@@ -1018,6 +1018,15 @@ def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
         "feat: ...",
         "[feat]",
         "feat(settings)!:",
+        # Words that begin with a mark of Markdown or other punctuation: the bot made
+        # "fix: : double" of "fix:: double".
+        "fix:: double",
+        "Fix:: double",
+        "Fix: # heading",
+        "Fix - - item",
+        "[Fix] > quote",
+        "Fix: 1. first",
+        "Fix: 2",
         # The breaking mark in a place that no rule of the form moves it from.
         "feat!(settings): drop the old settings",
         # Longer than the coach shows, so the suggestion cuts its words.

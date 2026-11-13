@@ -64,6 +64,14 @@ TYPES = (
     "style",
     "revert",
 )
+# Words that begin as words: with a letter, a number that is no mark of a list, code, a
+# quote or a bracket. A mark of a block of Markdown, such as #, -, > or 1., would make an
+# entry of the changelog that block, as a number alone would with the full stop of the
+# entry, and other punctuation is no start of a sentence, such as the second colon of
+# "fix:: double".
+BEGINS_AS_WORDS = re.compile(
+    r"""^(?!\d+(?:[.)](?:\s|$)|$))[^\W_]|^[`"'\u201c\u2018\u201e(]"""
+)
 # A title that passes the check of the title, whose pattern this is.
 PASSING_TITLE = re.compile(rf"^({'|'.join(TYPES)})(\([a-z0-9._/-]+\))?(!)?: .+")
 # The parts of a title that is no Conventional Commit yet: its first word, a scope, a
@@ -507,6 +515,12 @@ def names_its_type(text: str, match: re.Match[str]) -> bool:
     return bool(match[4].strip() or text[:1] == "[" or match[2] is not None or match[3])
 
 
+def begins_as_words(text: str) -> bool:
+    """Whether the words of a title begin as a sentence does, and not with a mark of a
+    block of Markdown or other punctuation."""
+    return BEGINS_AS_WORDS.match(text) is not None
+
+
 def marks_a_type(text: str) -> bool:
     """Whether a text starts with the name of a type that it marks as its type."""
     match = title_parts(text)
@@ -562,8 +576,8 @@ def corrected_title(title: str, branch: str) -> str:
     suggests, for a title that names its type itself and differs only in its form. The
     type and the breaking mark decide the version, so the bot takes them from the title
     as they stand. A word for a type, a type that the branch or the words would choose,
-    a title that names a second type and a title without words stay suggestions for a
-    person."""
+    a title that names a second type, a title without words and one whose words begin
+    with a mark of Markdown or punctuation stay suggestions for a person."""
     # Its full length: clean with a limit may cut it to just that limit.
     text = clean(title, len(title))
     match = title_parts(text)
@@ -574,6 +588,7 @@ def corrected_title(title: str, branch: str) -> str:
         or not marks_a_type(text)
         or marks_a_type(match[5])
         or not match[5].rstrip(". ")
+        or not begins_as_words(match[5])
     ):
         return ""
     return suggest_title(title, branch)

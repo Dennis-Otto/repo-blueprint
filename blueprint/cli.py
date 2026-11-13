@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import tomllib
 import webbrowser
 from collections.abc import Callable, Sequence
@@ -2626,10 +2627,15 @@ def parser() -> argparse.ArgumentParser:
     one function with every command made 1,800 copies of its 640 lines, 51 MB of
     code that the Mutation workflow and its tests compiled for minutes."""
     parser = argparse.ArgumentParser(
-        prog="blueprint.py", description=blueprint.__doc__.split("\n\n")[0]
+        prog="blueprint.py",
+        description=blueprint.__doc__.split("\n\n")[0],
+        # The epilog lists the commands in groups of its own, line by line.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--repo", help="OWNER/NAME; by default the repository of this folder"
+        "--repo",
+        metavar="OWNER/NAME",
+        help="the repository; by default the repository of this folder",
     )
     parser.add_argument(
         "--config",
@@ -2637,7 +2643,12 @@ def parser() -> argparse.ArgumentParser:
         default=CONFIG,
         help="the settings, by default %(default)s",
     )
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar="COMMAND",
+        help="one of the commands below; COMMAND --help shows its own help",
+    )
     for add in (
         add_settings_parsers,
         add_changelog_parsers,
@@ -2654,7 +2665,59 @@ def parser() -> argparse.ArgumentParser:
         add_locks_parsers,
     ):
         add(commands)
+    parser.epilog = command_groups(commands)
     return parser
+
+
+# The commands that a person runs; every other one is a step of a bot or a workflow,
+# which a person seldom needs.
+PERSON_COMMANDS = (
+    "create",
+    "doctor",
+    "checklist",
+    "settings",
+    "app",
+    "workflows",
+    "fragments",
+    "fix",
+    "locks",
+    "advisories",
+    "pages",
+    "binaries",
+    "decisions",
+    "migrate",
+)
+HELP_COLUMN = 24
+HELP_WIDTH = 79
+
+
+def command_groups(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> str:
+    """The commands of a person and the steps of the bots, as two groups of the help.
+    argparse lists the commands of one subparser in one flat block, so the help shows
+    them here instead, and the block keeps only the line of COMMAND."""
+    helps = {str(action.dest): str(action.help) for action in commands._choices_actions}
+    commands._choices_actions.clear()
+    bots = [name for name in helps if name not in PERSON_COMMANDS]
+    groups = [
+        ("commands for a person", PERSON_COMMANDS),
+        ("steps of the bots and the workflows", bots),
+    ]
+    return "\n\n".join(
+        f"{title}:\n" + "\n".join(command_line(name, helps[name]) for name in names)
+        for title, names in groups
+    )
+
+
+def command_line(name: str, help_text: str) -> str:
+    """One command of the help, its words beside it in the column where argparse sets
+    them; a test keeps every name short enough for it."""
+    first, *rest = textwrap.wrap(help_text, HELP_WIDTH - HELP_COLUMN)
+    indent = " " * HELP_COLUMN
+    return "\n".join(
+        [f"  {name:<{HELP_COLUMN - 2}}{first}", *(indent + line for line in rest)]
+    )
 
 
 def files_command(arguments: argparse.Namespace, root: Path) -> int | None:
