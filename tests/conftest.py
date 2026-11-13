@@ -26,6 +26,16 @@ def no_repository_of_the_run() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def no_runner_of_the_run() -> Iterator[None]:
+    """No test sees the folder of the runner of GitHub that runs the tests,
+    $RUNNER_TEMP: a bot that sits out an outage in a test would leave its mark there,
+    in the job of the tests (decision 0155). A test that needs one sets its own."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv("RUNNER_TEMP", raising=False)
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Each Python that a test starts keeps its bytecode in a folder of the run, not
     next to the code. The processes of pytest-xdist share the projects that the tests
