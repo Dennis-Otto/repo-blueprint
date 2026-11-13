@@ -9,10 +9,9 @@ requests when there is none.
 
 ## [1.18.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.1...v1.18.2) (2026-11-13)
 
-
 ### Bug fixes
 
-* **flaky:** count no job that ran out of time after each of its steps had passed ([#904](https://github.com/Dennis-Otto/repo-blueprint/issues/904)) ([13feb4b](https://github.com/Dennis-Otto/repo-blueprint/commit/13feb4b8deafb99822d39cc936fe88417c1a5aa2))
+- **The issue of flaky tests no longer counts a job that its runner left hanging:** a job that GitHub stopped at its time limit although each of its steps had passed, as a preview runner such as `ubuntu-24.04-firewall` sometimes leaves one that did its work and never reported its end, went into the issue *Flaky tests* and kept it open, although no test had failed and nothing in the repository could fix it. The summary of the run now names such a job in a section of its own, as the runner's fault, and the issue leaves it out ([#895](https://github.com/Dennis-Otto/repo-blueprint/issues/895)).
 
 ## [1.18.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.0...v1.18.1) (2026-11-13)
 
