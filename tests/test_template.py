@@ -65,6 +65,7 @@ import downstream
 import pins
 import reference
 from blueprint import bootstrap, ownership, screenshots
+from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
@@ -2652,24 +2653,30 @@ def test_someone_sets_every_label(projects: dict[str, Path]) -> None:
 
 
 @pytest.mark.parametrize("page", ["docs/guide.md", "docs/guide.de.md"])
-def test_the_guide_names_the_labels_that_the_bots_set(
+def test_adopt_adds_the_labels_that_the_bots_set(
     projects: dict[str, Path], page: str
 ) -> None:
-    # An existing repository gives its labels.toml the labels of the bots by hand, as
-    # the guide lists them: the group release, maintenance and no-bot-fixes, and no
-    # label that the template no longer has, such as docker.
+    # An existing repository gets the labels of the bots from blueprint.py adopt, as
+    # step 3 of the guide says: those of the group release of a new repository,
+    # maintenance and no-bot-fixes, and no label that the template no longer has,
+    # such as docker.
     text = (projects["generic"] / ".github/labels.toml").read_text(encoding="utf-8")
     labels = tomllib.loads(text)["label"]
-    bots = {label["name"] for label in labels if label["group"] == "release"}
+    bots = [
+        label
+        for label in labels
+        if label["group"] == "release"
+        or label["name"] in ("maintenance", "no-bot-fixes")
+    ]
     step = next(
         line
         for line in (ROOT / page).read_text(encoding="utf-8").splitlines()
         if line.startswith("3. ") and "labels.toml.jinja" in line
     )
-    named = set(re.findall(r"`([^`]+)`", step.partition("labels.toml.jinja)")[2]))
 
-    assert named == {*bots, "maintenance", "no-bot-fixes"}
-    assert named <= {label["name"] for label in labels}
+    assert bots == list(ADOPTED_LABELS)
+    assert {label["name"] for label in bots} >= {"maintenance", "no-bot-fixes"}
+    assert step.startswith("3. `python3 .github/blueprint.py adopt` ")
 
 
 def test_the_composer_lock_belongs_to_the_composer_json(
@@ -3039,9 +3046,10 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
     # Every copy brings create and its preflight alone, for the folder that copier
-    # copy wrote, and what registers its release app after them.
+    # copy wrote, adopt for an existing repository that it wrote into, and what
+    # registers its release app after them.
     persons = result.stdout.partition("\nsteps of the bots")[0]
-    for name in ("app", "create", "doctor"):
+    for name in ("app", "create", "doctor", "adopt"):
         assert f"\n  {name} " in persons
     for action in ("register", "connect"):
         command = subprocess.run(
