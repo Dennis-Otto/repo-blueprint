@@ -5,7 +5,8 @@
 # copier-copy.webp, its last screen, which the website shows until the video plays;
 # social-preview.webp, the social preview of .github/ at a seventh of its size, for
 # the home page of the website; dashboard.png, the dashboard of the repositories as
-# the website publishes it; and pictures of public pages of GitHub, each in the light
+# the website publishes it, from the fixed data of .github/docs-pictures/dashboard.json;
+# and pictures of public pages of GitHub, each in the light
 # and the dark theme: github-update-pull-request.png, an update of the blueprint with
 # its checks, github-release.png, the assets of a release with its SBOMs and its
 # provenance, and github-pr-coach.png, the comment of the PR coach with the coverage
@@ -16,7 +17,7 @@
 #
 # It needs Docker and the network: VHS records the terminal while Copier clones the
 # blueprint from GitHub, and the headless Chromium of the social preview's image
-# loads the dashboard and the pages of GitHub.
+# loads the pages of GitHub.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -25,12 +26,11 @@ export MSYS_NO_PATHCONV=1
 root="$(pwd -W 2>/dev/null || pwd)"
 recording="$(mktemp)"
 png="$(mktemp)"
-page="$(mktemp)"
 shown="$(mktemp)"
 difference="$(mktemp)"
 github="$(mktemp)"
 log="$(mktemp)"
-trap 'rm -f "$recording" "$png" "$page" "$shown" "$difference" "$github" "$log"' EXIT
+trap 'rm -f "$recording" "$png" "$shown" "$difference" "$github" "$log"' EXIT
 
 # VHS, git and Copier: the image comes from a Dockerfile, so that Renovate keeps it
 # current. Its build context is the repository, for the requirements of Copier.
@@ -75,19 +75,19 @@ else
   exit 1
 fi
 
-# The dashboard as the website shows it, in the browser of the social preview. curl
-# fetches the page first, so a page that does not load fails here instead of becoming a
-# picture of an error. The page caps its width below that of its main table, which then
-# scrolls: the copy that the browser draws lifts the cap, so every column is in the
-# picture. The page has no scripts, and its base address keeps its links and pictures.
-dashboard="https://dennis-otto.github.io/repo-blueprint/dashboard/"
+# The dashboard as the website shows it, in the browser of the social preview: the page
+# that dashboard.py renders of the fixed data of .github/docs-pictures/dashboard.json,
+# a day of the published dashboard, at the time of that day. So the picture changes
+# with the layout and the columns of the page, not with each state, date and version
+# of the live dashboard (#827). The page caps its width below that of its main table,
+# which then scrolls: .github/docs-pictures/dashboard_page.py lifts the cap, so every
+# column is in the picture. The page has no scripts.
+dashboard=".github/docs-pictures/dashboard.json"
 browser="$(sed -n 's/^FROM //p' .github/social-preview/Dockerfile)"
-# The curl of Git for Windows is a Windows program: it takes the Windows path of the file.
-saved="$(cygpath --mixed "$page" 2>/dev/null || echo "$page")"
-if curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-  --connect-timeout 10 --max-time 60 --output "$saved" "$dashboard" 2>"$log" &&
-  grep --quiet '</head>' "$page" &&
-  sed "0,/<\/head>/s||<base href=\"$dashboard\"><style>main { max-width: none; }</style></head>|" "$page" >"$shown" &&
+if docker run --rm --volume "$root:/work:ro" --env PYTHONPATH=/work \
+  --env PYTHONDONTWRITEBYTECODE=1 "$browser" \
+  python3 /work/.github/docs-pictures/dashboard_page.py "/work/$dashboard" >"$shown" 2>"$log" &&
+  grep --quiet '</head>' "$shown" &&
   docker run --rm --interactive "$browser" sh -c 'cat >/tmp/dashboard.html &&
     /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
     --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --window-size=1760,900 \
@@ -98,7 +98,7 @@ if curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
   echo "Rendered docs/images/dashboard.png."
 else
   cat "$log" >&2
-  echo "Rendering $dashboard failed." >&2
+  echo "Rendering the dashboard of $dashboard failed." >&2
   exit 1
 fi
 
