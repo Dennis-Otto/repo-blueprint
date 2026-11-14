@@ -12594,7 +12594,7 @@ RELEASE_APP_BOTS = {
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
     ("docs-pictures.yml", "pull-request"): ("the picture bot", False),
-    ("osv-scanner.yml", "dependabot"): ("the Dependabot alert bot", False),
+    ("release.yml", "dependabot"): ("the Dependabot alert bot", False),
     ("release.yml", "release-please"): ("the release bot", False),
     ("renovate.yml", "renovate"): ("Renovate", True),
     ("renovate.yml", "repositories"): ("Renovate", True),
@@ -12689,7 +12689,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
             ("commands.yml", "fix"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
-            ("osv-scanner.yml", "dependabot"),
+            ("release.yml", "dependabot"),
             ("release.yml", "release-please"),
             ("screenshot-bot.yml", "pull-request"),
             ("settings.yml", "check"),
@@ -12911,7 +12911,7 @@ SETTINGS_APP_CLIENT_ID = "${{ vars.SETTINGS_APP_CLIENT_ID }}"
 SETTINGS_APP_KEY = "${{ secrets.SETTINGS_APP_PRIVATE_KEY }}"
 SETTINGS_APP_BOTS = {
     ("blueprint-update.yml", "update"): "the blueprint bot",
-    ("osv-scanner.yml", "dependabot"): "the Dependabot alert bot",
+    ("release.yml", "dependabot"): "the Dependabot alert bot",
     ("settings.yml", "check"): "the settings bot",
 }
 HALF_CLIENT = (
@@ -13300,7 +13300,7 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     # notice there, and fails the check only in the repositories of the blueprint's
     # owner.
     lacks = workflow_steps.step(
-        "osv-scanner.yml", "dependabot", "Say what the app lacks", project
+        "release.yml", "dependabot", "Say what the app lacks", project
     )
     assert lacks["env"]["STRICT"] == "false"
     # No release app yet: no variable names one, no ruleset lets one create the release
@@ -28068,7 +28068,7 @@ def test_the_dependabot_alert_bot_asks_for_the_alerts_alone(
     # The token of a workflow can't read the Dependabot alerts: the settings app, or
     # the release app without it, closes them, with that permission alone.
     root = ROOT if project == "blueprint" else projects[project]
-    job = workflow_steps.job("osv-scanner.yml", "dependabot", root)
+    job = workflow_steps.job("release.yml", "dependabot", root)
     tokens = steps_using(job, "actions/create-github-app-token")
 
     assert [token["id"] for token in tokens] == ["settings-token", "release-token"]
@@ -28076,18 +28076,53 @@ def test_the_dependabot_alert_bot_asks_for_the_alerts_alone(
         assert app_permissions({"steps": [token]}) == {"vulnerability-alerts": "write"}
         # A refused token is the next step's to explain, not a failure of the step.
         assert token["continue-on-error"] is True
-    assert "pull_request" in job["if"]
-    assert "fork" in job["if"]
+    assert job["if"] == "${{ !github.event.repository.fork }}"
     # The blueprint's owner, whose apps have the permission, fails the check.
     lacks = workflow_steps.step_in(job, DEPENDABOT_LACKS)
     assert lacks["env"]["STRICT"] == "true"
     run = workflow_steps.step_in(job, "Close the alerts that osv-scanner.toml accepts")
-    assert "advisories --dependabot" in run["run"]
-    assert run["env"]["DRY_RUN"] == "${{ inputs.dry_run || false }}"
+    assert "advisories --dependabot >" in run["run"]
+    assert "DRY_RUN" not in run["env"]
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_the_weekly_osv_scanner_run_warns_before_an_acceptance_ends(
+def test_the_dependabot_alert_bot_runs_every_day_without_a_schedule_of_its_own(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # GitHub opens an alert whenever an advisory is published, not when main changes:
+    # in the OSV-Scanner workflow, which ran after a push and on Mondays, an alert of
+    # an accepted version stayed open for up to a week (repo-blueprint#852). The job
+    # runs in the Release workflow, after every push to main and on its daily
+    # schedule, which is there anyway, so no workflow gains a scheduled run.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    release = parse(flows["release.yml"])
+    on = release["on"]
+
+    assert "dependabot" in release["jobs"]
+    assert on["push"] == {"branches": ["main"]}
+    assert "workflow_dispatch" in on
+    [daily] = on["schedule"]
+    cron = Cron.parse(daily["cron"])
+    assert cron
+    week = [
+        datetime.date(2026, 10, 12) + datetime.timedelta(days=day) for day in range(7)
+    ]
+    assert all(map(cron.runs_on, week))
+    # No other workflow keeps a job of the alerts, and OSV-Scanner keeps its weekly
+    # scan without the input of the job's dry run, which nothing reads any more.
+    for name, text in flows.items():
+        jobs = parse(text).get("jobs") or {}
+        names = {job.get("name") for job in jobs.values()}
+        assert "dependabot alerts" not in names or name == "release.yml", name
+    osv = parse(flows["osv-scanner.yml"])
+    assert "dependabot" not in osv["jobs"]
+    assert osv["on"]["workflow_dispatch"] is None
+    assert scheduled_runs_a_week(root)["osv-scanner.yml"] == 1
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_daily_run_warns_before_an_acceptance_ends(
     projects: Mapping[str, Path], project: str
 ) -> None:
     # The acceptance of the Pillow of Home Assistant would have ended quietly, and
@@ -28095,16 +28130,13 @@ def test_the_weekly_osv_scanner_run_warns_before_an_acceptance_ends(
     # job of the alerts warns two weeks before, with the token of the job, which may
     # write the issue that names the acceptances and nothing else.
     root = ROOT if project == "blueprint" else projects[project]
-    job = workflow_steps.job("osv-scanner.yml", "dependabot", root)
+    job = workflow_steps.job("release.yml", "dependabot", root)
     warn = workflow_steps.step_in(job, "Warn of the acceptances that end soon")
 
     assert job["permissions"] == {"contents": "read", "issues": "write"}
     assert "advisories --ending" in warn["run"]
     assert '"$GITHUB_STEP_SUMMARY"' in warn["run"]
-    assert warn["env"] == {
-        "GH_TOKEN": "${{ github.token }}",
-        "DRY_RUN": "${{ inputs.dry_run || false }}",
-    }
+    assert warn["env"] == {"GH_TOKEN": "${{ github.token }}"}
     # Also after the app couldn't close the alerts, which needs no app, but never
     # without the block of Harden-Runner.
     assert warn["if"] == (
@@ -28128,7 +28160,7 @@ def test_the_dependabot_alert_bot_says_what_the_app_lacks(
 ) -> None:
     done = workflow_steps.run_step(
         tmp_path,
-        "osv-scanner.yml",
+        "release.yml",
         "dependabot",
         DEPENDABOT_LACKS,
         env={"APP": "settings", "STRICT": strict},
