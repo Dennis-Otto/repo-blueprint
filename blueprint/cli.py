@@ -2928,7 +2928,7 @@ def standalone_command(
                 version=arguments.version,
                 dry_run=arguments.dry_run,
             )
-        except (AdoptError, CreateError) as error:
+        except (AdoptError, CreateError, OSError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
         return 0 if done else 1

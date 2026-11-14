@@ -30,6 +30,8 @@ LABELS_TOML = (
     'group = "release"\n'
 )
 RELEASE = json.dumps({"tag_name": "v1.2.3", "name": "1.2.3"})
+LATEST = f"gh api repos/{REPO}/releases/latest"
+TAGS = shlex.join(["gh", "api", f"repos/{REPO}/tags?per_page=100"])
 ASKED = [
     "git --version",
     "git remote get-url origin",
@@ -68,6 +70,7 @@ class Shell:
             "gh --version": (0, "gh version 2.62.0 (2024-11-14)\n"),
             f"gh api repos/{REPO}": (0, json.dumps({"full_name": REPO})),
             f"gh api repos/{REPO}/releases/latest": (0, RELEASE),
+            TAGS: (0, "[]"),
             **(answers or {}),
         }
         self.calls: list[str] = []
@@ -241,7 +244,9 @@ def test_a_version_given_needs_no_release_on_github(
     ("tag", "version"),
     [("1.4.0", "1.4.0"), ("demo-v0.9.1", "0.9.1"), ("v3.0.0-rc.2", "3.0.0-rc.2")],
 )
-def test_the_version_is_the_end_of_the_tag(root: Path, tag: str, version: str) -> None:
+def test_the_version_is_the_end_of_the_tag(
+    root: Path, tag: str, version: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     answer = {
         f"gh api repos/{REPO}/releases/latest": (0, json.dumps({"tag_name": tag}))
     }
@@ -249,14 +254,27 @@ def test_the_version_is_the_end_of_the_tag(root: Path, tag: str, version: str) -
     assert adopt(root, run=Shell(answer), python=PYTHON)
 
     assert read(root, "version.txt") == f"{version}\n"
+    # release-please tags v<version>, and may not find a release of another tag.
+    warning = (
+        f"  · the tag {tag} is not v{version}, as release-please tags a release: it "
+        "may not find this release, and then its first release lists every commit\n"
+        "      set last-release-sha in release-please-config.json to the commit of "
+        f"{tag}\n"
+    )
+    assert (warning in capsys.readouterr().out) is (tag != f"v{version}")
 
 
+@pytest.mark.parametrize(
+    "tags", ["[]", json.dumps([{"name": "nightly"}, "v1.0.0"]), "{}", "<"]
+)
 def test_a_repository_without_a_release_stays_at_0_0_0(
-    root: Path, capsys: pytest.CaptureFixture[str]
+    root: Path, tags: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    answer = {f"gh api repos/{REPO}/releases/latest": (1, NOT_FOUND)}
+    shell = Shell({LATEST: (1, NOT_FOUND), TAGS: (0, tags)})
 
-    assert adopt(root, run=Shell(answer), python=PYTHON)
+    assert adopt(root, run=shell, python=PYTHON)
+
+    assert shell.calls[-2:] == [LATEST, TAGS]
 
     shown = capsys.readouterr().out
     assert (
@@ -265,6 +283,45 @@ def test_a_repository_without_a_release_stays_at_0_0_0(
     ) in shown
     assert ".release-please-manifest.json:" not in shown
     assert read(root, "version.txt") == "0.0.0\n"
+
+
+def test_a_repository_with_tags_but_no_latest_release_names_its_version(
+    root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Releases as tags alone, or as drafts and pre-releases, which the latest release
+    # of GitHub leaves out: from 0.0.0, the release bot would count on from there.
+    tags = [
+        {"name": "v2.3.0"},
+        {"name": "v2.10.0-rc.1"},
+        {"name": "v2.10.0"},
+        {"name": "v2.9.4"},
+        {"name": "latest"},
+    ]
+    shell = Shell({LATEST: (1, NOT_FOUND), TAGS: (0, json.dumps(tags))})
+
+    assert not adopt(root, run=shell, python=PYTHON)
+
+    assert (
+        f"  ✘ {REPO} has no latest release on GitHub, but the tag v2.10.0: name the "
+        "version that it released last\n"
+        "      python3 .github/blueprint.py adopt --version 2.10.0\n"
+    ) in capsys.readouterr().out
+    assert read(root, "version.txt") == "0.0.0\n"
+
+    # With the version named, adopt asks for no release.
+    assert adopt(root, version="2.10.0", run=Shell(), python=PYTHON)
+    assert read(root, "version.txt") == "2.10.0\n"
+
+
+def test_a_pre_release_comes_before_its_release() -> None:
+    versions = ["1.0.0", "1.0.0-rc.1", "0.9.10", "0.9.2"]
+
+    assert sorted(versions, key=adopt_module.version_key) == [
+        "0.9.2",
+        "0.9.10",
+        "1.0.0-rc.1",
+        "1.0.0",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -293,6 +350,14 @@ def test_a_repository_without_a_release_stays_at_0_0_0(
             [
                 f"  ✘ GitHub didn't say which release of {REPO} is the latest: gh: "
                 "Server Error (HTTP 500)",
+                "      name it: python3 .github/blueprint.py adopt --version X.Y.Z",
+            ],
+        ),
+        (
+            {LATEST: (1, NOT_FOUND), TAGS: (1, "gh: Server Error (HTTP 500)")},
+            [
+                f"  ✘ {REPO} has no latest release, and GitHub didn't say which tags "
+                "it has: gh: Server Error (HTTP 500)",
                 "      name it: python3 .github/blueprint.py adopt --version X.Y.Z",
             ],
         ),
@@ -445,6 +510,26 @@ def test_a_file_that_adopt_cant_read_is_named(
 
     with pytest.raises(AdoptError, match=message):
         adopt(root, run=Shell(), python=PYTHON)
+
+
+def test_a_file_that_isnt_utf_8_or_cant_be_written_is_named(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(adopt_module, "run_command", Shell())
+    (root / "CHANGELOG.md").write_bytes("# Änderungen\n".encode("latin-1"))
+
+    assert cli.main(["adopt"], root=root) == 2
+    assert capsys.readouterr().err.startswith(
+        "blueprint.py: CHANGELOG.md can't be read as UTF-8 text: "
+    )
+
+    write(root, "CHANGELOG.md", CHANGELOG)
+    (root / "version.txt").unlink()
+    (root / "version.txt").mkdir()
+    assert cli.main(["adopt"], root=root) == 2
+    assert capsys.readouterr().err.startswith(
+        "blueprint.py: version.txt can't be written: "
+    )
 
 
 def test_adopt_needs_the_files_of_copier_copy(root: Path) -> None:

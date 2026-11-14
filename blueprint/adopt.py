@@ -8,7 +8,10 @@ changelog, which the pull requests write under, and the labels that the bots set
 writes them, and only what is missing:
 
 - The version comes from the tag of the latest release on GitHub, or from --version for
-  a repository whose releases GitHub doesn't have. release-please reads it from
+  a repository whose releases GitHub doesn't have. A repository without a latest
+  release that has the tag of a version stops adopt until --version names the version
+  that it released last, and a tag other than v<version>, which release-please writes,
+  is named as a warning. release-please reads it from
   .release-please-manifest.json for every kind of release; the kind simple writes it
   into version.txt as well, which only that kind has. The manifest of a Python or Node
   package belongs to the project, and release-please writes the next version into it.
@@ -219,11 +222,44 @@ def repository_finding(answer: Answer, repo: str) -> Finding:
     return Finding(None, f"GitHub didn't say whether it has {repo}: {answer.text}")
 
 
-def release_finding(answer: Answer, repo: str) -> tuple[Finding, str | None]:
-    """The version of the latest release of the repository, from its tag, or 0.0.0
-    for a repository without a release; None when GitHub didn't say or the tag names
-    no version."""
-    if answer.found is False:
+def version_key(version: str) -> tuple[tuple[int, ...], bool, str]:
+    """The order of versions: by their numbers, a pre-release before its release."""
+    numbers, _, pre = version.partition("-")
+    return tuple(int(part) for part in numbers.split(".")), not pre, pre
+
+
+def latest_tag(text: str) -> tuple[str, str] | None:
+    """The tag of the highest version among the tags that GitHub answered, with its
+    version; None when no tag names one."""
+    try:
+        tags = json.loads(text)
+    except ValueError:
+        tags = []
+    versions = [
+        (str(tag["name"]), match[1])
+        for tag in (tags if isinstance(tags, list) else [])
+        if isinstance(tag, dict)
+        and (match := VERSION.search(str(tag.get("name", "")))) is not None
+    ]
+    return max(versions, key=lambda item: version_key(item[1]), default=None)
+
+
+def tags_finding(answer: Answer, repo: str) -> tuple[Finding, str | None]:
+    """For a repository that GitHub has no latest release of: 0.0.0 when it has no
+    tag of a version either, and a stop when it has one, since its releases may be
+    tags alone, drafts or pre-releases, which the latest release leaves out."""
+    if answer.found is not True:
+        return (
+            Finding(
+                False,
+                f"{repo} has no latest release, and GitHub didn't say which tags it "
+                f"has: {answer.text}",
+                "name it: python3 .github/blueprint.py adopt --version X.Y.Z",
+            ),
+            None,
+        )
+    latest = latest_tag(answer.text)
+    if latest is None:
         return (
             Finding(
                 True,
@@ -232,29 +268,63 @@ def release_finding(answer: Answer, repo: str) -> tuple[Finding, str | None]:
             ),
             "0.0.0",
         )
+    tag, version = latest
+    return (
+        Finding(
+            False,
+            f"{repo} has no latest release on GitHub, but the tag {tag}: name the "
+            "version that it released last",
+            f"python3 .github/blueprint.py adopt --version {version}",
+        ),
+        None,
+    )
+
+
+def tag_format_finding(tag: str, version: str) -> list[Finding]:
+    """A warning for a tag of the latest release that release-please would not have
+    written: it tags v<version>, without a component, as release-please-config.json
+    says."""
+    if tag == f"v{version}":
+        return []
+    return [
+        Finding(
+            None,
+            f"the tag {tag} is not v{version}, as release-please tags a release: it "
+            "may not find this release, and then its first release lists every "
+            "commit",
+            f"set last-release-sha in {CONFIG} to the commit of {tag}",
+        )
+    ]
+
+
+def release_finding(answer: Answer, repo: str) -> tuple[list[Finding], str | None]:
+    """The version of the latest release of the repository, from its tag, with a
+    warning for a tag that release-please would not have written; None when GitHub
+    didn't say or the tag names no version."""
     if answer.found is None:
-        return (
+        return [
             Finding(
                 False,
                 f"GitHub didn't say which release of {repo} is the latest: "
                 f"{answer.text}",
                 "name it: python3 .github/blueprint.py adopt --version X.Y.Z",
-            ),
-            None,
-        )
+            )
+        ], None
     tag = str(body(answer).get("tag_name", ""))
     match = VERSION.search(tag)
     if match is None:
-        return (
+        return [
             Finding(
                 False,
                 f"the latest release of {repo} has the tag {tag}, which names no "
                 "version",
                 "name it: python3 .github/blueprint.py adopt --version X.Y.Z",
-            ),
-            None,
-        )
-    return Finding(True, f"the latest release of {repo} is {tag}"), match[1]
+            )
+        ], None
+    return [
+        Finding(True, f"the latest release of {repo} is {tag}"),
+        *tag_format_finding(tag, match[1]),
+    ], match[1]
 
 
 def preflight(
@@ -290,10 +360,17 @@ def preflight(
         return findings, version
     if repository.ok is False:
         return findings, None
-    release, found = release_finding(
-        ask(run, root, f"repos/{repo}/releases/latest"), repo
-    )
-    return [*findings, release], found
+    answer = ask(run, root, f"repos/{repo}/releases/latest")
+    if answer.found is False:
+        # The latest release leaves out drafts and pre-releases, and a repository
+        # may tag its releases without releases on GitHub: its tags say whether it
+        # released before.
+        tags, found = tags_finding(
+            ask(run, root, f"repos/{repo}/tags?per_page=100"), repo
+        )
+        return [*findings, tags], found
+    release, found = release_finding(answer, repo)
+    return [*findings, *release], found
 
 
 def release_type(root: Path) -> str:
@@ -310,8 +387,14 @@ def release_type(root: Path) -> str:
 
 
 def read(root: Path, path: str) -> str | None:
+    """The text of a file of the folder, None when it is missing."""
     file = root / path
-    return file.read_text(encoding="utf-8") if file.is_file() else None
+    if not file.is_file():
+        return None
+    try:
+        return file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise AdoptError(f"{path} can't be read as UTF-8 text: {error}") from error
 
 
 def version_changes(root: Path, version: str) -> list[Change]:
@@ -441,9 +524,14 @@ def adopt(
         for change in changes:
             print(f"  {change.path}: {change.summary}")
             if not dry_run:
-                (root / change.path).write_text(
-                    change.text, encoding="utf-8", newline="\n"
-                )
+                try:
+                    (root / change.path).write_text(
+                        change.text, encoding="utf-8", newline="\n"
+                    )
+                except OSError as error:
+                    raise AdoptError(
+                        f"{change.path} can't be written: {error}"
+                    ) from error
     if workflows:
         print("Workflows that the blueprint doesn't bring, to keep or to remove:")
         for path in workflows:
