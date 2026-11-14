@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.18.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.2...v1.18.3) (2026-11-14)
+
+
+### Bug fixes
+
+* **deps:** update the issue assistant to v1.11.0 ([#908](https://github.com/Dennis-Otto/repo-blueprint/issues/908)) ([88860e8](https://github.com/Dennis-Otto/repo-blueprint/commit/88860e859f249f60e7046fbda24dda00365f5b50))
+
 ## [1.18.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.1...v1.18.2) (2026-11-13)
 
 ### Bug fixes
