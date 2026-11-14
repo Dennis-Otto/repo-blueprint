@@ -13,7 +13,9 @@ name: Docs pictures
 # starts it for one that conflicts (decision 0118). The recording waits for the
 # network, so a frame that repeats the one before counts once and the time each frame
 # shows not at all; and since VHS records in real time, the script keeps the committed
-# recording while the pictures of its screens stay the same (decision 0145).
+# recording while the pictures of its screens stay the same (decision 0145). The
+# dashboard is that of one day of its data, so it changes with the layout of the page,
+# not with each run of the dashboard (decision 0156).
 # A failed run keeps an issue of the bot-health bot open until the jobs that failed
 # pass again in a run.
 # It runs in the blueprint only; every repository has the Screenshots workflow.
