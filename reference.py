@@ -247,6 +247,15 @@ ABOUT: dict[str, str] = {
         " exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it"
         " from the file that the settings page of the app generates."
     ),
+    "REVIEWS_OF_MAIN": (
+        "`on` where `required_approvals` or `code_owner_review` of `[branch]` want a"
+        " review of every change, in the ruleset *Reviews of main*: then a check that"
+        " passed for a pull request that a bot pushed to starts the branch bot, which"
+        " merges a pull request of the bots past the review once its required checks"
+        " passed. The settings bot sets it to `on` or `off` by `[branch]`;"
+        " `[variables]` of `.github/repository.project.toml` decides instead where it"
+        " names it."
+    ),
     "SETTINGS_APP_CLIENT_ID": (
         "The Client ID of the settings app, an optional second GitHub App of the owner"
         " with only the permissions that the settings need. With it and the private key"
