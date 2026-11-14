@@ -47,6 +47,7 @@ from blueprint.settings import (
     ConfigError,
     Drift,
     Plan,
+    Reviews,
     Settings,
     actions_that_run,
     allows,
@@ -69,6 +70,7 @@ from blueprint.settings import (
     merge,
     read_plan,
     references,
+    reviews_ruleset,
     ruleset_differences,
     run_by,
     tag_creation_ruleset,
@@ -1251,6 +1253,7 @@ RULESETS = Path(__file__).parent / "data/rulesets"
         ),
         ("release-tags.json", tag_ruleset()),
         ("release-tag-creation.json", tag_creation_ruleset(4739928)),
+        ("reviews-of-main.json", reviews_ruleset(Reviews(1, True), 4739928)),
     ],
 )
 def test_the_rulesets_are_those_of_their_fixtures(
@@ -3100,6 +3103,135 @@ def test_a_project_names_its_own_release_app(root: Path) -> None:
     settings = with_app_id(root)
 
     assert settings.rulesets[-1] == tag_creation_ruleset(12345)
+
+
+def with_reviews(root: Path, branch: str) -> None:
+    """A project that sets the reviews of [branch] for itself."""
+    (root / ".github/repository.project.toml").write_text(
+        f"[branch]\n{branch}\n", encoding="utf-8"
+    )
+
+
+def test_by_default_main_wants_no_review(root: Path) -> None:
+    settings = Settings.load(root / ".github/repository.toml")
+
+    assert "Reviews of main" not in [ruleset["name"] for ruleset in settings.rulesets]
+    assert settings.variables["REVIEWS_OF_MAIN"] == "off"
+    # Protect main itself never wants a review, so that the release app, which may
+    # merge past the reviews, is still bound by the required checks.
+    pull_request = main_ruleset(["a"])["rules"][4]["parameters"]
+    assert pull_request["required_approving_review_count"] == 0
+    assert pull_request["require_code_owner_review"] is False
+
+
+def test_a_team_wants_approvals_and_the_release_app_merges_past_them(
+    root: Path,
+) -> None:
+    with_reviews(root, "required_approvals = 2")
+
+    settings = with_app_id(root)
+
+    assert [ruleset["name"] for ruleset in settings.rulesets] == [
+        "Protect main",
+        "Reviews of main",
+        "Release tags",
+        "Release tag creation",
+    ]
+    reviews = settings.rulesets[1]
+    assert reviews == reviews_ruleset(Reviews(2, False), 4739928)
+    assert reviews["bypass_actors"] == [
+        {
+            "actor_id": 4739928,
+            "actor_type": "Integration",
+            "bypass_mode": "pull_request",
+        }
+    ]
+    parameters = reviews["rules"][0]["parameters"]
+    assert parameters["required_approving_review_count"] == 2
+    assert parameters["require_code_owner_review"] is False
+    assert parameters["require_last_push_approval"] is True
+    assert settings.variables["REVIEWS_OF_MAIN"] == "on"
+    assert ruleset_problems(reviews) == []
+
+
+def test_without_the_release_app_nobody_merges_past_the_reviews(root: Path) -> None:
+    with_reviews(root, "required_approvals = 1")
+
+    settings = Settings.load(root / ".github/repository.toml")
+
+    assert settings.rulesets[1] == reviews_ruleset(Reviews(1, False), None)
+    assert settings.rulesets[1]["bypass_actors"] == []
+
+
+@pytest.mark.parametrize(
+    "place", [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
+)
+def test_the_code_owners_review_where_a_file_names_them(root: Path, place: str) -> None:
+    with_reviews(root, "code_owner_review = true")
+    (root / place).parent.mkdir(exist_ok=True)
+    (root / place).write_text("* @demo/maintainers\n", encoding="utf-8")
+
+    settings = Settings.load(root / ".github/repository.toml")
+
+    parameters = settings.rulesets[1]["rules"][0]["parameters"]
+    assert parameters["require_code_owner_review"] is True
+    assert parameters["required_approving_review_count"] == 0
+    assert settings.variables["REVIEWS_OF_MAIN"] == "on"
+
+
+def test_the_code_owners_need_the_file_that_names_them(root: Path) -> None:
+    with_reviews(root, "code_owner_review = true")
+
+    with pytest.raises(
+        ConfigError, match=r"needs the code owners in .github/CODEOWNERS"
+    ):
+        Settings.load(root / ".github/repository.toml")
+
+
+@pytest.mark.parametrize(
+    ("branch", "message"),
+    [
+        ("required_approvals = true", "a whole number from 0 to 10"),
+        ("required_approvals = -1", "a whole number from 0 to 10"),
+        ("required_approvals = 11", "a whole number from 0 to 10"),
+        ('required_approvals = "1"', "a whole number from 0 to 10"),
+        ('code_owner_review = "yes"', "true or false"),
+    ],
+)
+def test_the_reviews_of_main_are_checked(root: Path, branch: str, message: str) -> None:
+    with_reviews(root, branch)
+
+    with pytest.raises(ConfigError, match=message):
+        Settings.load(root / ".github/repository.toml")
+
+
+def test_a_variable_of_the_settings_wins_over_the_reviews(root: Path) -> None:
+    path = root / ".github/repository.toml"
+    path.write_text(
+        CONFIG.replace("[variables]\n", '[variables]\nREVIEWS_OF_MAIN = "on"\n'),
+        encoding="utf-8",
+    )
+
+    assert Settings.load(path).variables["REVIEWS_OF_MAIN"] == "on"
+
+
+def test_the_reviews_of_main_come_and_go_with_the_settings(
+    github: FakeGitHub, root: Path
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    run(github, root, "settings", "apply")
+
+    names = [ruleset["name"] for ruleset in github.rulesets.values()]
+    assert "Reviews of main" in names
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+
+    with_reviews(root, "required_approvals = 0")
+    run(github, root, "settings", "apply")
+
+    names = [ruleset["name"] for ruleset in github.rulesets.values()]
+    assert "Reviews of main" not in names
+    assert "Protect main" in names
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
 
 
 @pytest.mark.parametrize(
