@@ -181,8 +181,8 @@ The Client ID of the release app, with which each bot asks for a token of the ap
 
 `on` where `required_approvals` or `code_owner_review` of `[branch]` want a review of every change, in the ruleset *Reviews of main*: then a check that passed for a pull request that a bot pushed to starts the branch bot, which merges a pull request of the bots past the review once its required checks passed. The settings bot sets it to `on` or `off` by `[branch]`; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
 
-- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
-- **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository)
+- **Set by:** the settings as code, from `required_approvals` and `code_owner_review` of `[branch]`, which the settings bot applies; `[variables]` of `.github/repository.project.toml` can set another value
+- **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository)
 
 What the workflows say of it:
 

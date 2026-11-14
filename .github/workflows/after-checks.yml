@@ -1016,7 +1016,7 @@ jobs:
     # which no person reviews: the bot merges it past the review once its checks have
     # passed. So there a check that passed for a pull request that a bot pushed to
     # starts the bot as well; each run of the bot cancels the one before it, so the
-    # last check to pass decides (decision 0156).
+    # last check to pass decides (decision 0157).
     if: >-
       !github.event.repository.fork &&
       contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) &&

@@ -15000,6 +15000,9 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         "GH_TOKEN": "${{ steps.app.outputs.token }}",
         "ACTIONS_TOKEN": "${{ github.token }}",
         "BOT_ACCOUNT": "${{ steps.app.outputs.app-slug }}[bot]",
+        # Whether the settings made Reviews of main, which the release app passes, so
+        # that the bot merges the pull requests of the bots past it (decision 0157).
+        "REVIEWS_OF_MAIN": "${{ vars.REVIEWS_OF_MAIN }}",
         # The run of a check whose end started it: when GitHub couldn't start that
         # run, the line stays as it is (decision 0136).
         "AFTER": "${{ inputs.after }}",

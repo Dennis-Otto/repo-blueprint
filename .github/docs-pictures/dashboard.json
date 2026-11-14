@@ -1,0 +1,786 @@
+{
+ "schema": 1,
+ "generated": "2026-11-14T16:25:50Z",
+ "owner": "Dennis-Otto",
+ "blueprint": "v1.18.3",
+ "repos": [
+  {
+   "name": "dennis-otto.github.io",
+   "url": "https://github.com/Dennis-Otto/dennis-otto.github.io",
+   "repo": "Dennis-Otto/dennis-otto.github.io",
+   "description": "The projects of Dennis Otto in one place: Home Assistant, Nextcloud and Paperless, GitHub automation and the blueprint they all share.",
+   "homepage": "https://dennis-otto.github.io/",
+   "stars": 0,
+   "kind": "generic",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v1.9.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 0,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43596186082",
+     "started": "2026-11-14T12:43:11Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43596186182",
+     "started": "2026-11-14T12:43:11Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43596186178",
+     "started": "2026-11-14T12:43:11Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43499777181/job/132148556029",
+     "started": "2026-11-13T20:26:58Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43596186088",
+     "started": "2026-11-14T12:43:11Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43596186078",
+     "started": "2026-11-14T12:43:11Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43603392727",
+     "started": "2026-11-14T14:09:36Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/dennis-otto.github.io/actions/runs/43462711333",
+     "started": "2026-11-13T16:26:16Z"
+    },
+    "Mutation": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.3,
+   "health": {
+    "coverage": null,
+    "mutation": null,
+    "releases": 11,
+    "answer_hours": null,
+    "ci_minutes": 1.2583333333333333,
+    "schedule_minutes": 478.8416666666667
+   },
+   "release_url": "https://github.com/Dennis-Otto/dennis-otto.github.io/releases/tag/v1.9.0"
+  },
+  {
+   "name": "homedarts-for-autodarts",
+   "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts",
+   "repo": "Dennis-Otto/homedarts-for-autodarts",
+   "description": "Home Assistant integration for Autodarts boards and any dartboard: local realtime board control, X01, Cricket, party and training games, tournaments and a bot, player statistics with heatmaps, seven dashboard cards and seventeen blueprints, games started by voice. No cloud account needed.",
+   "homepage": "https://dennis-otto.github.io/homedarts-for-autodarts/",
+   "stars": 8,
+   "kind": "home-assistant",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v2.4.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 0,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43598498367",
+     "started": "2026-11-14T13:11:18Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43598498309",
+     "started": "2026-11-14T13:11:18Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43598498507",
+     "started": "2026-11-14T13:11:18Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43502121356/job/132154076853",
+     "started": "2026-11-13T20:37:10Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43598498425",
+     "started": "2026-11-14T13:11:18Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43598498320",
+     "started": "2026-11-14T13:11:18Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43603175590",
+     "started": "2026-11-14T14:07:07Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43492197106",
+     "started": "2026-11-13T19:26:20Z"
+    },
+    "Mutation": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/actions/runs/43388158012",
+     "started": "2026-11-13T07:46:31Z"
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.8,
+   "health": {
+    "coverage": 100.0,
+    "mutation": 95.1319010062551,
+    "releases": 20,
+    "answer_hours": null,
+    "ci_minutes": 6.433333333333334,
+    "schedule_minutes": 449.8833333333333
+   },
+   "release_url": "https://github.com/Dennis-Otto/homedarts-for-autodarts/releases/tag/v2.4.0"
+  },
+  {
+   "name": "issue-assistant",
+   "url": "https://github.com/Dennis-Otto/issue-assistant",
+   "repo": "Dennis-Otto/issue-assistant",
+   "description": "Safe AI issue triage for GitHub: a read-only AI writes a first analysis of every new issue (likely cause, missing info, duplicates, labels), and a job without AI validates it before posting.",
+   "homepage": "https://dennis-otto.github.io/issue-assistant/",
+   "stars": 0,
+   "kind": "github-action",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v1.11.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 0,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43596584393",
+     "started": "2026-11-14T12:48:07Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43596584386",
+     "started": "2026-11-14T12:48:07Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43596584486",
+     "started": "2026-11-14T12:48:07Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43499763404/job/132148454071",
+     "started": "2026-11-13T20:26:52Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43596584367",
+     "started": "2026-11-14T12:48:07Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43600674955",
+     "started": "2026-11-14T13:37:10Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43603323758",
+     "started": "2026-11-14T14:08:50Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/43464667813",
+     "started": "2026-11-13T16:38:00Z"
+    },
+    "Mutation": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/issue-assistant/actions/runs/42587242742",
+     "started": "2026-11-09T08:37:00Z"
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.8,
+   "health": {
+    "coverage": 100.0,
+    "mutation": 92.60017710870046,
+    "releases": 24,
+    "answer_hours": null,
+    "ci_minutes": 4.125,
+    "schedule_minutes": 466.525
+   },
+   "release_url": "https://github.com/Dennis-Otto/issue-assistant/releases/tag/v1.11.0"
+  },
+  {
+   "name": "paperless-sync",
+   "url": "https://github.com/Dennis-Otto/paperless-sync",
+   "repo": "Dennis-Otto/paperless-sync",
+   "description": "Nextcloud app that syncs Paperless-ngx documents into Nextcloud Files, by correspondent, type and year, and sends an inbox folder to Paperless. No WebDAV, no Nextcloud password.",
+   "homepage": "https://dennis-otto.github.io/paperless-sync/",
+   "stars": 8,
+   "kind": "nextcloud-app",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v1.10.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 1,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43597732087",
+     "started": "2026-11-14T13:02:21Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43597732047",
+     "started": "2026-11-14T13:02:21Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43597732083",
+     "started": "2026-11-14T13:02:21Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43499774579/job/132149093324",
+     "started": "2026-11-13T20:27:46Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43597732010",
+     "started": "2026-11-14T13:02:21Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43597731982",
+     "started": "2026-11-14T13:02:21Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43608509918",
+     "started": "2026-11-14T15:08:02Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43594778441",
+     "started": "2026-11-14T12:25:47Z"
+    },
+    "Mutation": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-sync/actions/runs/43186503899",
+     "started": "2026-11-12T08:52:18Z"
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.4,
+   "health": {
+    "coverage": 100.0,
+    "mutation": 93.0,
+    "releases": 29,
+    "answer_hours": 0.3711111111111111,
+    "ci_minutes": 7.766666666666667,
+    "schedule_minutes": 452.9666666666667
+   },
+   "release_url": "https://github.com/Dennis-Otto/paperless-sync/releases/tag/v1.10.0"
+  },
+  {
+   "name": "paperless-unified-search",
+   "url": "https://github.com/Dennis-Otto/paperless-unified-search",
+   "repo": "Dennis-Otto/paperless-unified-search",
+   "description": "Nextcloud app: Paperless-ngx OCR full-text search in Nextcloud's unified search, with no extra index; results open in the Nextcloud viewer",
+   "homepage": "https://dennis-otto.github.io/paperless-unified-search/",
+   "stars": 8,
+   "kind": "nextcloud-app",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v1.8.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 1,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43597352678",
+     "started": "2026-11-14T12:57:50Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43597352695",
+     "started": "2026-11-14T12:57:50Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43597352794",
+     "started": "2026-11-14T12:57:50Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43499774201/job/132148798286",
+     "started": "2026-11-13T20:27:14Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43597352627",
+     "started": "2026-11-14T12:57:50Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43597352658",
+     "started": "2026-11-14T12:57:50Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43608441917",
+     "started": "2026-11-14T15:07:18Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/43494029615",
+     "started": "2026-11-13T19:37:55Z"
+    },
+    "Mutation": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/paperless-unified-search/actions/runs/42987100052",
+     "started": "2026-11-11T08:26:51Z"
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.4,
+   "health": {
+    "coverage": 100.0,
+    "mutation": 97.0,
+    "releases": 33,
+    "answer_hours": null,
+    "ci_minutes": 6.1,
+    "schedule_minutes": 440.675
+   },
+   "release_url": "https://github.com/Dennis-Otto/paperless-unified-search/releases/tag/v1.8.0"
+  },
+  {
+   "name": "player-switch-for-autodarts",
+   "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts",
+   "repo": "Dennis-Otto/player-switch-for-autodarts",
+   "description": "Browser extension for Chrome, Edge and Firefox, for a shared Autodarts display: everyone plays under their own account and a tap on a tile switches players. Sessions are parked and kept fresh, so nobody signs in again; an optional remembered password signs an account back in by itself. Everything stays on the computer.",
+   "homepage": "https://dennis-otto.github.io/player-switch-for-autodarts/",
+   "stars": 0,
+   "kind": "chrome-extension",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v1.7.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 0,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43597008565",
+     "started": "2026-11-14T12:53:26Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43597008606",
+     "started": "2026-11-14T12:53:26Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43597008680",
+     "started": "2026-11-14T12:53:26Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43595052870",
+     "started": "2026-11-14T12:29:09Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43597008632",
+     "started": "2026-11-14T12:53:26Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43597008639",
+     "started": "2026-11-14T12:53:26Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43603292948",
+     "started": "2026-11-14T14:08:28Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/actions/runs/43466608990",
+     "started": "2026-11-13T16:49:36Z"
+    },
+    "Mutation": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.8,
+   "health": {
+    "coverage": 100.0,
+    "mutation": null,
+    "releases": 14,
+    "answer_hours": null,
+    "ci_minutes": 3.6999999999999997,
+    "schedule_minutes": 443.3333333333333
+   },
+   "release_url": "https://github.com/Dennis-Otto/player-switch-for-autodarts/releases/tag/v1.7.0"
+  },
+  {
+   "name": "repo-blueprint",
+   "url": "https://github.com/Dennis-Otto/repo-blueprint",
+   "repo": "Dennis-Otto/repo-blueprint",
+   "description": "Copier template for self-maintaining GitHub repos (Home Assistant/HACS, Nextcloud apps, GitHub Actions, Python, Node/TypeScript, Chrome extensions, Cloudflare Workers, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.",
+   "homepage": "https://dennis-otto.github.io/repo-blueprint/",
+   "stars": 0,
+   "kind": null,
+   "blueprint": null,
+   "update": null,
+   "release": "v1.18.3",
+   "released": "2026-11-14",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 1,
+   "conflicts": 0,
+   "ci": "ci-python.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43595613164",
+     "started": "2026-11-14T12:35:50Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43595613214",
+     "started": "2026-11-14T12:35:50Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43595613333",
+     "started": "2026-11-14T12:35:50Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43595613333/job/132449842407",
+     "started": "2026-11-14T12:38:02Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43601044584",
+     "started": "2026-11-14T13:41:43Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43529350662",
+     "started": "2026-11-13T23:44:31Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43603530304",
+     "started": "2026-11-14T14:11:06Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43488087895",
+     "started": "2026-11-13T19:00:42Z"
+    },
+    "Mutation": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43571925551",
+     "started": "2026-11-14T07:36:54Z"
+    },
+    "Renovate": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/43608125494",
+     "started": "2026-11-14T15:03:54Z"
+    }
+   },
+   "scorecard": 7.8,
+   "health": {
+    "coverage": 100.0,
+    "mutation": 86.29943804619559,
+    "releases": 76,
+    "answer_hours": null,
+    "ci_minutes": 5.324999999999999,
+    "schedule_minutes": 450.75
+   },
+   "release_url": "https://github.com/Dennis-Otto/repo-blueprint/releases/tag/v1.18.3"
+  },
+  {
+   "name": "repo-pager",
+   "url": "https://github.com/Dennis-Otto/repo-pager",
+   "repo": "Dennis-Otto/repo-pager",
+   "description": "A Telegram bot on a Cloudflare Worker that tells its maintainer only what needs them in their GitHub repositories, and acts on it with a button.",
+   "homepage": "https://dennis-otto.github.io/repo-pager/",
+   "stars": 0,
+   "kind": "cloudflare-worker",
+   "blueprint": "v1.18.3",
+   "update": null,
+   "release": "v0.10.0",
+   "released": "2026-11-13",
+   "next_release": null,
+   "next_url": null,
+   "pulls": 0,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43598827631",
+     "started": "2026-11-14T13:15:16Z"
+    },
+    "CodeQL": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43598827615",
+     "started": "2026-11-14T13:15:16Z"
+    },
+    "Release": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43598827812",
+     "started": "2026-11-14T13:15:16Z"
+    },
+    "Verification": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43499769660/job/132146344392",
+     "started": "2026-11-13T20:25:15Z"
+    },
+    "Website": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43600641084",
+     "started": "2026-11-14T13:36:45Z"
+    },
+    "Settings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43598827747",
+     "started": "2026-11-14T13:15:16Z"
+    },
+    "Findings": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43603229042",
+     "started": "2026-11-14T14:07:45Z"
+    },
+    "Links": {
+     "state": "success",
+     "url": "https://github.com/Dennis-Otto/repo-pager/actions/runs/43476278759",
+     "started": "2026-11-13T17:47:30Z"
+    },
+    "Mutation": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": 7.8,
+   "health": {
+    "coverage": 100.0,
+    "mutation": null,
+    "releases": 16,
+    "answer_hours": null,
+    "ci_minutes": 5.641666666666667,
+    "schedule_minutes": 467.78333333333336
+   },
+   "release_url": "https://github.com/Dennis-Otto/repo-pager/releases/tag/v0.10.0"
+  },
+  {
+   "name": "repo-pager-control-template",
+   "url": "https://github.com/Dennis-Otto/repo-pager-control-template",
+   "repo": "Dennis-Otto/repo-pager-control-template",
+   "description": "The template of the private control repository of Repo Pager: the jobs that run Claude Code with your own subscription and answer your pager, signed.",
+   "homepage": null,
+   "stars": 0,
+   "kind": null,
+   "blueprint": null,
+   "update": null,
+   "release": null,
+   "released": null,
+   "next_release": null,
+   "next_url": null,
+   "pulls": 1,
+   "conflicts": 0,
+   "ci": "ci.yml",
+   "runs": {
+    "CI": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "CodeQL": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Release": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Verification": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Website": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Settings": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Findings": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Links": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Mutation": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    },
+    "Renovate": {
+     "state": "absent",
+     "url": null,
+     "started": null
+    }
+   },
+   "scorecard": null,
+   "health": {
+    "coverage": null,
+    "mutation": null,
+    "releases": 0,
+    "answer_hours": null,
+    "ci_minutes": null,
+    "schedule_minutes": 257.6666666666667
+   },
+   "release_url": null
+  }
+ ],
+ "a_week_ago": {
+  "Dennis-Otto/dennis-otto.github.io": {
+   "coverage": null,
+   "mutation": null,
+   "releases": 8,
+   "answer_hours": null,
+   "ci_minutes": 0.825,
+   "schedule_minutes": 463.1333333333333
+  },
+  "Dennis-Otto/homedarts-for-autodarts": {
+   "coverage": 100.0,
+   "mutation": 95.37685626225833,
+   "releases": 21,
+   "answer_hours": 1.8027777777777778,
+   "ci_minutes": 4.383333333333333,
+   "schedule_minutes": 438.15
+  },
+  "Dennis-Otto/issue-assistant": {
+   "coverage": 100.0,
+   "mutation": 92.56063169768754,
+   "releases": 18,
+   "answer_hours": null,
+   "ci_minutes": 2.525,
+   "schedule_minutes": 452.51666666666665
+  },
+  "Dennis-Otto/paperless-sync": {
+   "coverage": 100.0,
+   "mutation": 94.0,
+   "releases": 24,
+   "answer_hours": 31.906666666666666,
+   "ci_minutes": 2.575,
+   "schedule_minutes": 447.15
+  },
+  "Dennis-Otto/paperless-unified-search": {
+   "coverage": 100.0,
+   "mutation": 99.0,
+   "releases": 28,
+   "answer_hours": null,
+   "ci_minutes": 2.7583333333333333,
+   "schedule_minutes": 440.5083333333333
+  },
+  "Dennis-Otto/player-switch-for-autodarts": {
+   "coverage": 100.0,
+   "mutation": null,
+   "releases": 8,
+   "answer_hours": null,
+   "ci_minutes": 1.5583333333333333,
+   "schedule_minutes": 432.65
+  },
+  "Dennis-Otto/repo-blueprint": {
+   "coverage": 100.0,
+   "mutation": 85.7483180187963,
+   "releases": 65,
+   "answer_hours": null,
+   "ci_minutes": 7.916666666666667,
+   "schedule_minutes": 456.5
+  }
+ }
+}

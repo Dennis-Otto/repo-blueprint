@@ -36,7 +36,7 @@ main*, a pull request of the bots waits for none: auto-merge would wait for a re
 that no person gives to an update. The release app may merge past that ruleset alone,
 so the bot merges such a pull request itself once it is up to date and its required
 checks passed, as long as the bots made it and every commit of it; the rules of *Protect
-main* still hold for that merge (decision 0156).
+main* still hold for that merge (decision 0157).
 """
 
 from __future__ import annotations
@@ -86,9 +86,13 @@ FIELDS = (
 # The review decision of a pull request that no approving review holds up but the one
 # that the rules want.
 REVIEW_REQUIRED = "REVIEW_REQUIRED"
-# Dependabot, the other bot whose pull requests merge by themselves; Renovate and every
-# bot of the blueprint open theirs and commit as the release app.
-DEPENDABOT = "dependabot[bot]"
+# The other bots whose pull requests merge by themselves: Dependabot, and Renovate where
+# the app of Mend runs it; elsewhere Renovate and every bot of the blueprint open theirs
+# and commit as the release app.
+OTHER_BOTS = frozenset({"dependabot[bot]", "renovate[bot]"})
+# The committer of the commits that GitHub makes and signs itself, such as the update of
+# a branch and the commits of Dependabot.
+GITHUB_COMMITTER = "web-flow"
 # What a review decision that holds up the merge says about the pull request.
 REVIEWS = {
     "CHANGES_REQUESTED": "changes were requested in a review",
@@ -395,10 +399,12 @@ class Job:
     """What the workflow gives the bot for the runs of the pull requests from forks: the
     token of its job, which may read, approve and start runs where the token of the
     release app may not, and the account of the release app, whose token makes the
-    merges of an update."""
+    merges of an update, and whether the settings want reviews of main, in the ruleset
+    that the release app may pass."""
 
     api: Api
     login: str
+    reviews: bool = False
 
 
 def job_from(environment: Mapping[str, str]) -> Job | None:
@@ -408,7 +414,8 @@ def job_from(environment: Mapping[str, str]) -> Job | None:
     login = environment.get("BOT_ACCOUNT", "")
     if not token or not login:
         return None
-    return Job(Api(run_gh_as(token)), login)
+    reviews = environment.get("REVIEWS_OF_MAIN", "") == "on"
+    return Job(Api(run_gh_as(token)), login, reviews)
 
 
 @dataclass
@@ -491,16 +498,23 @@ class Line:
 
     def made_by_the_bots(self, pull: Pull) -> bool:
         """Whether the bots opened the pull request and made every commit of it, each
-        signed: the release app, whose token the bot has, or Dependabot. Only in a job,
-        which names the release app; a commit of anyone else waits for a review."""
-        if self.job is None or pull.fork:
+        signed: the release app, whose token the bot has, Dependabot or Renovate.
+        Only in a job, which names the release app, and only where the settings made
+        the ruleset of the reviews, which the release app passes: a review that another
+        ruleset wants binds the bots too. A commit of anyone else waits for a review,
+        and so does one that a bot didn't commit, whose author anyone can write: GitHub
+        checks the signature against the committer."""
+        if self.job is None or not self.job.reviews or pull.fork:
             return False
-        bots = {self.job.login, DEPENDABOT}
+        bots = {self.job.login, *OTHER_BOTS}
         if pull.author not in bots:
             return False
         commits = self.comparison(pull).get("commits") or []
         return bool(commits) and all(
-            account(commit, "author") in bots and verified(commit) for commit in commits
+            account(commit, "author") in bots
+            and account(commit, "committer") in {*bots, GITHUB_COMMITTER}
+            and verified(commit)
+            for commit in commits
         )
 
     def mergeable_past_the_review(self, pull: Pull) -> bool:

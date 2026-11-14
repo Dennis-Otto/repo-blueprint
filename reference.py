@@ -785,9 +785,21 @@ def names_of(workflows: Sequence[Workflow], settings: str) -> dict[str, Name]:
     return found
 
 
+# The variables that the settings work out of other settings, with where from.
+DERIVED = {
+    "REVIEWS_OF_MAIN": "`required_approvals` and `code_owner_review` of `[branch]`",
+}
+
+
 def set_by(entry: Name, answers: Sequence[str]) -> str:
     if entry.name == GITHUB_TOKEN:
         return "GitHub, for every run of a workflow"
+    if entry.name in DERIVED:
+        return (
+            f"the settings as code, from {DERIVED[entry.name]}, which the settings bot"
+            " applies; `[variables]` of `.github/repository.project.toml` can set"
+            " another value"
+        )
     if entry.setting is not None:
         named = [
             f"[{code(answer)}](questions.md#{anchor(answer)})"
