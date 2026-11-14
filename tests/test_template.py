@@ -109,11 +109,15 @@ from blueprint.pages import CELL_WORDS, layouts, long_blocks, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import (
     PERMISSIONS,
+    REVIEWS_RULESET,
     Drift,
+    Reviews,
     Settings,
     allows,
     check_environments,
     event_policy,
+    release_app_id,
+    reviews_ruleset,
     target_workflows,
     unlisted_targets,
     workflow_triggers,
@@ -2122,6 +2126,33 @@ def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_sto
     }
     build = "./.github/workflows/build-release.yml"
     assert passing == {("release.yml", "assets", build, "APP_PRIVATE_KEY")}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_team_requires_reviews_of_main_and_the_bots_still_merge(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # #835: none by default, as for one maintainer; a project sets them for itself.
+    toml = (projects[kind] / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "\nrequired_approvals = 0\ncode_owner_review = false\n" in toml
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    assert REVIEWS_RULESET not in [ruleset["name"] for ruleset in settings.rulesets]
+    assert settings.variables["REVIEWS_OF_MAIN"] == "off"
+
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/repository.toml").write_text(toml, encoding="utf-8")
+    (tmp_path / ".github/repository.project.toml").write_text(
+        "[branch]\nrequired_approvals = 1\n", encoding="utf-8"
+    )
+    team = Settings.load(tmp_path / ".github/repository.toml", projects[kind])
+
+    reviews = next(r for r in team.rulesets if r["name"] == REVIEWS_RULESET)
+    # Only the release app of the project merges past them, the bots' pull requests.
+    assert reviews == reviews_ruleset(Reviews(1, False), release_app_id(team.variables))
+    assert team.variables["REVIEWS_OF_MAIN"] == "on"
+    # The checks of Protect main still bind everyone, the release app too.
+    assert team.rulesets[0] == settings.rulesets[0]
+    assert team.rulesets[0]["bypass_actors"] == []
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -13974,6 +14005,7 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
         "RELEASE_AUTOMATION_CLIENT_ID": "Iv23liOcto",
         "RELEASE_AUTOMATION_APP_ID": "12345",
         "ISSUE_ASSISTANT_AI": "on",
+        "REVIEWS_OF_MAIN": "off",
     }
     creation = next(
         ruleset
@@ -14968,6 +15000,9 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         "GH_TOKEN": "${{ steps.app.outputs.token }}",
         "ACTIONS_TOKEN": "${{ github.token }}",
         "BOT_ACCOUNT": "${{ steps.app.outputs.app-slug }}[bot]",
+        # Whether the settings made Reviews of main, which the release app passes, so
+        # that the bot merges the pull requests of the bots past it (decision 0157).
+        "REVIEWS_OF_MAIN": "${{ vars.REVIEWS_OF_MAIN }}",
         # The run of a check whose end started it: when GitHub couldn't start that
         # run, the line stays as it is (decision 0136).
         "AFTER": "${{ inputs.after }}",
@@ -15062,12 +15097,13 @@ def test_a_check_that_failed_for_good_starts_the_branch_bot() -> None:
         "RUN": "${{ github.event.workflow_run.id }}",
         "ATTEMPT": "${{ github.event.workflow_run.run_attempt }}",
         "NAME": "${{ github.event.workflow_run.name }}",
+        "CONCLUSION": "${{ github.event.workflow_run.conclusion }}",
     }
     assert "${{" not in start["run"]
-    assert (
-        'gh workflow run update-branches.yml --field after="$RUN" '
-        '--field attempt="$ATTEMPT"'
-    ) in start["run"]
+    # A check that failed names its run, so that the bot moves its line on past it; one
+    # that passed names none, as the bot then merges what passed.
+    assert 'fields=(--field after="$RUN" --field attempt="$ATTEMPT")' in start["run"]
+    assert 'gh workflow run update-branches.yml "${fields[@]}"' in start["run"]
     assert job["steps"][-1]["name"] == WAIT_FOR_DOCKER
 
 

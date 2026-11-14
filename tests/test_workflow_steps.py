@@ -951,16 +951,53 @@ START_THE_BRANCH_BOT = (
 )
 
 
-def start_the_branch_bot(tmp_path: Path, *answers: Answer) -> StepResult:
+def start_the_branch_bot(
+    tmp_path: Path, *answers: Answer, conclusion: str = "failure"
+) -> StepResult:
     return run_step(
         tmp_path,
         "after-checks.yml",
         "branches",
         "Start the branch bot",
         answers=answers,
-        env={"RUN": "77", "ATTEMPT": "2", "NAME": "CI (python)"},
+        env={
+            "RUN": "77",
+            "ATTEMPT": "2",
+            "NAME": "CI (python)",
+            "CONCLUSION": conclusion,
+        },
         stubs={"sleep": recording("sleep")},
     )
+
+
+def test_a_check_that_passed_starts_the_branch_bot_where_main_wants_reviews(
+    tmp_path: Path,
+) -> None:
+    # The job runs for a passed check only where REVIEWS_OF_MAIN is on; the bot merges
+    # what passed, so it names no run.
+    done = start_the_branch_bot(
+        tmp_path, exact("workflow run update-branches.yml"), conclusion="success"
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == ["workflow run update-branches.yml"]
+    assert done.summary == (
+        "CI (python) passed, so the branch bot merges a pull request of the bots past "
+        "the review that main wants, once all of its checks passed.\n"
+    )
+
+
+def test_a_branch_bot_that_never_starts_after_a_check_that_passed_says_so(
+    tmp_path: Path,
+) -> None:
+    done = start_the_branch_bot(
+        tmp_path,
+        Answer(re.escape("workflow run update-branches.yml"), err="HTTP 502", code=1),
+        conclusion="success",
+    )
+
+    assert done.returncode == 1
+    assert "branches after CI (python) passed; its next run" in done.stdout
 
 
 def test_a_check_that_failed_for_good_starts_the_branch_bot_with_its_run(

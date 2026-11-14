@@ -88,6 +88,7 @@ def pull(
     cross: bool = False,
     editable: bool = False,
     review: str | None = None,
+    author: str = CONTRIBUTOR,
 ) -> dict[str, Any]:
     """An open pull request as gh pr list shows it."""
     return {
@@ -103,6 +104,7 @@ def pull(
         "labels": [{"name": name} for name in labels],
         "reviewDecision": review,
         "statusCheckRollup": passed() if checks is None else checks,
+        "author": {"login": author},
     }
 
 
@@ -185,6 +187,7 @@ class FakeGitHub:
         # What GitHub answers when asked for one pull request again.
         self.mergeable: dict[int, bool | None] = {}
         self.updated: list[tuple[int, Any]] = []
+        self.merged: list[tuple[int, Any]] = []
         self.added: list[int] = []
         self.removed: list[int] = []
         # A status that answers a request instead of the simulation.
@@ -368,7 +371,13 @@ class FakeGitHub:
             return 200, {
                 "mergeable": self.mergeable.get(number),
                 "head": {"sha": self.head_after_update(number)},
+                "title": f"fix(deps): update {number}",
+                "body": f"The update {number}.",
             }
+        found = re.fullmatch(rf"{own}/pulls/(\d+)/merge", path)
+        if method == "PUT" and found:
+            self.merged.append((int(found[1]), body))
+            return 200, {"merged": True}
         found = re.fullmatch(rf"{own}/issues/(\d+)/labels", path)
         if method == "POST" and found:
             assert body == {"labels": [LABEL]}
@@ -850,6 +859,256 @@ def test_an_approved_pull_request_is_brought_up_to_date() -> None:
     assert [number for number, _ in github.updated] == [1]
 
 
+# --------------------------------------------------------------------------- reviews
+
+
+def with_reviews(github: FakeGitHub) -> tuple[str, list[str]]:
+    """A run of the bot in the workflow where the settings made Reviews of main."""
+    outcome = next_branch(Api(github), REPO, Job(Api(github.as_job), ACCOUNT, True))
+    return outcome.summary, [*outcome.warnings, *outcome.notices]
+
+
+def of_the_bots(number: int, **options: Any) -> FakeGitHub:
+    """A pull request of the release app that waits only for the review that the rules
+    want: up to date, its required checks passed, and every commit of the bots."""
+    github = FakeGitHub(
+        pull(number, author="app/demo-release", review="REVIEW_REQUIRED", **options)
+    )
+    github.behind = {number: 0}
+    github.commits[number] = [
+        a_commit(OWN, MAIN, author=ACCOUNT, committer="web-flow"),
+        merge_of_the_bot(head_of(number), OWN),
+    ]
+    return github
+
+
+def test_a_pull_request_of_the_bots_merges_past_the_review_that_the_rules_want() -> (
+    None
+):
+    github = of_the_bots(1)
+
+    summary, warnings = with_reviews(github)
+
+    assert warnings == []
+    assert github.merged == [
+        (
+            1,
+            {
+                "merge_method": "squash",
+                "sha": head_of(1),
+                "commit_title": "fix(deps): update 1 (#1)",
+                "commit_message": "The update 1.",
+            },
+        )
+    ]
+    assert notes(summary)[1] == (
+        "up to date with `main`, and its required checks passed: the bots made it, "
+        "so the bot merged it past the review that the rules want."
+    )
+
+
+def test_a_pull_request_of_dependabot_merges_past_the_review_as_well() -> None:
+    github = of_the_bots(1)
+    github.pulls[0]["author"] = {"login": "app/dependabot"}
+    github.commits[1][0] = a_commit(
+        OWN, MAIN, author="dependabot[bot]", committer="web-flow"
+    )
+
+    with_reviews(github)
+
+    assert [number for number, _ in github.merged] == [1]
+
+
+def test_a_pull_request_of_renovate_of_mend_merges_past_the_review_as_well() -> None:
+    github = of_the_bots(1)
+    github.pulls[0]["author"] = {"login": "app/renovate"}
+    github.commits[1][0] = a_commit(
+        OWN, MAIN, author="renovate[bot]", committer="renovate[bot]"
+    )
+
+    with_reviews(github)
+
+    assert [number for number, _ in github.merged] == [1]
+
+
+def test_a_review_that_the_settings_dont_make_binds_the_bots_too() -> None:
+    # Such as a ruleset of the organization: the release app can't pass it, so the
+    # bot neither merges nor brings up to date what waits for that review.
+    github = of_the_bots(1)
+    github.behind = {1: 2}
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.updated == []
+    assert github.merged == []
+    assert notes(summary)[1].startswith("it waits for an approving review")
+
+
+def test_a_pull_request_of_the_bots_merges_while_another_one_is_in_flight() -> None:
+    github = of_the_bots(2, enabled=LATER)
+    github.pulls.insert(0, pull(1, checks=[run("lint", None, status="IN_PROGRESS")]))
+    github.behind[1] = 0
+
+    summary, _ = with_reviews(github)
+
+    assert [number for number, _ in github.merged] == [2]
+    assert notes(summary)[1].endswith("its checks run: it merges next.")
+
+
+def test_a_pull_request_of_the_bots_without_a_body_merges_with_an_empty_message() -> (
+    None
+):
+    github = of_the_bots(1)
+    original = github.route
+
+    def route(method: str, path: str, body: Any) -> tuple[int, Any]:
+        if (method, path) == ("GET", f"repos/{REPO}/pulls/1"):
+            return 200, {"title": None, "body": None}
+        return original(method, path, body)
+
+    github.route = route  # type: ignore[method-assign]
+
+    with_reviews(github)
+
+    assert github.merged[0][1]["commit_title"] == " (#1)"
+    assert github.merged[0][1]["commit_message"] == ""
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        # Outside of a job, which names the release app: a person runs the bot.
+        "no job",
+        # A person opened it, or committed to it, or a commit isn't signed.
+        "a person's pull request",
+        "a person's commit",
+        "an unsigned commit",
+        # A person signed a commit under the name of the bot as its author.
+        "a person's commit as the bot",
+        # GitHub lists no commit of it.
+        "no commits",
+        # A check that was cancelled hasn't passed.
+        "a cancelled check",
+        # A required check that never reported hasn't passed either.
+        "a missing check",
+    ],
+)
+def test_any_doubt_leaves_a_pull_request_to_the_review(change: str) -> None:
+    github = of_the_bots(1)
+    if change == "a person's pull request":
+        github.pulls[0]["author"] = {"login": CONTRIBUTOR}
+    elif change == "a person's commit":
+        github.commits[1][0] = a_commit(OWN, MAIN)
+    elif change == "a person's commit as the bot":
+        github.commits[1][0] = a_commit(OWN, MAIN, author=ACCOUNT)
+    elif change == "an unsigned commit":
+        github.commits[1][0] = a_commit(OWN, MAIN, author=ACCOUNT, signed=False)
+    elif change == "no commits":
+        github.commits[1] = []
+    elif change == "a cancelled check":
+        github.pulls[0]["statusCheckRollup"] = [
+            run("lint", "CANCELLED"),
+            run("check (python)"),
+        ]
+    elif change == "a missing check":
+        github.pulls[0]["statusCheckRollup"] = [run("lint")]
+
+    summary, warnings = bot(github) if change == "no job" else with_reviews(github)
+
+    assert warnings == []
+    assert github.merged == []
+    assert github.updated == []
+    assert "merged" not in notes(summary)[1]
+
+
+@pytest.mark.parametrize("status", [405, 409, 422])
+def test_a_merge_past_the_review_that_github_refuses_waits_for_a_person(
+    status: int,
+) -> None:
+    # Such as where the release app may not merge past the ruleset of the reviews.
+    github = of_the_bots(1)
+    github.pulls.append(pull(2, enabled=LATER))
+    github.behind[2] = 1
+    merge = ("PUT", f"repos/{REPO}/pulls/1/merge")
+    github.fail[merge] = status
+    github.messages[merge] = "At least 1 approving review is required."
+
+    summary, warnings = with_reviews(github)
+
+    assert warnings == []
+    assert [number for number, _ in github.updated] == [2]
+    assert notes(summary)[1] == (
+        "it waits for an approving review, and GitHub didn't merge it as the release "
+        "app: `At least 1 approving review is required.`, so it can't merge yet: the "
+        "bot leaves it as it is, and the next one takes its place."
+    )
+
+
+@pytest.mark.parametrize(("status", "kind"), [(403, "::warning::"), (502, "::notice")])
+def test_another_refusal_of_a_merge_past_the_review_is_reported(
+    status: int, kind: str
+) -> None:
+    github = of_the_bots(1)
+    github.fail[("PUT", f"repos/{REPO}/pulls/1/merge")] = status
+
+    _, warnings = with_reviews(github)
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith(kind)
+
+
+def test_a_comparison_refused_for_the_review_is_reported() -> None:
+    github = of_the_bots(1)
+    github.fail[("GET", f"repos/{REPO}/compare/main...{head_of(1)}")] = 403
+
+    _, warnings = with_reviews(github)
+
+    assert github.merged == []
+    assert len(warnings) == 1
+
+
+def test_a_pull_request_of_the_bots_that_waits_for_a_review_is_brought_up_to_date() -> (
+    None
+):
+    # The bot merges it once its checks pass, so it takes its place in the line.
+    github = of_the_bots(1)
+    github.behind = {1: 2}
+
+    summary, warnings = with_reviews(github)
+
+    assert warnings == []
+    assert [number for number, _ in github.updated] == [1]
+    assert github.merged == []
+    assert notes(summary)[1].startswith("was 2 commits behind `main`")
+
+
+def test_a_pull_request_of_the_bots_that_waits_for_a_review_is_in_flight() -> None:
+    github = of_the_bots(1, checks=[run("lint", None, status="IN_PROGRESS")])
+    github.pulls.append(pull(2, enabled=LATER))
+    github.behind[2] = 1
+
+    summary, _ = with_reviews(github)
+
+    assert github.updated == []
+    assert github.merged == []
+    assert notes(summary)[1] == (
+        "up to date with `main`, and its checks run: it merges next."
+    )
+
+
+def test_changes_requested_hold_a_pull_request_of_the_bots_back() -> None:
+    github = of_the_bots(1)
+    github.pulls[0]["reviewDecision"] = "CHANGES_REQUESTED"
+    github.behind = {1: 1}
+
+    summary, _ = with_job(github)
+
+    assert github.updated == []
+    assert github.merged == []
+    assert notes(summary)[1].startswith("changes were requested in a review")
+
+
 def test_a_conversation_to_resolve_holds_a_pull_request_back_where_the_rules_say_so() -> (
     None
 ):
@@ -1095,7 +1354,9 @@ def test_a_pull_request_takes_what_gh_lists() -> None:
 
     found = Pull.of(data)
 
-    assert found == Pull(9, "feat/change-9", f"{9:040x}", "", "UNKNOWN", True, "", {})
+    assert found == Pull(
+        9, "feat/change-9", f"{9:040x}", "", "UNKNOWN", True, "", {}, author=CONTRIBUTOR
+    )
     required = frozenset(REQUIRED)
     assert found.pending(required)
     assert found.failed(required) == []
@@ -2062,6 +2323,25 @@ def test_without_the_token_and_the_account_there_is_no_job(
     environment: dict[str, str],
 ) -> None:
     assert job_from(environment) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "reviews"), [("on", True), ("off", False), ("", False)]
+)
+def test_the_job_knows_whether_the_settings_want_reviews(
+    value: str, reviews: bool
+) -> None:
+    environment = {
+        "ACTIONS_TOKEN": "a-token",
+        "BOT_ACCOUNT": ACCOUNT,
+        "REVIEWS_OF_MAIN": value,
+    }
+
+    job = job_from(environment)
+
+    assert job is not None
+    assert job.login == ACCOUNT
+    assert job.reviews is reviews
 
 
 def test_a_token_of_its_own_replaces_that_of_the_environment_for_the_cli(
