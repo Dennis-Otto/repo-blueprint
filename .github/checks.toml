@@ -1288,7 +1288,8 @@ hold."""
 problem = """`composer.json` isn't valid in the strict mode of Composer, `composer.lock`
 no longer locks what `composer.json` asks for, as after a change of it by hand, or a
 locked package has a known vulnerability. Or `composer audit` couldn't reach the
-advisories of Packagist, three times in a row, as the log says then."""
+advisories of Packagist five times in a row, over about two minutes, as the log says
+then."""
 why = """A broken `composer.json` breaks every install, `composer install` stops at a lock
 file that lacks a package, and a vulnerable package ships its vulnerability with the
 app. Without the advisories, the audit can't tell whether a package is vulnerable."""
