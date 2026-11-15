@@ -7469,11 +7469,17 @@ def test_the_canary_has_a_path_to_each_kind_of_sink(projects: dict[str, Path]) -
     kinds = set(re.findall(r"TaintKind::INPUT_(\w+)", plugin))
     assert kinds == set(issues)
     assert set(expected) == {*issues.values(), "TaintedSql"}
-    # A sink of an interface, of the interface that it extends, of the data of the
-    # app, and of a constructor.
+    # A sink of an interface, of the interface that it extends, of the storage below a
+    # folder, at its first parameter and at another, of the data of the app, and of a
+    # constructor.
     for call in (
         "$this->folder->newFile($name); // expect: TaintedFile",
         "$this->file->move('/user/files/' . $target); // expect: TaintedFile",
+        "$storage = $this->folder->getStorage();",
+        "$storage->file_put_contents($this->folder->getInternalPath() . '/' . $name,"
+        " ''); // expect: TaintedFile",
+        "$storage->rename($this->folder->getInternalPath() . '/.part', $name);"
+        " // expect: TaintedFile",
         "$this->appData->getFile($name); // expect: TaintedFile",
         "return new RedirectResponse($url); // expect: TaintedHeader",
     ):
@@ -7495,6 +7501,50 @@ def test_the_canary_has_a_path_to_each_kind_of_sink(projects: dict[str, Path]) -
     # A name that nextcloud/ocp no longer has stops the analysis, instead of leaving it
     # blind to that sink.
     assert "throw self::changed(" in plugin
+
+
+def test_the_taint_plugin_sees_the_paths_of_a_storage(
+    projects: dict[str, Path],
+) -> None:
+    plugin = (
+        projects["nextcloud-app"] / ".github/psalm/NextcloudTaintPlugin.php"
+    ).read_text(encoding="utf-8")
+
+    def sinks(interface: str) -> dict[str, list[str]]:
+        start = plugin.index(f"\t\t'OCP\\Files\\Storage\\{interface}' => [\n")
+        block = plugin[start : plugin.index("\n\t\t],\n", start)]
+        # The name of each method, then its parameters, on its line or below it.
+        entries = re.split(r"^\t\t\t'(\w+)' => ", block, flags=re.M)[1:]
+        return {
+            method: re.findall(r"'(\w+)' => \[TaintKind::INPUT_FILE\]", parameters)
+            for method, parameters in zip(entries[::2], entries[1::2], strict=True)
+        }
+
+    # Node::getStorage() leads past the folder: a path from a request that reaches the
+    # storage unchecked climbs to every file of it, by each method that reads, writes,
+    # lists, moves or removes what is at a path, or tells whether it is there, at each
+    # parameter that is a path, as nextcloud/ocp names them.
+    one = ["path"]
+    two = ["source", "target"]
+    internal = ["sourceInternalPath", "targetInternalPath"]
+    assert sinks("IStorage") == {
+        "mkdir": one,
+        "rmdir": one,
+        "opendir": one,
+        "file_exists": one,
+        "file_get_contents": one,
+        "file_put_contents": one,
+        "unlink": one,
+        "rename": two,
+        "copy": two,
+        "fopen": one,
+        "touch": one,
+        "getLocalFile": one,
+        "copyFromStorage": internal,
+        "moveFromStorage": internal,
+    }
+    # The storage that takes a stream declares its write of its own.
+    assert sinks("IWriteStreamStorage") == {"writeStream": one}
 
 
 PHP = shutil.which("php")
