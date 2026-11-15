@@ -5491,7 +5491,15 @@ def test_the_checks_fail_on_rules_that_osv_scanner_toml_does_not_have(
     fine = step()
     # A version accepted with every advisory, without its rule of Renovate.
     (project / "osv-scanner.toml").write_text(
-        (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text(encoding="utf-8"),
+        textwrap.dedent("""\
+            [[PackageOverrides]]
+            name = "pillow"
+            version = "12.3.0"
+            ecosystem = "PyPI"
+            vulnerability.ignore = true
+            effectiveUntil = 2099-12-31
+            reason = "Home Assistant pins Pillow 12.3.0 for the tests."
+            """),
         encoding="utf-8",
     )
     failed = step()
@@ -9186,7 +9194,7 @@ def test_the_setup_on_windows_fits_the_kind(
         "the `pyobjc-core` that it needs on macOS",
         "On macOS, run",
         "imports `fcntl`, a module of Python for Unix alone",
-        "pytest-homeassistant-custom-component imports",
+        "pytest-homeassistant imports",
         "WSL 2",
         "in the Linux file system of",
         "`~/demo-project`",
@@ -10805,7 +10813,55 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     inputs = (ROOT / "stacks/home-assistant/requirements-test.in").read_text(
         encoding="utf-8"
     )
-    assert re.search(r"^pytest-homeassistant-custom-component==\S+$", inputs, re.M)
+    assert re.search(r"^pytest-homeassistant==\S+$", inputs, re.M)
+
+
+def test_a_home_assistant_integration_tests_with_home_assistants_own_plugin(
+    projects: dict[str, Path],
+) -> None:
+    # pytest-homeassistant-custom-component is retired, and its last release pins
+    # Home Assistant 2026.10 with Pillow 12.3.0, whose advisories no update of it
+    # would fix; Home Assistant publishes pytest-homeassistant with each of its
+    # releases (#933).
+    lock = (ROOT / "stacks/home-assistant/requirements-test.txt").read_text("utf-8")
+    pins = dict(re.findall(r"^([\w.-]+)==(\S+)", lock, re.M))
+    assert "pytest-homeassistant-custom-component" not in pins
+    assert pins["pytest-homeassistant"] == pins["homeassistant"]
+    assert int(pins["pillow"].split(".")[0]) >= 13
+    # The plugins of pytest that scripts/check.sh and pyproject.toml use, which the
+    # old plugin brought and the new one doesn't.
+    for plugin in (
+        "pytest-cov",
+        "pytest-timeout",
+        "pytest-github-actions-annotate-failures",
+        "pytest-xdist",
+    ):
+        assert plugin in pins, plugin
+    for kind in ("home-assistant", "python-package"):
+        project = projects[kind]
+        pyproject = tomllib.loads((project / "pyproject.toml").read_text("utf-8"))
+        addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
+        # Home Assistant puts its httpx in place before the plugin of respx may
+        # import httpx, as the README of the test plugin asks.
+        assert (addopts[-2:] == ["-p", "no:respx"]) == (kind == "home-assistant")
+    tests = projects["home-assistant"] / "tests"
+    for name in ("test_config_flow.py", "test_init.py"):
+        source = (tests / name).read_text(encoding="utf-8")
+        assert "from pytest_homeassistant.common import MockConfigEntry" in source
+    # The hass of the plugin enables the integrations of custom_components itself.
+    conftest = (tests / "conftest.py").read_text(encoding="utf-8")
+    assert "enable_custom_integrations" not in conftest
+    rules = renovate_rules(
+        (projects["home-assistant"] / ".github/renovate-blueprint.json5").read_text(
+            encoding="utf-8"
+        )
+    )
+    base = [
+        rule
+        for rule in rules["packageRules"]
+        if rule.get("groupName") == "the Home Assistant test base"
+    ]
+    assert [rule["matchDepNames"] for rule in base] == [["pytest-homeassistant"]]
 
 
 # What keeps Renovate from compiling a lock file again, why_renovate_skips, is in
@@ -10869,15 +10925,14 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
     project = shutil.copytree(projects[kind], tmp_path / kind)
-    # Home Assistant pins Pillow for the tests of every integration, so a new one
-    # accepts its advisories as the blueprint does in stacks/home-assistant/, in the
+    # Home Assistant pins packages such as Pillow for the tests of every integration,
+    # so a new one accepts what the blueprint accepts in stacks/home-assistant/, in the
     # root, where its requirements-test.txt is.
     accepted = project / "osv-scanner.toml"
+    blueprint = (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text("utf-8")
     assert accepted.is_file() == (kind == "home-assistant")
     if accepted.is_file():
-        assert accepted.read_text(encoding="utf-8") == (
-            ROOT / "stacks/home-assistant/osv-scanner.toml"
-        ).read_text(encoding="utf-8")
+        assert accepted.read_text(encoding="utf-8") == blueprint
         assert (project / "requirements-test.txt").is_file()
     # The rules of the blueprint extend those of the project's osv-scanner.toml.
     rules = renovate_rules(
@@ -10890,7 +10945,9 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         (project / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
     )
     names = [rule["matchPackageNames"] for rule in preset["packageRules"]]
-    assert names == ([["pillow"]] if kind == "home-assistant" else [])
+    overrides = tomllib.loads(blueprint).get("PackageOverrides", [])
+    expected = [[entry["name"]] for entry in overrides]
+    assert names == (expected if kind == "home-assistant" else [])
     for rule in preset["packageRules"]:
         assert rule["matchFileNames"] == ["/^[^/]+$/"]
         assert rule["description"].startswith("osv-scanner.toml accepts every")

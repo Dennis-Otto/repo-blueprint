@@ -36,7 +36,15 @@ packages = ["src/{= python_package =}"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["[% if project_type == 'python-package' %]src[% else %].[% endif %]"]
+[%- if stack == 'home-assistant' %]
+# Home Assistant puts its own httpx in place of httpx as it is imported, which has to
+# come before anything imports httpx. The plugin of pytest that respx brings would
+# import it first, so it stays off, as the README of pytest-homeassistant asks; a test
+# can still use respx itself.
+addopts = ["--strict-markers", "--strict-config", "-p", "no:respx"]
+[%- else %]
 addopts = ["--strict-markers", "--strict-config"]
+[%- endif %]
 xfail_strict = true
 # A hanging test fails instead of blocking the run, locally as in the CI.
 timeout = 30
