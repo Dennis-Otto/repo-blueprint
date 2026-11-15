@@ -82,7 +82,7 @@ Each hook of `.github/mkdocs_blueprint.py` and each plugin of `.github/mkdocs-bl
 Option 2, with option 1 for a stated time until it is carried out.
 
 - **Until the move,** a rule of `.github/renovate-blueprint.json5` and `template/.github/renovate-blueprint.json5.jinja` holds `mkdocs` below 2, with its reason in a comment. Material 9 and the plugins keep their updates, since the authors of Material fix it until 5 May 2027.
-- **First,** the hooks that need no generator, those that read the files before the build or `site/` after it, such as the page *Automation*, the sitemaps and `llms.txt`, become steps of `blueprint.py`, so that they move with any generator ([decision 0165](0165-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)).
+- **First,** the hooks that need no generator, those that read the files before the build or `site/` after it, such as the page *Automation*, the sitemaps and `llms.txt`, become steps of `blueprint.py`, so that they move with any generator ([decision 0166](0166-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)).
 - **By 1 February 2027,** a look at Zensical's module API, its languages and the dates of a page decides how each remaining hook moves.
 - **Before 5 May 2027,** every website is built with Zensical, as a breaking release with a migration of `mkdocs.yml`, and the rule of Renovate goes with it.
 - **If Zensical can't carry the websites by then,** they stay on the last releases of MkDocs 1.6 and Material 9 until **5 November 2027** at the latest. An advisory against either without a fix ends that time at once: the blueprint then decides again, between options 2 and 3, in a new record.

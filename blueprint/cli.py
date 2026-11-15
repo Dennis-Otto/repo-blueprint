@@ -1494,7 +1494,7 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
 
 def website_command(arguments: argparse.Namespace, root: Path) -> int:
     """A step of the website that needs no generator: the page of the automation
-    before the build, or the sitemaps and llms.txt after it (decision 0165)."""
+    before the build, or the sitemaps and llms.txt after it (decision 0166)."""
     if arguments.action == "finish":
         try:
             menus = (

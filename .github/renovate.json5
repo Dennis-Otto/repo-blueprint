@@ -10,14 +10,13 @@
   extends: ["local>Dennis-Otto/repo-blueprint//.github/renovate-blueprint.json5"],
   customManagers: [
     {
-      // The release of Mermaid that the hook of every website names for Material,
-      // which reaches every repository with the hook.
+      // The release of Mermaid that every website serves, with its sha256, which
+      // reaches every repository with the pins of the websites.
       customType: "regex",
-      managerFilePatterns: ["/^\\.github/mkdocs_blueprint\\.py$/"],
+      managerFilePatterns: ["/^\\.github/mkdocs-blueprint-pins\\.toml$/"],
       matchStrings: [
-        "https://unpkg\\.com/(?<depName>mermaid)@(?<currentValue>\\d+\\.\\d+\\.\\d+)/dist/mermaid\\.min\\.js",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nversion = \"(?<currentValue>[^\"]+)\"",
       ],
-      datasourceTemplate: "npm",
     },
     {
       // The Copier of the quick start in the READMEs, with uv and with pipx, that of
@@ -81,11 +80,18 @@
     {
       // The Mermaid that every website draws its diagrams with, within the major
       // version that Material loads: .github/mkdocs_blueprint.py warns when Material
-      // loads another one, which fails the check docs, and then both move.
+      // loads another one, which fails the check docs, and then both move. The hooks
+      // check it by its sha256, which pins.py writes for the new release beside the
+      // version and into .github/pins.toml, so that the update merges on its own.
       matchManagers: ["custom.regex"],
       matchDepNames: ["mermaid"],
       allowedVersions: "<12",
       groupName: "the tools of the websites",
+      postUpgradeTasks: {
+        commands: ["python3 pins.py"],
+        fileFilters: [".github/pins.toml", ".github/mkdocs-blueprint-pins.toml"],
+        executionMode: "branch",
+      },
     },
     {
       // The uv that the workflows set up, which every repository gets from here.

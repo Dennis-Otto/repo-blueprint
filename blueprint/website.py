@@ -4,7 +4,7 @@ assistants, llms.txt, which are finished after it.
 
 The hooks of .github/mkdocs_blueprint.py take these steps in every build of MkDocs,
 with what the build knows; blueprint.py website takes them for a build with another
-generator, such as Zensical, which runs no hooks of MkDocs (decision 0165):
+generator, such as Zensical, which runs no hooks of MkDocs (decision 0166):
 
     python3 blueprint.py website automation DIR --site-name NAME ...
                                             the page of the automation into DIR
