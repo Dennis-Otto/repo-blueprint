@@ -136,7 +136,7 @@ It shows what is left for a person and which steps are done: the release app, th
 The release app can do everything that the bots need, the administration of each repository included: its rulesets, environments, variables and the actions that may run. A second app, the **settings app**, can take the administration over, so that the release app, which most workflows use, can give it up: a stolen key of the release app then can't change a ruleset or let a new action run.
 
 - **The settings bot** applies the settings as the settings app, every week and after each change of them.
-- **The OSV-Scanner workflow** closes the Dependabot alerts of the advisories that an `osv-scanner.toml` accepts, with the reason and the end of the acceptance, and opens again each one that it closed once the acceptance is gone: the token of a workflow can't read the Dependabot alerts.
+- **The Release workflow,** after every push to `main` and every day, closes the Dependabot alerts of the advisories that an `osv-scanner.toml` accepts, with the reason and the end of the acceptance, and opens again each one that it closed once the acceptance is gone: the token of a workflow can't read the Dependabot alerts.
 - **The blueprint bot** lets the actions of a new release of the blueprint start before it pushes the update: it adds the patterns of the release's `[actions.selected]` to the list of the allowed actions on GitHub, and takes none away, so the checks of the update's pull request start without a `settings apply` from its branch. The settings bot narrows the list to the settings after the merge.
 - **The release app** then needs no *Administration*, *Pages*, *Variables*, *Environments* and *Secrets* any more.
 
@@ -149,7 +149,7 @@ Without the settings app, everything works as before: the release app applies th
     | Administration | Read and write | rulesets, the switches of security, the actions that may run, environments |
     | Issues | Read and write | the labels |
     | Pages | Read and write | the website's settings |
-    | Dependabot alerts | Read and write | the Dependabot alerts of the advisories that an `osv-scanner.toml` accepts, which the OSV-Scanner workflow closes and opens again |
+    | Dependabot alerts | Read and write | the Dependabot alerts of the advisories that an `osv-scanner.toml` accepts, which the Release workflow closes and opens again |
     | Variables | Read and write | the variables of `[variables]`; set it by hand, the link can't |
     | Actions | Read-only | the settings of the workflows |
     | Contents | Read-only | the files of the community profile |
@@ -181,7 +181,7 @@ Without the settings app, everything works as before: the release app applies th
     The variable can also live in the settings as code, as `SETTINGS_APP_CLIENT_ID = "CLIENT_ID"` under `[variables]` of `.github/repository.project.toml`, which the settings bot applies with the release app first.
 
 5. **Check it:** *Actions → Settings → Run workflow*. The run takes the step *Create a token of the settings app* and skips *Check that the release app is set up*. When GitHub refuses the token, of an app that is not installed on the repository or lacks a permission, the summary of the run says so, and no setting changes.
-6. **An app registered before the OSV-Scanner workflow closed the Dependabot alerts** lacks their permission, and the job *dependabot alerts* of that workflow fails, or, in a repository of an owner other than the blueprint's, leaves a notice: on the settings page of the app that the summary of the run names, the settings app or, without it, the release app, under *Permissions & events* → *Repository permissions*, set *Dependabot alerts* to *Read and write* and press *Save changes*. GitHub then asks to accept the new permission on the installation: *Settings → Applications → Installed GitHub Apps*, *Configure* next to the app, *Review request*, *Accept new permissions*. Then run *Actions → OSV-Scanner → Run workflow*, with *dry_run* first to see what it would close.
+6. **An app registered before the blueprint closed the Dependabot alerts** lacks their permission, and the job *dependabot alerts* of the Release workflow fails, or, in a repository of an owner other than the blueprint's, leaves a notice: on the settings page of the app that the summary of the run names, the settings app or, without it, the release app, under *Permissions & events* → *Repository permissions*, set *Dependabot alerts* to *Read and write* and press *Save changes*. GitHub then asks to accept the new permission on the installation: *Settings → Applications → Installed GitHub Apps*, *Configure* next to the app, *Review request*, *Accept new permissions*. Then run *Actions → Release → Run workflow*, or wait for its next daily run.
 7. **Take the permissions from the release app** once the settings bot has run as the settings app in every repository: on the settings page of the release app, under *Permissions & events*, set *Administration*, *Pages*, *Variables*, *Environments* and *Secrets* to *No access*, and *Dependabot alerts* to *Read-only*. Its other permissions stay, for the release bot, Renovate, the blueprint bot and the others.
 
 `gh variable delete SETTINGS_APP_CLIENT_ID` hands the settings back to the release app, which needs its permissions again then.
