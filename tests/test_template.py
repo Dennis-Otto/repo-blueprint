@@ -14059,7 +14059,7 @@ def test_the_move_gives_a_real_repository_the_config_of_the_template_again(
         ROOT / f"tests/data/issue-assistant/{name}.toml", tmp_path / ISSUE_ASSISTANT
     )
     shutil.copy(projects[kind] / ".copier-answers.yml", tmp_path)
-    assert migrate(tmp_path, True, NEXT)
+    assert migrate(tmp_path, True)
     # What the template renders, but for the lines at the top that came after 1.18.3:
     # the update brings them without a conflict, and the next one changes the lists.
     rendered = (projects[kind] / ISSUE_ASSISTANT).read_text(encoding="utf-8")
