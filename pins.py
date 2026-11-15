@@ -2,8 +2,9 @@
 """The tools that the workflows of the blueprint download, pinned by version and sha256.
 
 The workflows and the scripts of .github download gitsign, gitleaks, Infection,
-krankerl, lychee, Nextcloud and syft at the version below a line "# renovate:", and check each
-download against the sha256 on the line after the version. Renovate moves the
+krankerl, lychee, Nextcloud and syft, and the hooks of every website Mermaid, at the
+version below a line "# renovate:", and check each download against the sha256 on the
+line after the version. Renovate moves the
 version, but can't know the checksum of the new release. .github/pins.toml records the address of each
 download and the version and sha256 that the files pin; after Renovate moved a
 version, it runs
@@ -36,22 +37,28 @@ from typing import Any
 
 RECORD = ".github/pins.toml"
 # The files of Renovate's custom manager that pin a download.
-FILES = (".github/*.sh", ".github/workflows/*.yml")
-# A download, pinned below its line "# renovate:": the version as in YAML (NAME: 1.2.3)
-# or in the shell (name=1.2.3), and the sha256 on the next line in the same form.
+FILES = (
+    ".github/*.sh",
+    ".github/workflows/*.yml",
+    ".github/mkdocs-blueprint-pins.toml",
+)
+# A download, pinned below its line "# renovate:": the version as in YAML (NAME: 1.2.3),
+# in the shell (name=1.2.3) or in TOML (name = "1.2.3"), and the sha256 on the next
+# line in the same form.
 PIN = re.compile(
     r"# renovate: datasource=\S+ depName=(?P<dep>\S+)[^\n]*\n"
-    r"[ \t]*(?P<name>[\w-]+)(?:: |=)\"?(?P<version>[^\"\s]+)\"?[ \t]*\n"
-    r"[ \t]*[\w-]+(?:: |=)\"?(?P<sha256>[0-9a-f]{64})\"?[ \t]*$",
+    r"[ \t]*(?P<name>[\w-]+)(?:: | ?= ?)\"?(?P<version>[^\"\s]+)\"?[ \t]*\n"
+    r"[ \t]*[\w-]+(?:: | ?= ?)\"?(?P<sha256>[0-9a-f]{64})\"?[ \t]*$",
     re.MULTILINE,
 )
 SHA256 = re.compile(r"[0-9a-f]{64}")
 HEADER = """\
-# The tools that the workflows and the scripts of .github download and check by their
-# sha256, each pinned below a line "# renovate:": the address of the download, in which
-# {version} stands for the version, and the version and sha256 that the files pin.
-# Renovate moves a version, and python3 pins.py then writes the sha256 of the new
-# release beside it and here. pins.py keeps this file; add a new download by hand.
+# The tools that the workflows, the scripts and the websites of .github download and
+# check by their sha256, each pinned below a line "# renovate:": the address of the
+# download, in which {version} stands for the version, and the version and sha256
+# that the files pin. Renovate moves a version, and python3 pins.py then writes the
+# sha256 of the new release beside it and here. pins.py keeps this file; add a new
+# download by hand.
 # https://github.com/Dennis-Otto/repo-blueprint
 """
 # Each download tries three times, 10 and 20 seconds apart, as the workflows do.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import faulthandler
 import gzip
+import hashlib
 import html
 import importlib.util
 import json
@@ -52,14 +53,33 @@ ASSETS = {
     "assets/javascripts/blueprint.js": "mkdocs-blueprint.js",
 }
 STYLESHEET, SCRIPT = ASSETS
+# The fonts of every website, Roboto and Roboto Mono, which Material would load with
+# the stylesheet of Google Fonts, which may change at any time: theme.font of
+# .github/mkdocs-blueprint.yml turns that off, and the website serves the copy of it
+# beside this file, before the stylesheet of the blueprint. A project that names
+# fonts of its own in theme.font gets those from Google Fonts, as Material loads them.
+FONTS = "assets/stylesheets/blueprint-fonts.css"
+FONTS_FILE = "mkdocs-blueprint-fonts.css"
+# The files of other servers that every website serves, in the file beside this one:
+# the release of Mermaid and the fonts, each with its sha256, which the hook checks
+# on every download of the privacy plugin and of its own, and on every copy of one
+# in the cache, so that a build fails on a file that differs.
+PINS_FILE = "mkdocs-blueprint-pins.toml"
+PINNED: dict[str, Any] = tomllib.loads(
+    (Path(__file__).resolve().parent / PINS_FILE).read_text(encoding="utf-8")
+)
 # The Mermaid that draws a ```mermaid block of a project's page, which the website
 # still draws live; a diagram that the pages show as its pictures needs none.
 # Material asks unpkg.com for the newest release of a major version, which the
 # privacy plugin downloads in every build, so that two builds of the same commit
 # could draw the diagrams differently.
-# The website loads this release instead, which Renovate keeps current within the
-# major version that Material loads.
-MERMAID = "https://unpkg.com/mermaid@11.17.2/dist/mermaid.min.js"
+# The website loads the release of PINNED instead, which Renovate keeps current
+# within the major version that Material loads, and only when a page has a
+# ```mermaid block: the hook downloads it after the pages, not the privacy plugin.
+MERMAID = (
+    f"https://unpkg.com/mermaid@{PINNED['mermaid']['version']}/dist/mermaid.min.js"
+)
+SHA256: dict[str, str] = {MERMAID: PINNED["mermaid"]["sha256"], **PINNED["fonts"]}
 FLOATING = re.compile(
     r"https://unpkg\.com/mermaid@(?P<major>\d+)/dist/mermaid\.min\.js"
 )
@@ -220,15 +240,24 @@ SNIPPET = re.compile(
 class Retrying:
     """The requests of a plugin, whose get tries a download again, after a second
     and then two, when the network or the server fails, and gives up on an attempt
-    after TIMEOUT unless the plugin names its own time limit."""
+    after TIMEOUT unless the plugin names its own time limit. With checked, a file
+    that PINNED names must have its sha256, or get raises Mismatch, which the plugin
+    takes for a download that failed."""
 
-    def __init__(self, requests: Any) -> None:
+    def __init__(self, requests: Any, *, checked: bool = False) -> None:
         self.requests = requests
+        self.checked = checked
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.requests, name)
 
     def get(self, url: str, **kwargs: Any) -> Any:
+        response = self.tried(url, **kwargs)
+        if self.checked:
+            check(url, response)
+        return response
+
+    def tried(self, url: str, **kwargs: Any) -> Any:
         kwargs.setdefault("timeout", TIMEOUT)
         transient = (self.requests.ConnectionError, self.requests.Timeout)
         for attempt in range(1, ATTEMPTS):
@@ -241,6 +270,73 @@ class Retrying:
                     return response
             time.sleep(attempt)
         return self.requests.get(url, **kwargs)
+
+
+class Mismatch(Exception):
+    """A download whose sha256 differs from the one that PINNED names."""
+
+
+def check(url: str, response: Any) -> None:
+    """Fail on a file that PINNED names, as the server sent it, with another sha256:
+    the error fails every build, and a strict one fails on the warning of the plugin
+    that gets the Mismatch too."""
+    expected = SHA256.get(url)
+    if expected is None or response.status_code != 200:
+        return
+    found = hashlib.sha256(response.content).hexdigest()
+    if found != expected:
+        message = (
+            f"{url} has the sha256 {found}, and .github/{PINS_FILE} pins "
+            f"{expected}: the website serves no file that differs from its pin. A new "
+            "release of Mermaid gets its sha256 from python3 pins.py of the blueprint, "
+            "and a font that changed under its address is no longer the one pinned."
+        )
+        log.error(message)
+        raise Mismatch(message)
+
+
+def unchecked(cache: Path) -> None:
+    """Remove every copy in the cache of a download of the privacy plugin that PINNED
+    names and that differs from its sha256, such as one from a cache of the time
+    before the hook checked it: the plugin never downloads a file again that it has,
+    so this one would reach the website unchecked. The plugin downloads it anew."""
+    for url, expected in SHA256.items():
+        address = urlsplit(url)
+        copy = cache / address.netloc / address.path.lstrip("/")
+        if copy.is_file() and sha256(copy) != expected:
+            log.info(
+                f"Downloading {url} again: its copy in {cache} isn't the pinned one"
+            )
+            copy.unlink()
+
+
+def sha256(path: Path) -> str:
+    """The sha256 of the file at path."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def fetching(config: Any) -> Any | None:
+    """The privacy plugin, when it downloads the files of other servers that the
+    pages name and serves them with the website, as it does by default; else None."""
+    plugin = config.plugins.get("material/privacy")
+    options = getattr(plugin, "config", None)
+    if options is None or not all(
+        getattr(options, name, True) for name in ("enabled", "assets", "assets_fetch")
+    ):
+        return None
+    return plugin
+
+
+def downloads(privacy: Any) -> Path:
+    """The folder of the privacy plugin's cache with the files of other servers, one
+    folder for each server, as the website serves them in its own folder."""
+    return Path(privacy.config.cache_dir, privacy.config.assets_fetch_dir)
+
+
+def served(privacy: Any) -> str:
+    """The path where the website serves MERMAID, where the privacy plugin would."""
+    address = urlsplit(MERMAID)
+    return f"{privacy.config.assets_fetch_dir}/{address.netloc}{address.path}"
 
 
 class Layers(dict[str, Any]):
@@ -307,9 +403,11 @@ def on_config(config: Any) -> None:
     Fonts doesn't come within 5 seconds, which fails a strict build, and the social
     plugin fails on any error of the network and waits without end for a server that
     stopped answering, or for a layer of its card that another card just starts, as
-    Layers says. The stylesheet and the script come
+    Layers says. The privacy plugin gets the files that PINNED names only with their
+    sha256, also from its cache. The stylesheet and the script come
     before those of the project, whose extra_css replaces the list of the blueprint
-    and whose rules win over them. The menu of mkdocs.yml belongs to the project, so
+    and whose rules win over them, and the fonts before the stylesheet, unless the
+    project names fonts of its own. The menu of mkdocs.yml belongs to the project, so
     the page comes after the security design there, unless the menu names it.
     """
     for name in DOWNLOADING:
@@ -318,7 +416,12 @@ def on_config(config: Any) -> None:
             continue
         module: Any = sys.modules[type(plugin).__module__]
         if not isinstance(module.requests, Retrying):
-            module.requests = Retrying(module.requests)
+            module.requests = Retrying(
+                module.requests, checked=name == "material/privacy"
+            )
+    privacy = fetching(config)
+    if privacy is not None:
+        unchecked(downloads(privacy))
     social = config.plugins.get("material/social")
     if social is not None:
         watch_the_layers(social)
@@ -328,6 +431,8 @@ def on_config(config: Any) -> None:
     ):
         if path not in map(str, listed):
             listed.insert(0, path)
+    if config.theme.get("font") is False and FONTS not in map(str, config.extra_css):
+        config.extra_css.insert(0, FONTS)
     found = languages(config)
     if found is not None:
         name_the_toggles(config.theme, found.current)
@@ -607,23 +712,40 @@ def source_facts(output: str) -> str:
 
 
 def on_files(files: Any, config: Any) -> Any:
-    """Serve the stylesheet and the script of the blueprint and the preview of the
-    repository, pin Mermaid, and add the page of the automation.
+    """Serve the stylesheet, the fonts and the script of the blueprint and the preview
+    of the repository, pin Mermaid, and add the page of the automation.
 
-    Both are files beside this one, which the i18n plugin leaves in place as files
-    of the theme. The script of Material that loads Mermaid comes from a copy in
-    .cache/ that names the release of MERMAID: the privacy plugin, which runs after
-    this hook, downloads that one for the website. The page of the automation, and
+    They are files beside this one, which the i18n plugin leaves in place as files
+    of the theme; the privacy plugin, which runs after this hook, downloads the fonts
+    that the stylesheet of the fonts names. The script of Material that loads Mermaid
+    comes from a copy in .cache/ that names the release of MERMAID, as the website
+    serves it when the privacy plugin downloads for it: on_post_build then downloads
+    it once a page has a ```mermaid block, and a website without an address, whose
+    script can't name the full address of its copy, loads it on every page, as the
+    privacy plugin does. The page of the automation, and
     its German version on a website in German, are files of docs/ that the folder
     doesn't hold: the i18n plugin, which runs after this hook too, takes them for
     pages of their languages, and on_nav gives them their text.
     """
     here = Path(__file__).resolve().parent
     kind = type(next(iter(files)))
+    privacy = fetching(config)
+    address = MERMAID
+    if privacy is not None:
+        address = served(privacy)
+        if config.site_url:
+            address = urljoin(config.site_url, address)
+        else:
+            BUILT.mermaid = True
+            if address not in map(str, config.extra_javascript):
+                config.extra_javascript.append(address)
     for file in files:
         if BUNDLE.fullmatch(file.src_uri) and file.abs_src_path:
-            pin(file, Path(config.docs_dir).parent / ".cache/plugin/blueprint")
-    for destination, name in ASSETS.items():
+            pin(file, Path(config.docs_dir).parent / ".cache/plugin/blueprint", address)
+    assets = dict(ASSETS)
+    if FONTS in map(str, config.extra_css):
+        assets[FONTS] = FONTS_FILE
+    for destination, name in assets.items():
         files.append(
             kind(
                 name,
@@ -666,8 +788,8 @@ def on_files(files: Any, config: Any) -> Any:
     return files
 
 
-def pin(file: Any, cache: Path) -> None:
-    """Point the script of Material at a copy of it that loads MERMAID.
+def pin(file: Any, cache: Path, address: str) -> None:
+    """Point the script of Material at a copy of it that loads MERMAID from address.
 
     A Material that loads another major version of Mermaid, or no longer from
     unpkg.com, warns, which fails a strict build, so that MERMAID follows it.
@@ -684,13 +806,15 @@ def pin(file: Any, cache: Path) -> None:
     if found["major"] != major:
         log.warning(
             f"Material loads Mermaid {found['major']}, and the website pins {MERMAID}: "
-            f"change MERMAID in .github/mkdocs_blueprint.py to a release of Mermaid "
-            f"{found['major']}."
+            f"change the version of mermaid in .github/{PINS_FILE} to a release of "
+            f"Mermaid {found['major']}, and run python3 pins.py of the blueprint."
         )
         return
     copy = cache / file.src_uri
     copy.parent.mkdir(parents=True, exist_ok=True)
-    copy.write_text(FLOATING.sub(MERMAID, script), encoding="utf-8", newline="")
+    copy.write_text(
+        FLOATING.sub(lambda _: address, script), encoding="utf-8", newline=""
+    )
     file.abs_src_path = str(copy)
 
 
@@ -742,6 +866,8 @@ class Built:
         self.version = ""
         self.menus: dict[str, Menu] = {}
         self.preview: tuple[int, int] | None = None
+        # Whether the website serves MERMAID: a page has a ```mermaid block.
+        self.mermaid = False
 
 
 BUILT = Built()
@@ -971,7 +1097,8 @@ def on_page_content(html_text: str, page: Any, config: Any, files: Any) -> str:
         docs.name,
         {file.dest_uri: file for file in files},
     )
-    html_text = MERMAID_BLOCK.sub(r"\g<0> data-search-exclude", html_text)
+    html_text, diagrams = MERMAID_BLOCK.subn(r"\g<0> data-search-exclude", html_text)
+    BUILT.mermaid = BUILT.mermaid or diagrams > 0
     html_text = without_badges(html_text)
     html_text = from_checkout(html_text, page, config, files, where)
     html_text = PICTURE.sub(lambda m: themed(m, where), html_text)
@@ -1602,8 +1729,9 @@ def search_in_language(output: str, page: Any, found: Languages) -> str:
 
 def on_post_build(config: Any) -> None:
     """Write the map of the website and the search index of each language, keep the
-    pages that no search engine lists out of the sitemap, and copy the sitemap of a
-    website in several languages into every folder of pages.
+    pages that no search engine lists out of the sitemap, serve Mermaid once a page
+    of any language has a ```mermaid block, and copy the sitemap of a website in
+    several languages into every folder of pages.
 
     The language switch of Material asks for sitemap.xml in the folder of the page in
     each language: decisions/ and de/decisions/ on decisions/0006-beta-channel.html.
@@ -1615,6 +1743,8 @@ def on_post_build(config: Any) -> None:
     for path in (sitemap, site / "sitemap.xml.gz"):
         unlist(path, BUILT.unlisted)
     write_map(site / LLMS_TXT, config)
+    if BUILT.mermaid:
+        serve_mermaid(config)
     found = languages(config)
     if found is None:
         return
@@ -1626,6 +1756,39 @@ def on_post_build(config: Any) -> None:
         return
     for folder in {page.parent for page in site.rglob("*.html")} - {site}:
         shutil.copyfile(sitemap, folder / "sitemap.xml")
+
+
+def serve_mermaid(config: Any) -> None:
+    """Serve MERMAID where the script of Material loads it, from the cache of the
+    privacy plugin, where on_config left only the pinned file, or downloaded with the
+    requests of the plugin, which check it, into the cache. The build of each language
+    writes into the folder of the whole website, so the first build after a page with
+    a ```mermaid block serves it for every language, and a later one finds it in the
+    cache. A download that fails warns, which fails a strict build, as the privacy
+    plugin does."""
+    privacy = fetching(config)
+    if privacy is None:
+        return
+    path = served(privacy)
+    copy = Path(privacy.config.cache_dir) / path
+    if not copy.is_file():
+        requests = sys.modules[type(privacy).__module__].requests
+        try:
+            response = requests.get(MERMAID)
+        except (Mismatch, OSError) as error:
+            log.warning(f"Couldn't retrieve {MERMAID}: {error}")
+            return
+        if response.status_code != 200:
+            log.warning(
+                f"Couldn't retrieve {MERMAID}: the server answered "
+                f"{response.status_code}"
+            )
+            return
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes(response.content)
+    target = Path(config.site_dir) / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(copy, target)
 
 
 # After the i18n plugin, which writes the search index of every language with -100,

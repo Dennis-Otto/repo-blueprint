@@ -2951,6 +2951,8 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/a11y/package.json",
         ".github/a11y/package-lock.json",
         ".github/mkdocs-blueprint.css",
+        ".github/mkdocs-blueprint-fonts.css",
+        ".github/mkdocs-blueprint-pins.toml",
         ".github/mkdocs-blueprint.js",
         ".github/cspell-words.txt",
         ".vale.ini",
@@ -11353,7 +11355,7 @@ THE_TOOLS = [
     ("dockerfile", "final", ".github/social-preview/Dockerfile"),
     ("npm", "devDependencies", ".github/prose/package.json"),
     ("npm", "devDependencies", ".github/a11y/package.json"),
-    ("custom.regex", "", ".github/mkdocs_blueprint.py"),
+    ("custom.regex", "", ".github/mkdocs-blueprint-pins.toml"),
     ("pre-commit", "repository", ".pre-commit-config.yaml"),
 ]
 THE_TOOLS_OF_A_KIND = {
@@ -11513,7 +11515,8 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
         (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     )
     own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
-    downloads = set(pins.load_record(ROOT))
+    # Mermaid is the download of the hooks of the websites, which its own rule moves.
+    downloads = set(pins.load_record(ROOT)) - {"mermaid"}
     enabled, tasks = True, None
     for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
         if downloads & set(rule.get("matchDepNames", [])):
@@ -11546,6 +11549,16 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
         ],
         "executionMode": "branch",
     }
+    # The same for Mermaid, which the hooks of every website check by its sha256 in
+    # the pins of the websites, and which only the blueprint moves.
+    (mermaid,) = [
+        rule for rule in own["packageRules"] if rule.get("matchDepNames") == ["mermaid"]
+    ]
+    assert mermaid["postUpgradeTasks"] == {
+        "commands": ["python3 pins.py"],
+        "fileFilters": [pins.RECORD, ".github/mkdocs-blueprint-pins.toml"],
+        "executionMode": "branch",
+    }
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
@@ -11563,7 +11576,9 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
     ] == [r"^python3 pins\.py$"]
     assert "allowShellExecutorForPostUpgradeCommands" not in bot
     for pin in pins.find_pins(ROOT):
-        assert any(fnmatch.fnmatchcase(pin.path, name) for name in tasks["fileFilters"])
+        rule = mermaid if pin.dep == "mermaid" else {"postUpgradeTasks": tasks}
+        filters = rule["postUpgradeTasks"]["fileFilters"]
+        assert any(fnmatch.fnmatchcase(pin.path, name) for name in filters)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -22812,6 +22827,8 @@ def test_every_website_is_checked_for_its_accessibility(
         ".github/a11y/package.json",
         ".github/a11y/package-lock.json",
         ".github/mkdocs-blueprint.css",
+        ".github/mkdocs-blueprint-fonts.css",
+        ".github/mkdocs-blueprint-pins.toml",
         ".github/mkdocs-blueprint.js",
     ):
         assert (root / name).read_bytes() == (ROOT / name).read_bytes(), name
@@ -27723,7 +27740,11 @@ def test_every_website_shows_the_fragments_under_unreleased(
     # The hook and blueprint.py as the project has them, beside a changelog with a
     # fragment that waits for the release.
     project = projects[kind]
-    for name in (".github/mkdocs_blueprint.py", ".github/blueprint/changelog.py"):
+    for name in (
+        ".github/mkdocs_blueprint.py",
+        ".github/mkdocs-blueprint-pins.toml",
+        ".github/blueprint/changelog.py",
+    ):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(project / name, tmp_path / name)
     shutil.copy(project / "CHANGELOG.md", tmp_path / "CHANGELOG.md")

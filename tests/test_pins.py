@@ -4,16 +4,31 @@ release, against repositories of a few files and a download that stays offline."
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import re
 import urllib.error
 from email.message import Message
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 
 import pins
+
+ROOT_HOOKS = Path(__file__).parents[1] / ".github/mkdocs_blueprint.py"
+
+
+def hooks() -> ModuleType:
+    """The hooks of the websites, which download the Mermaid that they pin."""
+    spec = importlib.util.spec_from_file_location("mkdocs_blueprint", ROOT_HOOKS)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 ROOT = Path(__file__).parents[1]
 OLD = "a" * 64
@@ -86,12 +101,14 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
             "anchore/syft",
             "lycheeverse/lychee",
             "gitleaks/gitleaks",
+            "mermaid",
         }
     )
     # gitsign in sign-tag.sh and in verify-release.yml, krankerl in the release and in
     # the checks of a Nextcloud app, syft for the SBOMs of the release and the weekly
     # one of the repository, lychee in the script that checks the links of the
-    # documents and of the website, and gitleaks in the one of the secret scan.
+    # documents and of the website, gitleaks in the one of the secret scan, and
+    # Mermaid in the pins of the websites.
     assert sorted((pin.dep, pin.path) for pin in found) == [
         ("ChristophWurst/krankerl", ".github/workflows/build-release.yml"),
         ("ChristophWurst/krankerl", ".github/workflows/ci-php.yml"),
@@ -100,6 +117,7 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
         ("gitleaks/gitleaks", ".github/gitleaks.sh"),
         ("infection/infection", ".github/workflows/mutation.yml"),
         ("lycheeverse/lychee", ".github/lychee.sh"),
+        ("mermaid", ".github/mkdocs-blueprint-pins.toml"),
         ("nextcloud/server", ".github/workflows/build-release.yml"),
         ("sigstore/gitsign", ".github/sign-tag.sh"),
         ("sigstore/gitsign", ".github/workflows/verify-release.yml"),
@@ -121,6 +139,11 @@ def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
     # name, with .github/download.sh or gh, and any other file from its address.
     record = pins.load_record(ROOT)
     for pin in pins.find_pins(ROOT):
+        if pin.path == ".github/mkdocs-blueprint-pins.toml":
+            # The hooks of the websites download it from the address of its version.
+            url = record[pin.dep].url.replace("{version}", pin.version)
+            assert url == hooks().MERMAID
+            continue
         text = (ROOT / pin.path).read_text(encoding="utf-8")
         plain = re.sub(r"\$\{(\w+)\}", r"$\1", text.replace("\\\n", " "))
         plain = re.sub(r" {2,}", " ", plain)
@@ -197,6 +220,23 @@ def test_a_file_whose_sha256_was_changed_by_hand_gets_that_of_the_record(
     ]
     # Without a download: the record holds the sha256 of the version.
     assert fetch.urls == []
+    assert pins.check(root) == []
+
+
+def test_a_pin_in_toml_gets_the_sha256_of_its_release(tmp_path: Path) -> None:
+    pinned = (
+        "[tool]\n"
+        "# renovate: datasource=npm depName=owner/tool\n"
+        'version = "1.1.0"\n'
+        f'sha256 = "{OLD}"\n'
+    )
+    root = repository(tmp_path)
+    (root / ".github/mkdocs-blueprint-pins.toml").write_bytes(pinned.encode())
+
+    pins.update(root, Fetches())
+
+    text = (root / ".github/mkdocs-blueprint-pins.toml").read_bytes().decode()
+    assert text == pinned.replace(OLD, NEW)
     assert pins.check(root) == []
 
 
