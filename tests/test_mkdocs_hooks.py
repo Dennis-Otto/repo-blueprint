@@ -2347,19 +2347,21 @@ def test_front_matter_that_mkdocs_cant_read_stops_the_build(
     assert shown == markdown
     assert [record.levelno for record in caplog.records] == [logging.WARNING]
     assert "reference/variables.md" in caplog.text
-    assert "decision 0159" in caplog.text
+    assert "decision 0160" in caplog.text
     assert "in quotes" in caplog.text
 
 
 @pytest.mark.parametrize(
     "markdown",
     [
-        "# Page\n\n---\n\nAfter a rule.\n\n---\n",
-        "---\n---\n# Page\n",
-        "",
+        pytest.param("# Page\n\n---\n\nAfter a rule.\n\n---\n", id="rules-below"),
+        # Two rules at the top, which neither MkDocs nor the hook takes as front
+        # matter: an empty body is no mapping, so MkDocs keeps them as rules.
+        pytest.param("---\n---\n# Page\n", id="two-rules-at-the-top"),
+        pytest.param("", id="empty"),
     ],
 )
-def test_a_page_whose_front_matter_mkdocs_read_builds_quietly(
+def test_a_page_that_starts_without_unread_front_matter_builds_quietly(
     markdown: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     module = hooks()

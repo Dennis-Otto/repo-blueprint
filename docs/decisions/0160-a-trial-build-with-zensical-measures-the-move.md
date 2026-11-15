@@ -23,12 +23,22 @@ python3 -m venv .venv-zensical
 | No page *Automation*, no `llms.txt`, no stylesheet and script of the blueprint, the pictures of the README with the paths of the repository | No MkDocs hook runs, as 0146 says: each of them is a hook of `.github/mkdocs_blueprint.py`. |
 | Its plugin `privacy` downloaded the scripts of its own bundle, such as Pyodide, Ace and Plyr, and warned that it couldn't download one of Google | The strict build of the check *docs* would fail on that warning alone, before the move takes the plugin. |
 
+## Options
+
+1. **Move now and drop what Zensical can't run,** the hooks and the German folders. For: the websites would be on the successor half a year early. Against: every website would lose the page *Automation*, `llms.txt`, its stylesheet and script and the pictures of its README, and every German page would link to English headings, for a gain that waits until 5 May 2027 anyway.
+2. **A job of Zensical in the CI that may fail,** beside the strict build of MkDocs. For: each release of Zensical would show its findings at once. Against: a check that may fail is a red mark nobody reads, it costs a runner on every pull request of every repository, and the trial build of a look at Zensical shows the same.
+3. **Quote the one description by hand in `reference.py`.** For: the smallest change. Against: the next value with a colon and a space breaks the page again, and nothing stops a page of another website from losing its front matter the same way.
+4. **Fix the front matter for both generators, warn about every page whose front matter MkDocs couldn't read, keep the move where 0146 put it and repeat the trial build at each look at Zensical.** For: the bug of today's website is gone for good, the warning stops it in every repository, and the move keeps its dates. Against: the move itself is not done yet.
+
+Option 4, since it fixes what is wrong today and loses nothing that the websites promise.
+
 ## Decision
 
 - **No website moves yet.** Without the hooks and the languages, a website built with Zensical would lose most of what [the page of the website](../features/website.md) promises, and every German page would link to English headings; decision 0146 stays as it is, with its dates.
 - **Front matter reads alike in both:** the hooks of every website warn about a page whose front matter MkDocs couldn't read as a mapping of YAML, which stops the strict build of the check *docs*, and `reference.py` writes the front matter of its pages with PyYAML, which puts a value in quotes where plain YAML would read it otherwise.
+- **The first step of 0146 is open work that waits for nothing:** the hooks that read the files before the build or `site/` after it, the page *Automation*, the sitemaps and `llms.txt`, become steps of `blueprint.py`. The trial build showed exactly these as missing in Zensical, so they come first. They are a change of every website and of the template of its own size, with tests of each, so they follow in a pull request of their own under [#872](https://github.com/Dennis-Otto/repo-blueprint/issues/872), well before the look of 1 February 2027.
 - **Each look at Zensical starts with this trial build,** by 1 February 2027 at the latest, as 0146 asks: a finding that is wrong for MkDocs as well, as the front matter was, is fixed at once, and the others are written down here, against the table of 0146.
 
 ## Consequences
 
-The page of the variables shows its title first again, with its own description, and no page of a website can lose its front matter that way unnoticed. The move to Zensical stays where 0146 put it: it waits for the module API of Zensical, the place of the hooks, and for a website in several languages. The trial build needs no change of a website, so it can be repeated with every release of Zensical.
+The page of the variables shows its title first again, with its own description, and no page of a website can lose its front matter that way unnoticed. The move to Zensical stays where 0146 put it: the steps of `blueprint.py` for the hooks that need no generator can be built now, and the rest waits for the module API of Zensical, the place of the hooks, and for a website in several languages. The trial build needs no change of a website, so it can be repeated with every release of Zensical.

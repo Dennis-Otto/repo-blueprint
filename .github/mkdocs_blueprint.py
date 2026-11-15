@@ -160,7 +160,7 @@ NOINDEX = '<meta name="robots" content="noindex, follow">'
 # The front matter of a page as MkDocs looks for it, which it takes away from the
 # Markdown once it reads it as a mapping of YAML. When it can't, MkDocs keeps it as
 # Markdown without a word: its last line of dashes makes the rest a heading of the
-# page. Zensical refuses to build such a page (decision 0159).
+# page. Zensical refuses to build such a page (decision 0160).
 FRONT_MATTER = re.compile(r"\A-{3}[ \t]*\n.*?\n(?:\.{3}|-{3})[ \t]*\n", re.S)
 # The links in the head of a page, such as those to its versions in other languages.
 HEAD_LINK = re.compile(rf"<link\b{TAG}>", re.I)
@@ -780,7 +780,7 @@ def on_page_markdown(markdown: str, page: Any, config: Any, files: Any) -> str:
         log.warning(
             "The front matter of %s is no mapping of YAML, so MkDocs shows it as text "
             "at the top of the page and Zensical doesn't build the page at all "
-            "(decision 0159): put a value with a colon and a space, or with # after "
+            "(decision 0160): put a value with a colon and a space, or with # after "
             "a space, in quotes, such as description: 'Why: the reason'.",
             page.file.src_uri,
         )

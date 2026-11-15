@@ -22,7 +22,7 @@ Weitere Sprachen funktionieren genauso, etwa `/de/`, `/nl/` und `/fr/`, sobald `
 
 Eine Seite, deren Front Matter kein Mapping von YAML ist, hält den Build an, etwa eine Beschreibung mit Doppelpunkt und Leerzeichen ohne Anführungszeichen: MkDocs zeigte sie sonst als Text oben auf der Seite, und Zensical lehnt die Seite ab.
 
-**Womit:** MkDocs 1.6 mit dem Material-Theme, das Renovate unter MkDocs 2 hält, bis jede Website zu Zensical wechselt, bevor die Wartung von Material am 5. Mai 2027 endet, wie [Entscheidung 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) es plant und ein Probebau mit Zensical ihn misst ([Entscheidung 0159](../decisions/0159-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
+**Womit:** MkDocs 1.6 mit dem Material-Theme, das Renovate unter MkDocs 2 hält, bis jede Website zu Zensical wechselt, bevor die Wartung von Material am 5. Mai 2027 endet, wie [Entscheidung 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) es plant und ein Probebau mit Zensical ihn misst ([Entscheidung 0160](../decisions/0160-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
 
 ## Diagramme, die sich selbst reparieren
 

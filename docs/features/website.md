@@ -22,7 +22,7 @@ More languages work the same way, such as `/de/`, `/nl/` and `/fr/` once `mkdocs
 
 A page whose front matter isn't a mapping of YAML stops the build, such as a description with a colon and a space and no quotes: MkDocs would show it as text at the top of the page, and Zensical refuses the page.
 
-**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it and a trial build with Zensical measures it ([decision 0159](../decisions/0159-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
+**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it and a trial build with Zensical measures it ([decision 0160](../decisions/0160-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
 
 ## Diagrams that fix themselves
 
