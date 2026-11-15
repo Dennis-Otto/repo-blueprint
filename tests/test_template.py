@@ -11582,6 +11582,66 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_moves_the_markdownlint_of_the_action_and_of_the_image_together(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The check lint runs the markdownlint-cli2 of its action, scripts/markdownlint.sh
+    # that of its image, and Renovate would update each in a pull request of its own,
+    # a new major version of the action apart from the image of its markdownlint-cli2:
+    # one group, also across major versions, after the groups of the actions and of the
+    # images, keeps them in one branch (#932).
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    (action,) = pins.load_bundles(ROOT)
+    image = pins.load_bundles(ROOT)[action].image
+    grouped = [
+        index
+        for index, rule in enumerate(rules)
+        if action in rule.get("matchDepNames", [])
+    ]
+    assert rules[grouped[0]] == {
+        "matchDepNames": [action, image],
+        "groupName": "markdownlint-cli2",
+        "separateMajorMinor": False,
+    }
+    for group in ("the actions", "the actions to a new major version", "the images"):
+        (index,) = [i for i, rule in enumerate(rules) if rule.get("groupName") == group]
+        assert index < grouped[0], group
+    # No later rule names another group for either of them.
+    assert not [
+        rule
+        for rule in rules[grouped[0] + 1 :]
+        if {action, image} & set(rule.get("matchDepNames", []))
+        and ("groupName" in rule or "group" in rule)
+    ]
+    # The names are those of the pins that Renovate finds.
+    lint = (root / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    assert f"uses: {action}@" in lint
+    script = (root / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    assert f'image="{image}:v' in script
+    tasks = [rule for rule in rules[grouped[0] + 1 :] if "postUpgradeTasks" in rule]
+    if kind != "blueprint":
+        assert not [rule for rule in tasks if action in rule.get("matchDepNames", [])]
+        return
+    # In the blueprint, pins.py reads the version that the action runs at its new
+    # commit, and Renovate commits the record. The rule names the image too: Renovate
+    # takes the tasks of a branch from its first update, whichever of the two it is.
+    (task,) = [rule for rule in tasks if action in rule.get("matchDepNames", [])]
+    assert task == {
+        "matchDepNames": [action, image],
+        "postUpgradeTasks": {
+            "commands": ["python3 pins.py"],
+            "fileFilters": [pins.RECORD],
+            "executionMode": "branch",
+        },
+    }
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
 def test_renovate_leaves_the_issue_assistant_to_the_sync_bot(
     projects: dict[str, Path], kind: str
 ) -> None:
