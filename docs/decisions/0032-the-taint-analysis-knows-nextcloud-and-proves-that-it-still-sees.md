@@ -24,7 +24,7 @@ On paperless-sync and paperless-unified-search, the analysis that knows Nextclou
 Option 3. `.github/psalm/NextcloudTaintPlugin.php`, which `psalm.xml` loads, adds to what `nextcloud/ocp` marks itself:
 
 - **Sources:** every parameter of a public method of a controller, the term and the filters of a search, and the answer of another server, its body and its headers, which the app doesn't control.
-- **Sinks:** the paths of the files and folders of a user and of the data of the app, the address of every request of `IClient`, and the address of a `RedirectResponse`, an open redirect.
+- **Sinks:** the paths of the files and folders of a user, of the storage below them (`IStorage`, which `Node::getStorage()` returns and which leads past the folder), and of the data of the app, the address of every request of `IClient`, and the address of a `RedirectResponse`, an open redirect.
 
 The canary, a controller in `.github/psalm/canary/`, lets the input of a request reach each kind of sink, and marks each line where the analysis has to find a path with `// expect:` and the issue. The step *Psalm taint canary* of `scripts/check.sh` analyses it with the plugin and the same `nextcloud/ocp`, while the types are checked on another processor, and fails unless the analysis finds every path that the canary expects and no other, such as the one that a function of the canary escapes. The CI uploads the paths of the analysis of the app to code scanning, with each line that they take, from a job of its own that runs no code of the app.
 
