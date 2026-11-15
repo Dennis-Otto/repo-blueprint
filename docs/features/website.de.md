@@ -25,11 +25,30 @@ Eine Seite, deren Front Matter kein Mapping von YAML ist, hält den Build an, et
 **Schritte, die den Generator überdauern:** Die Seite *Automatisierung*, die Sitemaps und `llms.txt` sind Schritte von `blueprint.py`, nicht von MkDocs, damit der Wechsel zu einem anderen Generator sie behält ([Entscheidung 0165](../decisions/0165-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). Die Hooks gehen sie bei jedem Build, und ein Build mit einem anderen Generator geht sie davor und danach:
 
 ```sh
-python3 blueprint.py website automation build --site-name "Mein Projekt" --repository https://github.com/owner/name --language en --language de
-python3 blueprint.py website finish site --site-url https://owner.github.io/name/ --menu menu.json
+python3 .github/blueprint.py website automation build --site-name "Mein Projekt" --repository https://github.com/owner/name --language en --language de
+python3 .github/blueprint.py website finish site --site-url https://owner.github.io/name/ --menu menu.json
 ```
 
-Der erste schreibt die Seite jeder Sprache und die Bilder ihrer Diagramme nach `build`, eine Kopie von `docs/`, die der Generator baut, nie nach `docs/` selbst, und nichts, wo das Projekt eine eigene `docs/automation.md` hat; der zweite nimmt jede Seite, deren Head `noindex` sagt, aus beiden Sitemaps, kopiert die Sitemap einer Website in mehreren Sprachen in jeden Ordner von Seiten und schreibt `llms.txt` aus dem Menü jeder Sprache in `menu.json`, sofern die Website keine hat.
+Der erste schreibt die Seite jeder Sprache und die Bilder ihrer Diagramme nach `build`, eine Kopie von `docs/`, die der Generator baut, nie nach `docs/` selbst, und nichts, wo das Projekt eine eigene `docs/automation.md` hat; der zweite nimmt jede Seite, deren Head `noindex` sagt, aus beiden Sitemaps, kopiert die Sitemap einer Website in mehreren Sprachen in jeden Ordner von Seiten und schreibt `llms.txt` aus dem Menü jeder Sprache in `menu.json`, sofern die Website keine hat. Das Menü nennt die Standardsprache und für jede Sprache den Namen der Website, ihre `summary`, das `label` einer weiteren Sprache und ihre `items`: eine Seite mit `title`, `url`, `address` und `description`, einen Abschnitt mit `title` und `children`:
+
+```json
+{
+  "default": "en",
+  "languages": {
+    "en": {
+      "name": "My project",
+      "summary": "What it does",
+      "items": [
+        {"title": "Home", "url": "index.html", "address": "https://owner.github.io/name/", "description": "Where it starts"},
+        {"title": "Guides", "children": [
+          {"title": "Install", "url": "install.html", "address": "https://owner.github.io/name/install.html"}
+        ]}
+      ]
+    },
+    "de": {"name": "Mein Projekt", "label": "Deutsch", "items": []}
+  }
+}
+```
 
 **Womit:** MkDocs 1.6 mit dem Material-Theme, das Renovate unter MkDocs 2 hält, bis jede Website zu Zensical wechselt, bevor die Wartung von Material am 5. Mai 2027 endet, wie [Entscheidung 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) es plant und ein Probebau mit Zensical ihn misst ([Entscheidung 0160](../decisions/0160-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `blueprint/website.py`, `.github/a11y/`.
 

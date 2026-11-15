@@ -383,6 +383,57 @@ def test_a_menu_that_is_no_menu_fails_the_step(
     )
 
 
+def test_a_menu_that_is_missing_fails_the_step_before_the_site_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = site(tmp_path, languages=False)
+    before = (folder / "sitemap.xml").read_text(encoding="utf-8")
+
+    code = run(tmp_path, "finish", "site", "--site-url", ADDRESS, "--menu", "gone.json")
+
+    assert code == 2
+    assert capsys.readouterr().err.startswith(
+        "blueprint.py: gone.json holds no menus of the website, as read_menus of "
+        "blueprint/website.py reads them (FileNotFoundError: "
+    )
+    assert (folder / "sitemap.xml").read_text(encoding="utf-8") == before
+
+
+def test_a_page_that_is_not_utf8_is_no_fault_of_the_menu(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = site(tmp_path, languages=False)
+    (folder / "latin.html").write_bytes(b"<head>\xe4</head>")
+    menu(tmp_path / "menu.json")
+
+    code = run(tmp_path, "finish", "site", "--site-url", ADDRESS, "--menu", "menu.json")
+
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "blueprint.py: 'utf-8' codec can't decode byte 0xe4 in position 6: "
+        "invalid continuation byte\n"
+    )
+
+
+def test_a_page_whose_name_is_percent_encoded_in_the_sitemap_leaves_it(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "site"
+    folder.mkdir()
+    (folder / "über uns.html").write_text(f"<head>{NOINDEX}</head>", encoding="utf-8")
+    (folder / "sitemap.xml").write_text(
+        f'<urlset xmlns="x"><url><loc>{ADDRESS}%C3%BCber%20uns.html</loc></url>'
+        f"<url><loc>{ADDRESS}</loc></url>\n</urlset>\n",
+        encoding="utf-8",
+    )
+
+    assert run(tmp_path, "finish", "site", "--site-url", ADDRESS) == 0
+
+    assert (folder / "sitemap.xml").read_text(encoding="utf-8") == (
+        f'<urlset xmlns="x"><url><loc>{ADDRESS}</loc></url>\n</urlset>\n'
+    )
+
+
 def test_the_menus_of_a_website_read_from_json(tmp_path: Path) -> None:
     menus, default, further = website.read_menus(menu(tmp_path / "menu.json"))
 

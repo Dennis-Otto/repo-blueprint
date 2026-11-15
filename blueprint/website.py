@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 # ---------------------------------------------------------- the page of the automation
 
@@ -913,13 +913,15 @@ def unlist(path: Path, addresses: set[str]) -> None:
     if not path.is_file():
         return
 
+    def listed(address: str) -> bool:
+        # A generator writes an address with a space or a letter beyond ASCII
+        # percent-encoded, and noindexed reads it from the name of the file.
+        address = html.unescape(address)
+        return address in addresses or unquote(address) in addresses
+
     def keep(text: str) -> str:
-        text = SITEMAP_ENTRY.sub(
-            lambda m: "" if html.unescape(m["loc"]) in addresses else m[0], text
-        )
-        return SITEMAP_LINK.sub(
-            lambda m: "" if html.unescape(m["href"]) in addresses else m[0], text
-        )
+        text = SITEMAP_ENTRY.sub(lambda m: "" if listed(m["loc"]) else m[0], text)
+        return SITEMAP_LINK.sub(lambda m: "" if listed(m["href"]) else m[0], text)
 
     if path.suffix != ".gz":
         text = path.read_text(encoding="utf-8")
@@ -967,7 +969,12 @@ def several_languages(site: Path) -> bool:
     return sitemap.is_file() and "hreflang=" in sitemap.read_text(encoding="utf-8")
 
 
-def read_menus(path: Path) -> tuple[dict[str, Menu], str, dict[str, str]]:
+# The menus of a website by their languages, its default language, and the names
+# of its further languages, as read_menus reads them.
+Menus = tuple[dict[str, Menu], str, dict[str, str]]
+
+
+def read_menus(path: Path) -> Menus:
     """The menus of the website in the file path, by their languages, its default
     language, and the names of its further languages, from JSON such as
 
@@ -1007,12 +1014,12 @@ def items_of(items: list[dict[str, Any]]) -> tuple[Item, ...]:
     )
 
 
-def finish(site: Path, base: str, menu: Path | None = None) -> list[str]:
+def finish(site: Path, base: str, menus: Menus | None = None) -> list[str]:
     """Finish the website in site, whose address is base, after its build: take the
     pages that no search engine lists out of its sitemaps, copy the sitemap of a
     website in several languages into every folder of its pages, and write llms.txt
-    from the menus in the file menu, unless the website has one. What it did, one
-    step on each line."""
+    from menus, as read_menus reads them, unless the website has one. What it did,
+    one step on each line."""
     unlisted = noindexed(site, base)
     unlist_pages(site, unlisted)
     done = [
@@ -1022,12 +1029,12 @@ def finish(site: Path, base: str, menu: Path | None = None) -> list[str]:
         copy_sitemap(site)
         done.append("the sitemap of a website in several languages is in every folder")
     target = site / LLMS_TXT
-    if menu is not None and not target.exists():
-        menus, default, further = read_menus(menu)
+    if menus is not None and not target.exists():
+        languages, default, further = menus
         target.write_text(
-            map_of_website(menus, default, further, unlisted),
+            map_of_website(languages, default, further, unlisted),
             encoding="utf-8",
             newline="\n",
         )
-        done.append(f"{LLMS_TXT} maps the menu of {', '.join(menus)}")
+        done.append(f"{LLMS_TXT} maps the menu of {', '.join(languages)}")
     return done

@@ -1497,12 +1497,10 @@ def website_command(arguments: argparse.Namespace, root: Path) -> int:
     before the build, or the sitemaps and llms.txt after it (decision 0165)."""
     if arguments.action == "finish":
         try:
-            done = website.finish(
-                root / arguments.site,
-                arguments.site_url,
-                root / arguments.menu if arguments.menu else None,
+            menus = (
+                website.read_menus(root / arguments.menu) if arguments.menu else None
             )
-        except (ValueError, KeyError, TypeError, AttributeError) as error:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             print(
                 f"blueprint.py: {arguments.menu} holds no menus of the website, as "
                 f"read_menus of blueprint/website.py reads them "
@@ -1510,6 +1508,7 @@ def website_command(arguments: argparse.Namespace, root: Path) -> int:
                 file=sys.stderr,
             )
             return 2
+        done = website.finish(root / arguments.site, arguments.site_url, menus)
         for step in done:
             print(f"{step}.")
         return 0

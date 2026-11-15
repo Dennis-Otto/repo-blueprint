@@ -32,6 +32,8 @@ on:
       - .github/mkdocs-blueprint.css
       - .github/mkdocs-blueprint.js
       - .github/mkdocs_project.py
+      # The hooks take the page Automation, the sitemaps and llms.txt from this code.
+      - blueprint/website.py
       - .github/a11y/**
       - docs/**
       # The pages of the documentation include them.
