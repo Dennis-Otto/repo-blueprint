@@ -11628,11 +11628,11 @@ def test_renovate_moves_the_markdownlint_of_the_action_and_of_the_image_together
         assert not [rule for rule in tasks if action in rule.get("matchDepNames", [])]
         return
     # In the blueprint, pins.py reads the version that the action runs at its new
-    # commit, and Renovate commits the record.
-    (task,) = [rule for rule in tasks if rule.get("matchDepNames") == [action]]
+    # commit, and Renovate commits the record. The rule names the image too: Renovate
+    # takes the tasks of a branch from its first update, whichever of the two it is.
+    (task,) = [rule for rule in tasks if action in rule.get("matchDepNames", [])]
     assert task == {
-        "matchManagers": ["github-actions"],
-        "matchDepNames": [action],
+        "matchDepNames": [action, image],
         "postUpgradeTasks": {
             "commands": ["python3 pins.py"],
             "fileFilters": [pins.RECORD],
