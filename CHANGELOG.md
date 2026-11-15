@@ -7,6 +7,27 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.19.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.3...v1.19.0) (2026-11-15)
+
+
+### Features
+
+* **adopt:** an existing repository adopts the blueprint by command ([#918](https://github.com/Dennis-Otto/repo-blueprint/issues/918)) ([ca16319](https://github.com/Dennis-Otto/repo-blueprint/commit/ca16319e4aa56ca0eb0e9d3cc170fcac5afe3ed9))
+* **issue-assistant:** a project adds the hosts and files of its assistant in a file of its own ([#927](https://github.com/Dennis-Otto/repo-blueprint/issues/927)) ([89b6bfe](https://github.com/Dennis-Otto/repo-blueprint/commit/89b6bfe81ca51a3342abe2c4dcaf8a09e80cf9c8))
+* **settings:** a team requires reviews of main and the bots still merge ([#916](https://github.com/Dennis-Otto/repo-blueprint/issues/916)) ([30ca8ec](https://github.com/Dennis-Otto/repo-blueprint/commit/30ca8ec62998ae1758ea7e98db08079c0ad507e8))
+
+
+### Bug fixes
+
+* **advisories:** close an alert of an accepted version within a day ([#919](https://github.com/Dennis-Otto/repo-blueprint/issues/919)) ([9e265ef](https://github.com/Dennis-Otto/repo-blueprint/commit/9e265ef4a1542e66f46bb55f4de53bb6d2336d4b))
+* **deps:** update the issue assistant to v1.12.0 ([#924](https://github.com/Dennis-Otto/repo-blueprint/issues/924)) ([de76271](https://github.com/Dennis-Otto/repo-blueprint/commit/de76271e9198b776d7b7d1288f877334217e7fef))
+* **diagrams:** the check promises the diagram bot only where it commits, and no time ([#928](https://github.com/Dennis-Otto/repo-blueprint/issues/928)) ([c96a410](https://github.com/Dennis-Otto/repo-blueprint/commit/c96a410e88f66947d1799d11f39c43e1b0a51f38))
+* **docs:** front matter that MkDocs can't read stops the build ([#920](https://github.com/Dennis-Otto/repo-blueprint/issues/920)) ([9f77d6b](https://github.com/Dennis-Otto/repo-blueprint/commit/9f77d6b849bff4fb98cc30c86895d77eae38356e))
+* **fixes:** each autofix names the paths it may write, and the fix bot keeps only those ([#922](https://github.com/Dennis-Otto/repo-blueprint/issues/922)) ([27834fa](https://github.com/Dennis-Otto/repo-blueprint/commit/27834fab200b9aa2292a4b31f1d1d62434444eb3))
+* **php:** composer audit sits out an outage of Packagist of a minute or two ([#923](https://github.com/Dennis-Otto/repo-blueprint/issues/923)) ([c3e92ae](https://github.com/Dennis-Otto/repo-blueprint/commit/c3e92aefeba2c2d353600a04781dcc7bd372860a))
+* **php:** the taint analysis follows paths into the storage of a folder ([#925](https://github.com/Dennis-Otto/repo-blueprint/issues/925)) ([e58adbf](https://github.com/Dennis-Otto/repo-blueprint/commit/e58adbfdc1aecf6829478bb2f490b2d335fc5787))
+* the bots after the checks run only the run of the head of a pull request again ([#921](https://github.com/Dennis-Otto/repo-blueprint/issues/921)) ([be36f06](https://github.com/Dennis-Otto/repo-blueprint/commit/be36f06eff57a868b4bf7f51f2fd32ee93614b31))
+
 ## [1.18.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.2...v1.18.3) (2026-11-14)
 
 ### Bug fixes
