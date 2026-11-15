@@ -1,5 +1,5 @@
 ---
-description: Every variable and secret that the workflows of Repo Blueprint read or that its settings as code set: what it does, who sets it and which workflows read it.
+description: 'Every variable and secret that the workflows of Repo Blueprint read or that its settings as code set: what it does, who sets it and which workflows read it.'
 ---
 
 # Variables and secrets

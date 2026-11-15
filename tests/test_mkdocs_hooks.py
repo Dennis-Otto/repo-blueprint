@@ -2326,6 +2326,52 @@ def test_the_search_and_search_engines_leave_out_copies_and_templates() -> None:
     assert module.on_page_markdown.mkdocs_priority == -10
 
 
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "---\ndescription: Why: the reason\n---\n\n# Page\n",
+        "---  \nJust a sentence.\n...\n# Page\n",
+    ],
+)
+def test_front_matter_that_mkdocs_cant_read_stops_the_build(
+    markdown: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = hooks()
+    page = page_of("reference/variables.html")
+
+    # MkDocs keeps front matter that is no mapping of YAML in the Markdown of the
+    # page, where its dashes make a heading of it, and Zensical refuses the page.
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        shown = module.on_page_markdown(markdown, page, SimpleNamespace(plugins={}), [])
+
+    assert shown == markdown
+    assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    assert "reference/variables.md" in caplog.text
+    assert "decision 0159" in caplog.text
+    assert "in quotes" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "# Page\n\n---\n\nAfter a rule.\n\n---\n",
+        "---\n---\n# Page\n",
+        "",
+    ],
+)
+def test_a_page_whose_front_matter_mkdocs_read_builds_quietly(
+    markdown: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = hooks()
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_page_markdown(
+            markdown, page_of("guide.html"), SimpleNamespace(plugins={}), []
+        )
+
+    assert caplog.records == []
+
+
 def test_the_sitemap_dates_a_page_by_its_last_change() -> None:
     module = hooks()
     changed = page_of("guide.html")
