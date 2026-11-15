@@ -261,6 +261,20 @@ def test_a_step_is_its_own_title(tmp_path: Path) -> None:
     assert Catalog.load(tmp_path).steps["Ruff"].title == "Ruff"
 
 
+def test_an_explanation_names_the_paths_that_its_fixes_write(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        ".github/checks.toml",
+        f"[check.lint]{ENTRY}writes = ['**/*.md', 'docs/?.txt']\n[check.docs]{ENTRY}",
+    )
+
+    catalog = Catalog.load(tmp_path)
+
+    assert catalog.checks["lint"].writes == ("**/*.md", "docs/?.txt")
+    # One that names none leaves it to the default of the fix bot.
+    assert catalog.checks["docs"].writes is None
+
+
 @pytest.mark.parametrize(
     ("text", "error"),
     [
@@ -276,6 +290,13 @@ def test_a_step_is_its_own_title(tmp_path: Path) -> None:
         (f"[check.lint]{ENTRY}commands = 'make'\n", "commands that are no list"),
         (f"[check.lint]{ENTRY}commands = [1]\n", "commands that are no list"),
         (f"[check.lint]{ENTRY}docs = 1\n", "docs that are no link"),
+        (f"[check.lint]{ENTRY}writes = '**'\n", "a writes that is no list of globs"),
+        (f"[check.lint]{ENTRY}writes = []\n", "a writes that is no list of globs"),
+        (f"[check.lint]{ENTRY}writes = [1]\n", "a writes that is no list of globs"),
+        *(
+            (f"[check.lint]{ENTRY}writes = ['{glob}']\n", "a writes that is no list")
+            for glob in ("/etc/x", "docs/", "../x", "docs/./x", "a\\b", "a//b", "")
+        ),
         ("[check.lint\n", ".github/checks.toml: "),
     ],
 )
