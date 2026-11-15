@@ -17,6 +17,12 @@
 # command can fix" and "Keep the fixes for the fix bot" of ci.yml at the end of the job
 # of its check, an artifact fixes-<name> of its own, which in a matrix job also holds
 # strategy.job-index, since each leg needs its own, and fetch-depth: 2 in its checkout.
+# A check whose commands fix files names in writes the globs of the paths that they
+# write, from the root of the repository, with ** for any folders, * for any part of a
+# name and ? for one character, such as writes = ["**/*.ts"]: the bot takes a fix of
+# its artifact fixes-<name> only at such a path, or fixes-<name>-<index> of a check
+# <name> (*). Without writes, its fixes still reach a pull request whose author reads
+# the commit, but not one of a bot, one whose auto-merge is on, or that of main.
 # A check that only a person can fix says why:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
@@ -36,6 +42,7 @@
 # why = """..."""
 # fix = """..."""
 # autofix = ["npm run lint -- --fix"]
+# writes = ["**/*.ts"]
 
 # A part that a workflow of this project adds to the report of the PR coach, such as
 # the size of a module or the result of visual tests, in place of a comment of its own.

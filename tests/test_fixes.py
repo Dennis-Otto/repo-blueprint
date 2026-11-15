@@ -28,6 +28,7 @@ from workflow_steps import Answer, condition_of, step_in
 
 import blueprint.fixes
 import pins
+import reference
 from blueprint import cli
 from blueprint.changelog import Fragment, fragment_problems
 from blueprint.coach import BOT, DRAFT_HEADLINE, FIX_HEADLINE, Catalog
@@ -37,6 +38,7 @@ from blueprint.fixes import (
     MADE_BY,
     MAIN_EVENTS,
     OPT_OUT,
+    READ_FIRST,
     RIGHTS_FOLDERS,
     RIGHTS_SCRIPTS,
     SUGGESTED,
@@ -46,6 +48,7 @@ from blueprint.fixes import (
     Pushed,
     Suggestion,
     Watched,
+    Writes,
     allowed,
     artifacts_of,
     blob_sha,
@@ -86,10 +89,14 @@ from blueprint.fixes import (
     text_fixed,
     watched,
     why_unread,
+    writes_in,
+    writes_of,
+    written_by,
 )
 from blueprint.github import Api, GitHubError
 from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE
 from blueprint.update import BRANCH as UPDATE_BRANCH
+from blueprint.versions import PLACES
 
 ROOT = Path(__file__).parents[1]
 REPO = "o/r"
@@ -2156,6 +2163,24 @@ def test_the_author_reads_every_fix_of_a_branch_of_a_person() -> None:
     assert "Left to you" not in said
     (request,) = github.graphql
     assert len(request["variables"]["input"]["fileChanges"]["additions"]) == 3
+    # The bot decided as it planned; a later auto-merge, or a merge right after green,
+    # would take these files without another look, so the commit asks for one.
+    named = "`.github/blueprint.py`, `blueprint/cli.py`"
+    assert f"{READ_FIRST} {named}\n" in said
+    body = request["variables"]["input"]["message"]["body"]
+    assert f"{READ_FIRST} .github/blueprint.py, blueprint/cli.py\n" in body
+
+
+def test_a_commit_of_nothing_that_runs_with_rights_asks_for_no_look() -> None:
+    github = FakeGitHub()
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, FIXES, "app", "u", ""
+    )
+
+    (request,) = github.graphql
+    assert READ_FIRST not in said
+    assert READ_FIRST not in request["variables"]["input"]["message"]["body"]
 
 
 def test_what_nobody_reads_keeps_every_other_reason() -> None:
@@ -2210,6 +2235,218 @@ def test_a_migration_moves_only_data_that_the_bot_may_commit() -> None:
         assert not path.startswith((".github/workflows/", ".github/actions/"))
         assert path.endswith(".toml")
         assert path.split("/")[0] not in RIGHTS_FOLDERS
+
+
+# ---------------------------------------------------------------- what each check writes
+
+TEXTS = 'title = "T"\nproblem = "P"\nwhy = "W"\nfix = "F"\n'
+
+
+def with_catalog(root: Path, *steps: str) -> Path:
+    """A repository whose linters name what markdownlint writes, whose end-to-end tests
+    name nothing, and whose scripts/check.sh runs Ruff, the tests and the steps."""
+    write(
+        root,
+        ".github/checks.toml",
+        f"[check.lint]\n{TEXTS}autofix = 'Each linter.'\nwrites = ['**/*.md']\n"
+        f'[check."check (*)"]\n{TEXTS}autofix = "Its steps."\n'
+        f'[check."e2e (*)"]\n{TEXTS}autofix = ["npm run fix"]\n'
+        f"[step.Ruff]\n{TEXTS}autofix = ['ruff format .']\nwrites = ['**/*.py']\n"
+        f"[step.Tests]\n{TEXTS}autofix = 'A person.'\n"
+        f"[step.Mystery]\n{TEXTS}autofix = ['make fix']\n",
+    )
+    lines = [f'step "{name}"' for name in ("Ruff", "Tests", *steps)]
+    write(root, "scripts/check.sh", "\n".join(lines) + "\n")
+    return root
+
+
+@pytest.mark.parametrize(
+    ("glob", "path", "matches"),
+    [
+        ("**/*.md", "README.md", True),
+        ("**/*.md", "docs/features/checks.md", True),
+        ("**/*.md", "README.mdx", False),
+        ("*.md", "docs/index.md", False),
+        ("docs/*.md", "docs/a/b.md", False),
+        ("docs/?.txt", "docs/a.txt", True),
+        ("docs/?.txt", "docs/ab.txt", False),
+        ("**", "a/b/c.py", True),
+        ("tests/answers/*.yml", "tests/answers/x.yml", True),
+        # A dot is a dot, not any character.
+        ("a.md", "abmd", False),
+    ],
+)
+def test_a_glob_of_writes_matches_as_the_ignore_paths_of_renovate(
+    glob: str, path: str, matches: bool
+) -> None:
+    assert written_by(glob, path) is matches
+
+
+def test_an_artifact_writes_what_the_explanation_of_its_check_names(
+    tmp_path: Path,
+) -> None:
+    root = with_catalog(tmp_path)
+    catalog = Catalog.load(root)
+
+    assert writes_of(catalog, root, "fixes-lint") == Writes("lint", ("**/*.md",), False)
+    # The job of scripts/check.sh: each step that a command fixes names its own, and a
+    # step that only a person fixes writes nothing.
+    assert writes_of(catalog, root, "fixes-check") == Writes(
+        "check (*)", ("**/*.py",), False
+    )
+    # A leg of a matrix job is a kind of its check; this one names no paths.
+    assert writes_of(catalog, root, "fixes-e2e-1") == Writes("e2e (*)", (), True)
+    assert writes_of(catalog, root, "fixes-unknown") == Writes("unknown", (), True)
+    # A step of scripts/check.sh that names no paths leaves the others named.
+    with_catalog(root, "Mystery")
+    assert writes_of(catalog, root, "fixes-check") == Writes(
+        "check (*)", ("**/*.py",), True
+    )
+
+
+def test_the_bot_keeps_a_fix_only_where_its_check_allows_the_path(
+    tmp_path: Path,
+) -> None:
+    root = with_catalog(tmp_path / "main")
+    lint = kept(
+        tmp_path / "fixes/1-fixes-lint", {"README.md": "# A\n", "app.py": "x\n"}
+    )
+
+    fixes = load([lint], writes_in(root))
+
+    assert fixes.files == {"README.md": b"# A\n"}
+    assert fixes.left == {
+        "app.py": "no path that the fixes of the check `lint` write, by writes of its "
+        "explanation, so a person commits its fix"
+    }
+    assert fixes.unnamed == frozenset()
+    # Where another check allows the path, its fix counts; one whose check names no
+    # paths is unnamed.
+    e2e = kept(tmp_path / "fixes/2-fixes-e2e", {"app.py": "y\n", "web/a.ts": "z\n"})
+
+    both = load([lint, e2e], writes_in(root))
+
+    assert both.files == {"README.md": b"# A\n", "app.py": b"y\n", "web/a.ts": b"z\n"}
+    assert both.left == {}
+    assert both.unnamed == {"app.py", "web/a.ts"}
+
+
+def test_a_check_that_names_the_path_wins_over_a_first_one_that_names_none(
+    tmp_path: Path,
+) -> None:
+    root = with_catalog(tmp_path / "main")
+    e2e = kept(tmp_path / "fixes/1-fixes-e2e", {"README.md": "# E\n", "app.py": "e\n"})
+    lint = kept(
+        tmp_path / "fixes/2-fixes-lint", {"README.md": "# L\n", "app.py": "l\n"}
+    )
+    unknown = kept(tmp_path / "fixes/3-fixes-unknown", {"app.py": "u\n"})
+
+    fixes = load([e2e, lint, unknown], writes_in(root))
+
+    # Lint names README.md, so its copy counts as named; it doesn't name app.py,
+    # which keeps the first copy, unnamed, and no reason of Lint for it, nor does
+    # the third check, which names no paths either.
+    assert fixes.files == {"README.md": b"# L\n", "app.py": b"e\n"}
+    assert fixes.left == {}
+    assert fixes.unnamed == {"app.py"}
+
+
+def test_without_scripts_check_sh_the_fixes_of_the_check_are_unnamed(
+    tmp_path: Path,
+) -> None:
+    # A checkout of main without scripts/check.sh says nothing of what fixes-check
+    # writes: a person who reads the commit still gets its fixes.
+    root = with_catalog(tmp_path)
+    (root / "scripts/check.sh").unlink()
+
+    assert writes_in(root)("fixes-check") == Writes("check (*)")
+    fixes = load(
+        [kept(tmp_path / "fixes/1-fixes-check", {"a.md": "x\n"})], writes_in(root)
+    )
+    assert fixes.files == {"a.md": b"x\n"}
+    assert fixes.unnamed == {"a.md"}
+
+
+def test_only_a_person_reads_a_fix_whose_check_names_no_paths() -> None:
+    fixes = Fixes({"README.md": b"# A\n", "app.py": b"y\n"}, {}, frozenset({"app.py"}))
+
+    assert for_unread(fixes, "") is fixes
+    unread = for_unread(fixes, "bot")
+
+    assert unread.files == {"README.md": b"# A\n"}
+    assert unread.left == {
+        "app.py": "comes from a check whose explanation names no paths in writes, and "
+        "a bot opened the pull request, which merges without a person reading the "
+        "commit, so a person commits its fix"
+    }
+    assert unread.unnamed == {"app.py"}
+    # The checks of the commit keep what the bot read of each path.
+    files = {path: ("100644", "other") for path in fixes.files}
+    assert changeable(files, SHA, fixes).unnamed == {"app.py"}
+
+
+def test_a_fix_of_the_command_line_takes_the_catalog_of_main(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A fix of app.py that Lint kept is not what markdownlint writes, while that of
+    # the CI is what Ruff does.
+    folder = tmp_path / "fixes"
+    kept(folder / "1-fixes-lint", {"app.py": "x = 2\n"})
+    github = FakeGitHub()
+    arguments = ["--repo", REPO, "fix", "commit", "--sha", SHA, "--branch", "feature"]
+    arguments += ["--unread", "", "--app", "app", "--url", "u", "--folder", str(folder)]
+
+    assert cli.main(arguments, api=api_of(github), root=ROOT) == 0
+    said = capsys.readouterr().out
+    assert "Left to you:" in said
+    assert "`app.py`: no path that the fixes of the check `lint` write" in said
+    assert github.graphql == []
+
+    shutil.rmtree(folder)
+    kept(folder / "1-fixes-check", {"app.py": "x = 2\n"})
+    assert cli.main(arguments, api=api_of(github), root=ROOT) == 0
+    assert capsys.readouterr().out.startswith("The fix bot committed c0ffee0")
+
+
+def kept_artifacts() -> set[str]:
+    """The artifacts of fixes that the workflows of the blueprint keep."""
+    return {
+        found
+        for path in (ROOT / ".github/workflows").glob("*.yml")
+        for found in re.findall(
+            r"^\s+name: (fixes-[a-z-]+)$", path.read_text(encoding="utf-8"), re.M
+        )
+    }
+
+
+def test_every_fix_that_a_workflow_keeps_names_the_paths_that_it_writes() -> None:
+    # Where nobody reads the commit, a check that names no paths gets no fix in.
+    catalog = Catalog.load(ROOT)
+    assert kept_artifacts() == {
+        "fixes-check",
+        "fixes-docs",
+        "fixes-downstream",
+        "fixes-lint",
+    }
+    for artifact in kept_artifacts():
+        found = writes_of(catalog, ROOT, artifact)
+        assert found.globs, artifact
+        assert not found.unnamed, artifact
+    for name, entry in catalog.steps.items():
+        assert entry.writes or not entry.autofix, name
+
+
+def test_the_paths_of_the_fixers_are_those_that_they_write() -> None:
+    catalog = Catalog.load(ROOT)
+    assert catalog.steps["Files of the project"].writes == tuple(sorted(MOVABLE))
+    assert set(catalog.steps["Version"].writes or ()) == {
+        f"**/{name}" for name in PLACES
+    }
+    tests = catalog.steps["Tests, with every line and branch covered"].writes or ()
+    written = [path.as_posix() for path in reference.pages(ROOT)] + [pins.RECORD]
+    # The bot never writes a workflow, such as the order of the Rollout.
+    for path in filter(allowed, written):
+        assert any(written_by(glob, path) for glob in tests), path
 
 
 def test_too_many_files_for_one_answer_stop_the_bot() -> None:
@@ -2958,7 +3195,7 @@ def test_a_check_in_a_workflow_of_the_project_fixes_itself(
     place = (
         ["--pull", "42"]
         if fork
-        else ["--branch", "feature", "--app", "app", "--url", "u"]
+        else ["--branch", "feature", "--unread", "", "--app", "app", "--url", "u"]
     )
     code = cli.main(
         [
@@ -3077,7 +3314,8 @@ def one_job(root: Path, github: FakeGitHub, output: Path, run: str) -> str:
 
 
 def commit_of_the_job(root: Path, github: FakeGitHub) -> int:
-    """Commits what the job collected, as its next step does."""
+    """Commits what the job collected, as its next step does on the pull request of a
+    person, which unread of fix collect leaves empty."""
     return cli.main(
         [
             "--repo",
@@ -3088,6 +3326,8 @@ def commit_of_the_job(root: Path, github: FakeGitHub) -> int:
             SHA,
             "--branch",
             "feature",
+            "--unread",
+            "",
             "--app",
             "app",
             "--url",
@@ -4214,6 +4454,8 @@ def test_the_fix_bot_has_only_what_it_needs() -> None:
         if step.get("uses", "").startswith("actions/checkout@")
     ]
     assert checkout["with"]["sparse-checkout"].startswith(".github\nblueprint\n")
+    # scripts/check.sh of main says what the fixes of fixes-check may write.
+    assert "scripts" in checkout["with"]["sparse-checkout"].split()
     assert "ref" not in checkout["with"]
     assert "github.event.workflow_run.conclusion == 'failure'" in condition_of(bot)
     assert bot["concurrency"]["cancel-in-progress"] is False
@@ -4788,6 +5030,29 @@ def decided(
     )
 
 
+def test_the_command_promises_no_commit_of_fixes_beyond_the_writes(
+    tmp_path: Path,
+) -> None:
+    # Lint names only Markdown, so its fix of app.py is what the commit job leaves.
+    root = with_catalog(tmp_path / "main")
+    api = api_of(with_a_fix(FakeGitHub()))
+
+    found = decide_command(
+        api,
+        REPO,
+        42,
+        "maintainer",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        WATCHED,
+        no_wait,
+        writes_in(root),
+    )
+
+    assert found.action == ""
+    assert found.text.startswith("No command fixed what the checks of")
+
+
 def test_a_branch_of_the_repository_gets_the_commit_at_the_command(
     tmp_path: Path,
 ) -> None:
@@ -5201,7 +5466,7 @@ def test_fix_commit_at_the_command_from_the_command_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], refuses: bool, suggests: str
 ) -> None:
     folder = tmp_path / "fixes"
-    kept(folder / "1-fixes-lint", {"app.py": "x = 2\n"})
+    kept(folder / "1-fixes-check", {"app.py": "x = 2\n"})
     github = with_a_fix(FakeGitHub(), fork=True, editable=True)
     github.fork_refuses = refuses
     output = tmp_path / "output"
@@ -5334,6 +5599,8 @@ def test_the_command_runs_nothing_of_the_pull_request() -> None:
     )
     # main alone, as the workflow runs on the default branch for a comment.
     assert set(checkout["with"]) == {"persist-credentials", "sparse-checkout"}
+    # With scripts/check.sh, which says what the fixes of fixes-check may write.
+    assert "scripts" in checkout["with"]["sparse-checkout"].split()
     token = step_in(job, "Create a token of the release app for the branch")
     assert {key for key in token["with"] if key.startswith("permission-")} == {
         "permission-contents",
