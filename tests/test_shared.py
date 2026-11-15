@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
 import time
+import tomllib
 from importlib.util import cache_from_source
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import shared
@@ -91,6 +93,70 @@ def test_no_test_parses_yaml_with_the_slow_parser() -> None:
     ]
 
     assert not found
+
+
+def measured_name(path: str, packages: list[str]) -> str | None:
+    """The name under which coverage measures the file at path from the root, by the
+    source_pkgs of pyproject.toml, such as blueprint.website for blueprint/website.py
+    and mkdocs_blueprint for .github/mkdocs_blueprint.py; None for a file it doesn't."""
+    parts = PurePosixPath(path).with_suffix("").parts
+    if parts[0] in packages:
+        return ".".join(parts)
+    if parts[-1] in packages:
+        return parts[-1]
+    return None
+
+
+def test_the_name_of_a_file_coverage_measures_is_that_of_its_module() -> None:
+    assert measured_name("blueprint/website.py", ["blueprint"]) == "blueprint.website"
+    assert measured_name(".github/mkdocs_blueprint.py", ["mkdocs_blueprint"]) == (
+        "mkdocs_blueprint"
+    )
+    assert measured_name(".github/mkdocs_project.py", ["mkdocs_blueprint"]) is None
+
+
+def test_every_test_loads_a_measured_file_under_the_name_coverage_measures() -> None:
+    # Coverage decides by the name of the module whether it measures a file, the first
+    # time that a process runs it, and keeps that for the file: a test that loads
+    # .github/mkdocs_blueprint.py under another name first hid the file from coverage
+    # in its process, so that a line that only a later test of that process ran was
+    # missed, depending on the order of the tests (#946).
+    settings = tomllib.loads(
+        (shared.ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    packages = settings["tool"]["coverage"]["run"]["source_pkgs"]
+    checked: list[str] = []
+    found: list[str] = []
+    for test in sorted(Path(__file__).parent.glob("*.py")):
+        for call in ast.walk(ast.parse(test.read_text(encoding="utf-8"))):
+            if not (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "spec_from_file_location"
+            ):
+                continue
+            name, path = call.args[:2]
+            # A file of the blueprint, as ROOT / "path"; not a file of a project
+            # that a test renders, which coverage never measures.
+            if not (
+                isinstance(name, ast.Constant)
+                and isinstance(name.value, str)
+                and isinstance(path, ast.BinOp)
+                and isinstance(path.left, ast.Name)
+                and path.left.id == "ROOT"
+                and isinstance(path.right, ast.Constant)
+                and isinstance(path.right.value, str)
+            ):
+                continue
+            expected = measured_name(path.right.value, packages)
+            if expected is not None:
+                checked.append(expected)
+                if name.value != expected:
+                    found.append(f"{test.name}:{call.lineno} {name.value}")
+
+    assert not found, "loaded under a name that coverage doesn't measure"
+    # The check sees the loads of the hooks of the website, which caused #946.
+    assert "mkdocs_blueprint" in checked
 
 
 def test_a_folder_is_made_once(tmp_path: Path) -> None:
