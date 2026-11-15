@@ -5494,7 +5494,15 @@ def test_the_checks_fail_on_rules_that_osv_scanner_toml_does_not_have(
     fine = step()
     # A version accepted with every advisory, without its rule of Renovate.
     (project / "osv-scanner.toml").write_text(
-        (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text(encoding="utf-8"),
+        textwrap.dedent("""\
+            [[PackageOverrides]]
+            name = "pillow"
+            version = "12.3.0"
+            ecosystem = "PyPI"
+            vulnerability.ignore = true
+            effectiveUntil = 2099-12-31
+            reason = "Home Assistant pins Pillow 12.3.0 for the tests."
+            """),
         encoding="utf-8",
     )
     failed = step()
@@ -7816,10 +7824,26 @@ namespace {
 	$classes['OCP\Files\Folder']['get']->params[0]->sinks = is_int(TaintKind::INPUT_SQL)
 		? TaintKind::INPUT_SQL
 		: [TaintKind::INPUT_SQL];
-	$provider = new class($classes) {
-		public function __construct(private array $classes) {}
+	// The classes of the app, each with the classes that it extends, as Psalm has them
+	// after it populated the codebase: lowercase, with their names.
+	$app = [];
+	foreach ([
+		'OCA\App\Controller\PageController' => ['OCP\AppFramework\Controller'],
+		'OCA\App\Controller\ApiController' => ['OCP\AppFramework\OCSController', 'OCP\AppFramework\Controller'],
+		'OCA\App\Service\PageService' => [],
+		'OCA\App\Service\ControllerFactory' => ['OCA\App\Service\Factory'],
+	] as $class => $parents) {
+		$app[strtolower($class)] = (object)[
+			'parent_classes' => array_combine(array_map('strtolower', $parents), $parents),
+			'public_api' => false,
+		];
+	}
+	$provider = new class($classes, $app) {
+		private static array $all = [];
+		public function __construct(private array $classes, array $app) { self::$all = $app; }
 		public function has(string $class): bool { return isset($this->classes[$class]); }
 		public function get(string $class): object { return (object)['methods' => $this->classes[$class]]; }
+		public static function getAll(): array { return self::$all; }
 	};
 	$codebase = new Codebase($provider);
 	NextcloudTaintPlugin::afterCodebasePopulated(new AfterCodebasePopulatedEvent($codebase));
@@ -7842,6 +7866,7 @@ namespace {
 		'sinks' => [],
 		'controller' => $codebase->sources,
 		'paths' => $codebase->paths,
+		'public api' => array_map(static fn (object $storage): bool => $storage->public_api, $app),
 	];
 	foreach ($classes as $class => $methods) {
 		foreach ($methods as $method => $storage) {
@@ -7920,6 +7945,97 @@ def test_the_taint_plugin_works_with_psalm_6_and_7(
     assert found["paths"] == (
         [] if psalm == "6" else [[f"{node} specialized", node] for node in parameters]
     )
+    # Every controller is public API, as with @psalm-api, also one that extends a
+    # controller of Nextcloud's own, so that Psalm 7 searches for unused code from it;
+    # a class that is no controller isn't, whatever its name.
+    assert found["public api"] == {
+        "oca\\app\\controller\\pagecontroller": True,
+        "oca\\app\\controller\\apicontroller": True,
+        "oca\\app\\service\\pageservice": False,
+        "oca\\app\\service\\controllerfactory": False,
+    }
+
+
+# A Psalm for the step of the Variants that proves the controllers to be entry points:
+# it reads the controller and the service that the step writes, in the namespace of the
+# app, and reports as Psalm 7 does with its plugin, as Psalm 7 did without it, or
+# nothing, as when it crashes.
+ENTRY_POINT_PSALM = r"""#!/usr/bin/env bash
+controller=lib/Controller/EntryPointController.php
+service=lib/Service/EntryPointService.php
+grep -qxF 'namespace OCA\App\Controller;' "$controller" || exit 3
+grep -qxF 'use OCA\App\Service\EntryPointService;' "$controller" || exit 3
+grep -qF 'return new DataResponse($this->service->greet($name));' "$controller" || exit 3
+grep -qxF 'namespace OCA\App\Service;' "$service" || exit 3
+greet="$(grep -n 'function greet' "$service" | cut -d: -f1)"
+unused="$(grep -n 'function unused' "$service" | cut -d: -f1)"
+finding() {
+  printf '{"type": "PossiblyUnusedMethod", "file_name": "%s", "line_from": %s}' "$service" "$1"
+}
+case "$FINDS" in
+  unused) echo "[$(finding "$unused")]" ;;
+  both) echo "[$(finding "$greet"), $(finding "$unused")]" ;;
+  *) echo "Psalm crashed" >&2; exit 1 ;;
+esac
+exit 2
+"""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("finds", ["unused", "both", "nothing"])
+def test_the_variants_prove_that_psalm_takes_each_controller_as_an_entry_point(
+    tmp_path: Path, finds: str
+) -> None:
+    name = "Take each controller of the app as an entry point of Psalm"
+    variant = workflow_steps.step("variants.yml", "variant", name)
+    # Each new Nextcloud app and each that the update brings, with its own tools.
+    assert condition_of(variant) == (
+        "matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'"
+    )
+    workspace = tmp_path / "workspace"
+    project = workspace / "variant"
+    (project / "appinfo").mkdir(parents=True)
+    (project / "appinfo/info.xml").write_text(
+        "<?xml version='1.0'?>\n<info><id>app</id><namespace>App</namespace></info>\n",
+        encoding="utf-8",
+    )
+    psalm = project / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    psalm.write_text(ENTRY_POINT_PSALM, encoding="utf-8", newline="\n")
+    psalm.chmod(0o755)
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "variant",
+        name,
+        env={"FINDS": finds},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        workspace=workspace,
+    )
+
+    # The controller and the service are gone, whatever Psalm found.
+    assert sorted(path.name for path in (project / "lib").rglob("*.php")) == []
+    if finds == "unused":
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert done.stdout == (
+            "Psalm takes the controller as an entry point: it finds the method that"
+            " nothing calls, and nothing else.\n"
+        )
+        return
+    assert done.returncode == 1
+    service = "lib/Service/EntryPointService.php"
+    found = {
+        "both": f"{service}:8 PossiblyUnusedMethod\n{service}:12 PossiblyUnusedMethod",
+        "nothing": "nothing, or wrote no report",
+    }[finds]
+    assert done.stdout.startswith(
+        "Psalm (exit code "
+        + ("2" if finds == "both" else "1")
+        + f") should find only: {service}:12 PossiblyUnusedMethod\n"
+        f"It found: {found}\n"
+        "::error::Psalm takes a controller of a Nextcloud app for no entry point,"
+    ), done.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
@@ -9190,7 +9306,7 @@ def test_the_setup_on_windows_fits_the_kind(
         "the `pyobjc-core` that it needs on macOS",
         "On macOS, run",
         "imports `fcntl`, a module of Python for Unix alone",
-        "pytest-homeassistant-custom-component imports",
+        "pytest-homeassistant imports",
         "WSL 2",
         "in the Linux file system of",
         "`~/demo-project`",
@@ -10809,7 +10925,55 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     inputs = (ROOT / "stacks/home-assistant/requirements-test.in").read_text(
         encoding="utf-8"
     )
-    assert re.search(r"^pytest-homeassistant-custom-component==\S+$", inputs, re.M)
+    assert re.search(r"^pytest-homeassistant==\S+$", inputs, re.M)
+
+
+def test_a_home_assistant_integration_tests_with_home_assistants_own_plugin(
+    projects: dict[str, Path],
+) -> None:
+    # pytest-homeassistant-custom-component is retired, and its last release pins
+    # Home Assistant 2026.10 with Pillow 12.3.0, whose advisories no update of it
+    # would fix; Home Assistant publishes pytest-homeassistant with each of its
+    # releases (#933).
+    lock = (ROOT / "stacks/home-assistant/requirements-test.txt").read_text("utf-8")
+    pins = dict(re.findall(r"^([\w.-]+)==(\S+)", lock, re.M))
+    assert "pytest-homeassistant-custom-component" not in pins
+    assert pins["pytest-homeassistant"] == pins["homeassistant"]
+    assert int(pins["pillow"].split(".")[0]) >= 13
+    # The plugins of pytest that scripts/check.sh and pyproject.toml use, which the
+    # old plugin brought and the new one doesn't.
+    for plugin in (
+        "pytest-cov",
+        "pytest-timeout",
+        "pytest-github-actions-annotate-failures",
+        "pytest-xdist",
+    ):
+        assert plugin in pins, plugin
+    for kind in ("home-assistant", "python-package"):
+        project = projects[kind]
+        pyproject = tomllib.loads((project / "pyproject.toml").read_text("utf-8"))
+        addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
+        # Home Assistant puts its httpx in place before the plugin of respx may
+        # import httpx, as the README of the test plugin asks.
+        assert (addopts[-2:] == ["-p", "no:respx"]) == (kind == "home-assistant")
+    tests = projects["home-assistant"] / "tests"
+    for name in ("test_config_flow.py", "test_init.py"):
+        source = (tests / name).read_text(encoding="utf-8")
+        assert "from pytest_homeassistant.common import MockConfigEntry" in source
+    # The hass of the plugin enables the integrations of custom_components itself.
+    conftest = (tests / "conftest.py").read_text(encoding="utf-8")
+    assert "enable_custom_integrations" not in conftest
+    rules = renovate_rules(
+        (projects["home-assistant"] / ".github/renovate-blueprint.json5").read_text(
+            encoding="utf-8"
+        )
+    )
+    base = [
+        rule
+        for rule in rules["packageRules"]
+        if rule.get("groupName") == "the Home Assistant test base"
+    ]
+    assert [rule["matchDepNames"] for rule in base] == [["pytest-homeassistant"]]
 
 
 # What keeps Renovate from compiling a lock file again, why_renovate_skips, is in
@@ -10873,15 +11037,14 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
     project = shutil.copytree(projects[kind], tmp_path / kind)
-    # Home Assistant pins Pillow for the tests of every integration, so a new one
-    # accepts its advisories as the blueprint does in stacks/home-assistant/, in the
+    # Home Assistant pins packages such as Pillow for the tests of every integration,
+    # so a new one accepts what the blueprint accepts in stacks/home-assistant/, in the
     # root, where its requirements-test.txt is.
     accepted = project / "osv-scanner.toml"
+    blueprint = (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text("utf-8")
     assert accepted.is_file() == (kind == "home-assistant")
     if accepted.is_file():
-        assert accepted.read_text(encoding="utf-8") == (
-            ROOT / "stacks/home-assistant/osv-scanner.toml"
-        ).read_text(encoding="utf-8")
+        assert accepted.read_text(encoding="utf-8") == blueprint
         assert (project / "requirements-test.txt").is_file()
     # The rules of the blueprint extend those of the project's osv-scanner.toml.
     rules = renovate_rules(
@@ -10894,7 +11057,9 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         (project / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
     )
     names = [rule["matchPackageNames"] for rule in preset["packageRules"]]
-    assert names == ([["pillow"]] if kind == "home-assistant" else [])
+    overrides = tomllib.loads(blueprint).get("PackageOverrides", [])
+    expected = [[entry["name"]] for entry in overrides]
+    assert names == (expected if kind == "home-assistant" else [])
     for rule in preset["packageRules"]:
         assert rule["matchFileNames"] == ["/^[^/]+$/"]
         assert rule["description"].startswith("osv-scanner.toml accepts every")

@@ -358,7 +358,10 @@ def test_the_blueprint_tells_renovate_what_its_osv_scanner_files_accept() -> Non
     assert outcome.problems == []
     assert outcome.in_step
     # The test tools of Home Assistant, which pins them for the tests of every
-    # integration: Pillow; the uv of Home Assistant 2026.10.4 has no advisory.
-    assert {(entry.folder, entry.name) for entry in outcome.accepted} >= {
-        ("stacks/home-assistant", "pillow"),
+    # integration, have a file of their own, which OSV-Scanner reads. It accepts no
+    # Pillow: pytest-homeassistant 2026.11.1 pins Home Assistant 2026.11.1, which
+    # brings Pillow 13.0.0, where the advisories of Pillow 12.3.0 are fixed (#933).
+    assert Path("stacks/home-assistant/osv-scanner.toml") in configs(ROOT)
+    assert ("stacks/home-assistant", "pillow") not in {
+        (entry.folder, entry.name) for entry in outcome.accepted
     }
