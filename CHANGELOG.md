@@ -7,6 +7,23 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.19.0...v1.20.0) (2026-11-15)
+
+
+### Features
+
+* **checks:** scripts/check.sh lints the Markdown as the check lint does ([#941](https://github.com/Dennis-Otto/repo-blueprint/issues/941)) ([864941f](https://github.com/Dennis-Otto/repo-blueprint/commit/864941f4e4ddec73e37939508b3e125edd072f0e))
+* **nextcloud:** every controller is an entry point of Psalm's search for unused code ([#943](https://github.com/Dennis-Otto/repo-blueprint/issues/943)) ([04bae19](https://github.com/Dennis-Otto/repo-blueprint/commit/04bae1974187b493644179f11969351ffdfba088))
+* **website:** the page Automation, the sitemaps and llms.txt are steps of blueprint.py ([#945](https://github.com/Dennis-Otto/repo-blueprint/issues/945)) ([d7e6559](https://github.com/Dennis-Otto/repo-blueprint/commit/d7e655944e172289531b7804d79d1c32bcf661ef))
+
+
+### Bug fixes
+
+* **home-assistant:** test with Home Assistant's own test plugin, with Pillow 13 ([#942](https://github.com/Dennis-Otto/repo-blueprint/issues/942)) ([c5c79ca](https://github.com/Dennis-Otto/repo-blueprint/commit/c5c79ca08fdf83a34a9c193514ad331ea466bc25))
+* **migrate:** the update moves the hosts and files of the issue assistant into the file of the project ([#938](https://github.com/Dennis-Otto/repo-blueprint/issues/938)) ([2c3d01f](https://github.com/Dennis-Otto/repo-blueprint/commit/2c3d01f1f8f7ab1064fc66c182c744cbdb9e5e6b))
+* the blueprint bot makes the tree of a large update in steps ([#940](https://github.com/Dennis-Otto/repo-blueprint/issues/940)) ([da6a6de](https://github.com/Dennis-Otto/repo-blueprint/commit/da6a6deb171322eee5bad0d015d356d4cda92647))
+* **website:** serve the fonts and Mermaid only by their sha256, and give the dashboard its sitemap ([#944](https://github.com/Dennis-Otto/repo-blueprint/issues/944)) ([24553fe](https://github.com/Dennis-Otto/repo-blueprint/commit/24553fe87300d7f1f0c46e4e0d19d96e9248fac7))
+
 ## [1.19.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.3...v1.19.0) (2026-11-15)
 
 ### Features
