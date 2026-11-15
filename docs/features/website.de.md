@@ -22,7 +22,7 @@ Weitere Sprachen funktionieren genauso, etwa `/de/`, `/nl/` und `/fr/`, sobald `
 
 Eine Seite, deren Front Matter kein Mapping von YAML ist, hält den Build an, etwa eine Beschreibung mit Doppelpunkt und Leerzeichen ohne Anführungszeichen: MkDocs zeigte sie sonst als Text oben auf der Seite, und Zensical lehnt die Seite ab.
 
-**Schritte, die den Generator überdauern:** Die Seite *Automatisierung*, die Sitemaps und `llms.txt` sind Schritte von `blueprint.py`, nicht von MkDocs, damit der Wechsel zu einem anderen Generator sie behält ([Entscheidung 0164](../decisions/0164-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). Die Hooks gehen sie bei jedem Build, und ein Build mit einem anderen Generator geht sie davor und danach:
+**Schritte, die den Generator überdauern:** Die Seite *Automatisierung*, die Sitemaps und `llms.txt` sind Schritte von `blueprint.py`, nicht von MkDocs, damit der Wechsel zu einem anderen Generator sie behält ([Entscheidung 0165](../decisions/0165-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). Die Hooks gehen sie bei jedem Build, und ein Build mit einem anderen Generator geht sie davor und danach:
 
 ```sh
 python3 blueprint.py website automation build --site-name "Mein Projekt" --repository https://github.com/owner/name --language en --language de

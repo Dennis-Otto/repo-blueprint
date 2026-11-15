@@ -22,7 +22,7 @@ More languages work the same way, such as `/de/`, `/nl/` and `/fr/` once `mkdocs
 
 A page whose front matter isn't a mapping of YAML stops the build, such as a description with a colon and a space and no quotes: MkDocs would show it as text at the top of the page, and Zensical refuses the page.
 
-**Steps that outlive the generator:** the page *Automation*, the sitemaps and `llms.txt` are steps of `blueprint.py`, not of MkDocs, so that the move to another generator keeps them ([decision 0164](../decisions/0164-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). The hooks take them in every build, and a build with another generator takes them around it:
+**Steps that outlive the generator:** the page *Automation*, the sitemaps and `llms.txt` are steps of `blueprint.py`, not of MkDocs, so that the move to another generator keeps them ([decision 0165](../decisions/0165-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). The hooks take them in every build, and a build with another generator takes them around it:
 
 ```sh
 python3 blueprint.py website automation build --site-name "My project" --repository https://github.com/owner/name --language en --language de

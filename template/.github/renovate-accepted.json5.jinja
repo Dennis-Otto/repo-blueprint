@@ -1,12 +1,12 @@
 [#- The rules of Renovate for what the osv-scanner.toml of the project accepts, as
-    blueprint.py advisories writes them: in a Home Assistant integration those of the
-    test tools that the blueprint accepts in stacks/home-assistant/, whose lock file a
-    project has in its root, and none in every other project. Once the blueprint
-    accepts none there, the render stops: then every kind takes the empty file. -#]
-[%- from "includes/replace.jinja" import replaced with context -%]
-[% if stack == 'home-assistant' -%]
-{= replaced(".github/renovate-accepted.json5", [["stacks/home-assistant/", ""]]) -=}
-[%- else -%]
+    blueprint.py advisories writes them: none in a new repository of any kind, since
+    the blueprint accepts no version of the test tools of Home Assistant in
+    stacks/home-assistant/ either. Once it accepts one there again, an integration
+    takes the blueprint's own .github/renovate-accepted.json5, whose lock file it has
+    in its root: the macro of includes/replace.jinja with "stacks/home-assistant/"
+    replaced by nothing, for the stack home-assistant, which stops the render while
+    the file names no such path. test_renovate_tries_no_fix_of_what_osv_scanner_accepts
+    fails until it does. -#]
 // The versions that an osv-scanner.toml of this repository accepts with every
 // advisory, as rules of Renovate, which .github/renovate-blueprint.json5 extends:
 // Renovate opens no branch to fix a vulnerability of such a version, which the lock
@@ -17,4 +17,3 @@
 {
   "packageRules": []
 }
-[% endif -%]

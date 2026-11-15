@@ -46,7 +46,7 @@ def code_of(names: tuple[str, ...], module: str) -> ModuleType | None:
     return code
 
 
-# The steps of the website that need no generator (decision 0164): the page of the
+# The steps of the website that need no generator (decision 0165): the page of the
 # automation before the build, and the sitemaps and the map of the website after
 # it. blueprint/website.py holds them, beside this file in a repository made from
 # the blueprint, and at the root of the blueprint itself; the hooks hand them what
