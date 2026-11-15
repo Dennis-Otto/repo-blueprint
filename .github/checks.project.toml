@@ -57,3 +57,13 @@ commands = [
 ]
 docs = "CONTRIBUTING.md#tests"
 autofix = ["{python} reference.py", "{python} pins.py"]
+# What reference.py and pins.py write; the workflows stay with a person anyway.
+writes = [
+  ".github/*.sh",
+  ".github/pins.toml",
+  "README.de.md",
+  "README.md",
+  "docs/kinds/*.md",
+  "docs/reference/*.md",
+  "template/.github/blueprint/owned.txt.jinja",
+]

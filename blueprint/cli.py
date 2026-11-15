@@ -102,6 +102,7 @@ from blueprint.fixes import (
     run_until_done,
     suggest,
     watched,
+    writes_in,
 )
 from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
@@ -783,11 +784,13 @@ def fix_version(root: Path, base: str | None = None) -> int:
     return 1 if done.left else 0
 
 
-def kept_fixes(folder: Path) -> Fixes:
-    """The fixes that fix collect downloaded into folder, one folder for each check."""
+def kept_fixes(folder: Path, root: Path) -> Fixes:
+    """The fixes that fix collect downloaded into folder, one folder for each check,
+    each file where the catalog of main in root lets its check write it."""
     if not folder.is_dir():
         return Fixes({})
-    return load(sorted(path for path in folder.iterdir() if path.is_dir()))
+    folders = sorted(path for path in folder.iterdir() if path.is_dir())
+    return load(folders, writes_in(root))
 
 
 def fix_own_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
@@ -836,6 +839,7 @@ def fix_command_command(
             arguments.folder,
             downloader(api, repo),
             watched(root),
+            writes=writes_in(root),
         )
     except NoList as error:
         print(f"::error::{error}", file=sys.stderr)
@@ -883,7 +887,7 @@ def fix_bot_command(
                 arguments.event,
                 arguments.branch,
                 number,
-                load(found.folders),
+                load(found.folders, writes_in(root)),
                 workflows.listed,
                 found.late,
             )
@@ -900,7 +904,7 @@ def fix_bot_command(
         )
         sys.stdout.write(decided.text)
         return 0
-    fixes = kept_fixes(arguments.folder)
+    fixes = kept_fixes(arguments.folder, root)
     if arguments.action == "commit" and arguments.pull:
         pushed = commit_on_command(
             api,

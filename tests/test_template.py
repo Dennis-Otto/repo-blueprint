@@ -8613,13 +8613,19 @@ def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
         # Dennis-Otto/paperless-unified-search on 8 November 2026 (#346): Composer
         # ends with 100 when it can't reach a repository, and the audit goes again.
         ((100, 0), (5,), 0),
-        ((100, 100, 0), (5, 10), 0),
-        # Out of reach three times, the step fails: the audit never ran.
-        ((100, 100, 100), (5, 10), 100),
+        ((100, 100, 0), (5, 15), 0),
+        # An outage of the advisories that lasts a minute or two, which pauses of 15
+        # seconds in all didn't sit out (#911): the pauses grow to 60 seconds.
+        ((100, 100, 100, 0), (5, 15, 30), 0),
+        ((100, 100, 100, 100, 0), (5, 15, 30, 60), 0),
+        # Out of reach five times, about two minutes, the step fails: the audit never
+        # ran, and it stays as strict as ever.
+        ((100, 100, 100, 100, 100), (5, 15, 30, 60), 100),
         # A vulnerable or abandoned package fails at once, and so does any other
-        # error of Composer.
+        # error of Composer, at any try.
         ((1,), (), 1),
         ((100, 1), (5,), 1),
+        ((100, 100, 100, 1), (5, 15, 30), 1),
         ((2,), (), 2),
     ],
 )
@@ -8687,7 +8693,8 @@ def test_composer_audit_tries_again_only_after_an_error_of_the_network(
     ], output
     # Composer's own error, then what to do about it.
     gone = (
-        "Packagist stayed out of reach, and composer audit can't check the packages"
+        "Packagist stayed out of reach for about two minutes, and composer audit"
+        " can't check the packages"
         " without its advisories; run the checks again once packagist.org answers.\n"
     )
     assert result.stderr.endswith(gone) is (code == 100), result.stderr
