@@ -13,7 +13,7 @@ The stylesheet of Google Fonts names no version: Google changes it whenever a fo
 
 1. A sha256 of every file that the plugin downloads, the stylesheet of Google Fonts included: the builds fail whenever Google changes the stylesheet, until someone writes the new hashes.
 2. The fonts and Mermaid from a hash-pinned package, such as `@fontsource/roboto` and `mermaid` of npm: every build of a website needs Node and a lock file of npm beside the hash-pinned tools of Python, for three files.
-3. The fonts and Mermaid in the repository: about 4.3 MB of binary files in every repository, 0.8 MB of fonts and 3.6 MB of Mermaid,, which every update of a font or of Mermaid brings again.
+3. The fonts and Mermaid in the repository: about 4.3 MB of binary files in every repository, 0.8 MB of fonts and 3.6 MB of Mermaid, which every update of a font or of Mermaid brings again.
 4. A copy of the stylesheet of Google Fonts in the blueprint, `.github/mkdocs-blueprint-fonts.css`, with `theme.font: false` in `.github/mkdocs-blueprint.yml`, and the sha256 of each font and of the release of Mermaid in `.github/mkdocs-blueprint-pins.toml`, which the hooks check; Mermaid downloaded by the hooks once a page has a `mermaid` block.
 
 ## Decision
