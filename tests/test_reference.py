@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from shared import load_yaml
 
 import reference
 from reference import Name, Question
@@ -445,9 +446,23 @@ def test_a_section_of_a_question() -> None:
     ]
 
 
+def described(page: str) -> str:
+    """The description in the front matter of page, as MkDocs and Zensical read it:
+    a mapping of YAML between two lines of three dashes at the start of the page."""
+    assert page.startswith("---\n")
+    front, end, _ = page[4:].partition("\n---\n")
+    assert end
+    meta = load_yaml(front)
+    assert isinstance(meta, dict)
+    assert set(meta) == {"description"}
+    description = meta["description"]
+    assert isinstance(description, str)
+    return description
+
+
 def test_the_page_of_the_questions() -> None:
     page = reference.questions_page(COPIER)
-    assert page.startswith("---\ndescription: ")
+    assert described(page).startswith("Every question of the Copier template")
     assert "Copier asks these 5 questions" in page
     assert "- [`project_name`](#project_name): The name of the project" in page
     assert "- **When Copier refuses an answer, it says:** Name the project." in page
@@ -586,7 +601,12 @@ def test_who_sets_a_name() -> None:
 
 def test_the_page_of_the_variables(repository: Path) -> None:
     page = reference.pages(repository)[reference.VARIABLES]
-    assert page.startswith("---\ndescription: ")
+    # The description holds a colon and a space, which plain YAML reads as the start
+    # of a second key: MkDocs then showed the front matter as a heading of the page,
+    # and Zensical refused to build it.
+    assert described(page).endswith(
+        "settings as code set: what it does, who sets it and which workflows read it."
+    )
     variables, _, secrets = page.partition("## Secrets")
     assert "- [`PUBLISH_TO`](#publish_to): Where the release delivers." in variables
     assert "### `EXTRA`" in variables
