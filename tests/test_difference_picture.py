@@ -206,14 +206,29 @@ def test_the_pages_of_the_screenshot_bot_show_the_picture_that_renews_itself() -
     listed = (ROOT / ".github/docs-pictures/paths.txt").read_text(encoding="utf-8")
     for pattern in ("blueprint/screenshots.py", "stacks/screenshots/requirements.txt"):
         assert f"\n{pattern}\n" in listed, pattern
+    # The picture is one that keep draws today: of the kind of a difference that its
+    # code draws now, so that a change of keep that draws another kind fails here and
+    # not first in the pull request of the picture bot; as large as the dashboard of
+    # the page, which the browser photographs at the same size; with the changed
+    # pixels and their frames in red, over the dashboard in its own colors behind
+    # the veil, not in grays.
+    kept = difference(png((40, 30), [(3, 4)]), png((40, 30), [(3, 4), (30, 20)]))
+    assert kept is not None
+    shown = (ROOT / "docs/images/dashboard.png").read_bytes()
     drawn = (ROOT / "docs/images/screenshots-difference.png").read_bytes()
-    with Image.open(io.BytesIO(drawn)) as image:
-        assert image.format == "PNG"
-        # The palette of keep: the red of the changes first, then the grays.
-        assert image.mode == "P"
-        palette = image.getpalette()
-        assert palette is not None
-        assert palette[:3] == list(RED)
+    with (
+        Image.open(io.BytesIO(kept)) as now,
+        Image.open(io.BytesIO(shown)) as dashboard_picture,
+        Image.open(io.BytesIO(drawn)) as image,
+    ):
+        assert image.format == now.format == "PNG"
+        assert image.mode == now.mode == "RGB"
+        assert image.size == dashboard_picture.size
+        counted = image.getcolors(image.width * image.height)
+        assert counted is not None
+        colors = {color for _, color in counted if isinstance(color, tuple)}
+        assert RED in colors
+        assert any(len(set(color)) > 1 for color in colors - {RED})
     # The pages about the screenshot bot show it, in English and in German, with
     # what it shows in words.
     for name, words in (
