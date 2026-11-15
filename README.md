@@ -92,7 +92,7 @@ Seven public repositories follow the blueprint, each with code of its own and th
 
 | Kind | Stack | Checks | Delivery |
 | --- | --- | --- | --- |
-| [Home Assistant integration](https://dennis-otto.github.io/repo-blueprint/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS, verified as HACS installs it |
+| [Home Assistant integration](https://dennis-otto.github.io/repo-blueprint/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS, verified as HACS installs it |
 | [Nextcloud app](https://dennis-otto.github.io/repo-blueprint/kinds/nextcloud-app.html) | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, PHP 8.2 for the code and its packages, PHPUnit in random order with full coverage | signed package to the App Store |
 | [GitHub Action](https://dennis-otto.github.io/repo-blueprint/kinds/github-action.html) | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
 | [Python package](https://dennis-otto.github.io/repo-blueprint/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
