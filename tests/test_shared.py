@@ -115,6 +115,126 @@ def test_the_name_of_a_file_coverage_measures_is_that_of_its_module() -> None:
     assert measured_name(".github/mkdocs_project.py", ["mkdocs_blueprint"]) is None
 
 
+def blueprint_path(node: ast.expr, names: dict[str, ast.expr]) -> str | None:
+    """The path from the root of the blueprint that an expression of a test names, such
+    as .github/x.py for ROOT / ".github" / "x.py", through the names that its module
+    assigns and with {name} for a value of an f-string; None for a path that does not
+    start at the root, such as tmp_path / "x.py"."""
+    match node:
+        case (
+            ast.Name(id="ROOT")
+            | ast.Subscript(
+                value=ast.Attribute(attr="parents"), slice=ast.Constant(value=1)
+            )
+        ):
+            # ROOT, or Path(__file__).parents[1] of a test in tests/.
+            return "."
+        case ast.Name(id=name) if name in names:
+            return blueprint_path(names[name], names)
+        case ast.BinOp(left=left, op=ast.Div(), right=right):
+            base = blueprint_path(left, names)
+            return (
+                None if base is None else (PurePosixPath(base) / part(right)).as_posix()
+            )
+        case _:
+            return None
+
+
+def part(node: ast.expr) -> str:
+    """The text of one part of a path, with {name} for a value of an f-string and {?}
+    for any other expression."""
+    match node:
+        case ast.Constant(value=str(text)):
+            return text
+        case ast.JoinedStr(values=values):
+            return "".join(part(value) for value in values)
+        case ast.FormattedValue(value=ast.Name(id=name)):
+            return "{" + name + "}"
+        case _:
+            return "{?}"
+
+
+def wrong_loads(source: str, packages: list[str]) -> tuple[list[str], list[str]]:
+    """The loads of a file of the blueprint by its path in the source of a test: those
+    under the name that coverage measures, and those under another name or under one
+    that this can't tell, by line."""
+    tree = ast.parse(source)
+    names = {
+        target.id: statement.value
+        for statement in tree.body
+        if isinstance(statement, ast.Assign)
+        for target in statement.targets
+        if isinstance(target, ast.Name)
+    }
+    checked: list[str] = []
+    found: list[str] = []
+    for call in ast.walk(tree):
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "spec_from_file_location"
+        ):
+            continue
+        name, where = call.args[:2]
+        # Not a file of a project that a test renders, which coverage never measures.
+        path = blueprint_path(where, names)
+        if path is None:
+            continue
+        file = PurePosixPath(path)
+        match name:
+            case ast.Constant(value=str(loaded)) if "{" not in path:
+                expected = measured_name(path, packages)
+                if expected is not None:
+                    checked.append(expected)
+                    if loaded != expected:
+                        found.append(f"{call.lineno} {loaded}")
+            case ast.Name(id=variable) if (
+                file.name == f"{{{variable}}}.py"
+                and "{" not in file.parent.as_posix()
+                and file.parts[0] not in packages
+            ):
+                # A file named after the module that it holds, outside a package, such
+                # as module(name) of .github/docs-pictures/{name}.py: its name is the
+                # one coverage measures.
+                checked.append(path)
+            case _:
+                found.append(f"{call.lineno} can't tell")
+    return checked, found
+
+
+def test_a_load_is_checked_whatever_way_its_path_is_written() -> None:
+    packages = ["blueprint", "hooks", "pictures"]
+    source = """
+HOOKS = Path(__file__).parents[1] / ".github/hooks.py"
+a = importlib.util.spec_from_file_location("hooks", ROOT / ".github" / "hooks.py")
+b = importlib.util.spec_from_file_location("hooks_of_tests", HOOKS)
+c = importlib.util.spec_from_file_location(name, ROOT / f".github/pictures/{name}.py")
+d = importlib.util.spec_from_file_location(name, ROOT / f".github/{kind}/{name}.py")
+e = importlib.util.spec_from_file_location(name, ROOT / ".github" / name)
+f = importlib.util.spec_from_file_location(f"x_{name}", ROOT / "blueprint/cli.py")
+g = importlib.util.spec_from_file_location("website", ROOT / "blueprint/website.py")
+h = importlib.util.spec_from_file_location("other", ROOT / ".github/other.py")
+i = importlib.util.spec_from_file_location("hooks", project / ".github/hooks.py")
+j = importlib.util.spec_from_file_location(name, ROOT / f"blueprint/{name}.py")
+"""
+    checked, found = wrong_loads(source, packages)
+
+    assert checked == [
+        "hooks",
+        "hooks",
+        ".github/pictures/{name}.py",
+        "blueprint.website",
+    ]
+    assert found == [
+        "4 hooks_of_tests",
+        "6 can't tell",
+        "7 can't tell",
+        "8 can't tell",
+        "9 website",
+        "12 can't tell",
+    ]
+
+
 def test_every_test_loads_a_measured_file_under_the_name_coverage_measures() -> None:
     # Coverage decides by the name of the module whether it measures a file, the first
     # time that a process runs it, and keeps that for the file: a test that loads
@@ -128,35 +248,21 @@ def test_every_test_loads_a_measured_file_under_the_name_coverage_measures() -> 
     checked: list[str] = []
     found: list[str] = []
     for test in sorted(Path(__file__).parent.glob("*.py")):
-        for call in ast.walk(ast.parse(test.read_text(encoding="utf-8"))):
-            if not (
-                isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr == "spec_from_file_location"
-            ):
-                continue
-            name, path = call.args[:2]
-            # A file of the blueprint, as ROOT / "path"; not a file of a project
-            # that a test renders, which coverage never measures.
-            if not (
-                isinstance(name, ast.Constant)
-                and isinstance(name.value, str)
-                and isinstance(path, ast.BinOp)
-                and isinstance(path.left, ast.Name)
-                and path.left.id == "ROOT"
-                and isinstance(path.right, ast.Constant)
-                and isinstance(path.right.value, str)
-            ):
-                continue
-            expected = measured_name(path.right.value, packages)
-            if expected is not None:
-                checked.append(expected)
-                if name.value != expected:
-                    found.append(f"{test.name}:{call.lineno} {name.value}")
+        seen, wrong = wrong_loads(test.read_text(encoding="utf-8"), packages)
+        checked += seen
+        found += [f"{test.name}:{line}" for line in wrong]
 
     assert not found, "loaded under a name that coverage doesn't measure"
-    # The check sees the loads of the hooks of the website, which caused #946.
-    assert "mkdocs_blueprint" in checked
+    # The check sees the loads in each way that the tests write them: the hooks of the
+    # website, which caused #946, by ROOT / "path" and by a name of the module, and the
+    # scripts of the pictures by an f-string.
+    assert {
+        "mkdocs_blueprint",
+        "mkdocs_project",
+        "difference_picture",
+        ".github/docs-pictures/{name}.py",
+    } <= set(checked)
+    assert checked.count("mkdocs_blueprint") > 4
 
 
 def test_a_folder_is_made_once(tmp_path: Path) -> None:
