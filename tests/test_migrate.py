@@ -523,6 +523,18 @@ def test_a_config_that_isnt_toml_or_has_lists_of_another_type_stays(
     assert not issue_assistant_project(assistant_repository(tmp_path, text))
 
 
+def test_a_list_that_the_move_cant_follow_stays_as_it_is(tmp_path: Path) -> None:
+    # The `]` in the comment ends the search for the list early: the move would leave
+    # a config.toml that isn't TOML, so neither file changes.
+    root = assistant_repository(
+        tmp_path,
+        '[links]\nhosts = [\n  "a.example",  # see [docs]\n  "b.example",\n]\n',
+    )
+    assert not issue_assistant_project(root)
+    assert not migrate(root, True, NEXT)
+    assert not (root / ISSUE_ASSISTANT_PROJECT).exists()
+
+
 def test_the_project_file_keeps_what_it_has_and_names_each_host_once(
     tmp_path: Path,
 ) -> None:

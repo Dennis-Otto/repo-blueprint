@@ -282,16 +282,30 @@ def issue_assistant_project(root: Path) -> dict[str, str]:
         else ISSUE_ASSISTANT_PROJECT_TEXT
     )
     project = toml_table(project_text)
+    wanted: list[tuple[str, tuple[str, str], list[str]]] = []
     for place, moving in added.items():
         if not moving:
             continue
         kept = [name for name in names(config, *place) if name not in moving]
         config_text = with_names(config_text, *place, kept)
         there = names(project, *place)
-        project_text = with_names(
-            project_text, *place, list(dict.fromkeys((*there, *moving)))
-        )
-    return {ISSUE_ASSISTANT: config_text, ISSUE_ASSISTANT_PROJECT: project_text}
+        merged = list(dict.fromkeys((*there, *moving)))
+        project_text = with_names(project_text, *place, merged)
+        wanted += [
+            (ISSUE_ASSISTANT, place, kept),
+            (ISSUE_ASSISTANT_PROJECT, place, merged),
+        ]
+    # A list that the plain search of with_names can't follow, such as one with a `]`
+    # in a comment, would leave a file that the issue assistant can't read: the move
+    # runs unattended, so both files then stay as they are. Each file has the section
+    # of a list it got, so an empty table is one that isn't TOML.
+    changes = {ISSUE_ASSISTANT: config_text, ISSUE_ASSISTANT_PROJECT: project_text}
+    tables = {path: toml_table(text) for path, text in changes.items()}
+    if not all(tables.values()) or any(
+        names(tables[path], *place) != lists for path, place, lists in wanted
+    ):
+        return {}
+    return changes
 
 
 MIGRATIONS: tuple[Migration | Move, ...] = (

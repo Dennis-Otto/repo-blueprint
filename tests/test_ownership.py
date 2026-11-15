@@ -694,6 +694,7 @@ def test_the_report_names_the_files_and_the_way_out() -> None:
         "scripts/check-project.sh",
         ".github/checks.project.toml",
         ".github/agents.project.md",
+        ".github/issue-assistant/config.project.toml",
         ".github/workflows/",
         "## Releases",
     ):
