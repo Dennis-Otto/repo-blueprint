@@ -99,7 +99,7 @@ USUAL = {
     "listing": "ok",
     **{f"lookup-{name}": "200" for name in REPOSITORIES},
     **{f"dispatch-{name}": "ok" for name in REPOSITORIES},
-    "bot": "completed success",
+    "bot": "completed 1 success",
     "pull-request": "passed",
 }
 
@@ -541,21 +541,26 @@ def wait(rollout: Rollout, run: str = "123", last: str = "false") -> StepResult:
     [
         # The next repository waits for the bot and the checks of its pull request.
         (
-            ["queued ", "in_progress ", "completed success"],
+            ["queued 1 ", "in_progress 1 ", "completed 1 success"],
             ["pending", "pending", "passed"],
             4,
             "The checks of its update pull request passed.",
         ),
         # GitHub fails for a moment.
-        (["error", "completed success"], ["error", "passed"], 2, "passed."),
+        (["error", "completed 1 success"], ["error", "passed"], 2, "passed."),
         # The repository was up to date, or its pull request merged already.
         ([], ["none"], 0, "No update pull request is open"),
         ([], ["closed"], 0, "No update pull request is open"),
         # Checks that fail wait for the maintainer, not the rollout.
         ([], ["failed"], 0, "The checks of its update pull request failed"),
         # 15 minutes at most, for the bot and the checks together.
-        (["in_progress "] * 5, ["pending"] * 20, 15, "still ran after 15 minutes"),
-        (["in_progress "] * 20, [], 15, "The blueprint bot still ran after 15 minutes"),
+        (["in_progress 1 "] * 5, ["pending"] * 20, 15, "still ran after 15 minutes"),
+        (
+            ["in_progress 1 "] * 20,
+            [],
+            15,
+            "The blueprint bot still ran after 15 minutes",
+        ),
     ],
 )
 def test_the_next_repository_waits_for_the_update_of_this_one(
@@ -581,13 +586,35 @@ def test_the_next_repository_waits_for_the_update_of_this_one(
         assert calls[: len(bot_looks)] == bot_looks
 
 
+@pytest.mark.parametrize(
+    ("bot", "looks"),
+    [
+        # Its second try, which Bot health starts, fails as well.
+        (
+            [
+                "in_progress 1 ",
+                "completed 1 failure",
+                "completed 1 failure",
+                "queued 2 ",
+                "completed 2 failure",
+            ],
+            4,
+        ),
+        # No second try comes within 5 looks.
+        (["completed 1 failure"] * 6, 5),
+        # A start that failed gets no second try, nor a run that timed out once more.
+        (["completed 1 startup_failure"], 0),
+        (["completed 2 timed_out"], 0),
+    ],
+)
 def test_a_blueprint_bot_that_fails_fails_the_rollout_by_its_repository(
-    rollout: Rollout,
+    rollout: Rollout, bot: list[str], looks: int
 ) -> None:
-    rollout.plan("bot", "in_progress ", "completed failure")
+    rollout.plan("bot", *bot)
 
     result = wait(rollout)
 
+    assert slept(result) == ["sleep 60"] * looks
     assert result.returncode == 1
     assert (
         "::error::The blueprint bot failed in o/b: https://github.com/o/b/actions/runs/123"
@@ -597,8 +624,33 @@ def test_a_blueprint_bot_that_fails_fails_the_rollout_by_its_repository(
     assert result.called("pr ") == []
 
 
+def test_a_blueprint_bot_that_passes_its_second_try_holds_up_nothing(
+    rollout: Rollout,
+) -> None:
+    # As in paperless-unified-search on 2026-11-15 (#931): GitHub timed out the first
+    # attempt, and the second one, which Bot health started a minute later, passed.
+    rollout.plan(
+        "bot",
+        "in_progress 1 ",
+        "completed 1 failure",
+        "in_progress 2 ",
+        "completed 2 success",
+    )
+
+    result = wait(rollout)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error::" not in result.stdout
+    assert (
+        "The blueprint bot of o/b passed at attempt 2, after Bot health ran its"
+        " failed jobs again." in result.summary
+    )
+    assert "The checks of its update pull request passed." in result.summary
+    assert slept(result) == ["sleep 60"] * 3
+
+
 def test_no_repository_waits_for_the_last_one(rollout: Rollout) -> None:
-    rollout.plan("bot", "in_progress ", "completed success")
+    rollout.plan("bot", "in_progress 1 ", "completed 1 success")
 
     result = wait(rollout, last="true")
 

@@ -53,6 +53,12 @@ MAINTAINER = "Dennis-Otto"
 CONFLICT = (
     "<<<<<<< before updating\n# Demo\n=======\n# Demo 2\n>>>>>>> after updating\n"
 )
+# GitHub's answer to a tree whose files it couldn't take in time (#931).
+TREE_TIMEOUT = (
+    "Sorry, your request timed out. It's likely that your input was too large to"
+    " process. Consider building the tree incrementally, or building the commits you"
+    " need in a local clone of the repository and then pushing them to GitHub."
+)
 
 
 @pytest.fixture(autouse=True)
@@ -178,6 +184,10 @@ class FakeGitHub:
         self.next_id = 1
         self.signed = True
         self.tree_differs = False
+        # How many requests for a tree GitHub times out before it makes one, and the
+        # bytes of files inline above which it times out each (#931).
+        self.tree_timeouts = 0
+        self.tree_bytes: int | None = None
         self.graphql_fails = False
         # How many calls of gh pr merge GitHub refuses before it takes one.
         self.merge_fails = 0
@@ -366,6 +376,13 @@ class FakeGitHub:
         return 201, {"sha": self.git("hash-object", "-w", "--stdin", data=content)}
 
     def tree(self, method: str, body: Any) -> tuple[int, Any]:
+        size = sum(len(entry.get("content", "").encode()) for entry in body["tree"])
+        if self.tree_timeouts or (
+            self.tree_bytes is not None and size > self.tree_bytes
+        ):
+            self.tree_timeouts = max(self.tree_timeouts - 1, 0)
+            return 422, {"message": TREE_TIMEOUT}
+
         def apply() -> None:
             for entry in body["tree"]:
                 assert entry["type"] == "blob"
@@ -1335,6 +1352,98 @@ def test_a_failed_commit_takes_its_branch_away(github: FakeGitHub) -> None:
 
     assert set(github.refs) == {"main"}
     assert github.pulls == {}
+
+
+def test_a_large_update_makes_its_tree_in_steps(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    # GitHub times out a tree with more files inline than a step of the bot takes
+    # (#931); a file too large for a step goes as a blob of its own.
+    monkeypatch.setattr(blueprint.update, "TREE_BYTES", 40)
+    github.tree_bytes = 40
+    stage(
+        github.root,
+        "v1.1.0",
+        {
+            "docs/a.md": "a" * 30,
+            "docs/b.md": "b" * 30,
+            "docs/large.md": "l" * 50,
+            "scripts/new.sh": "#!/bin/sh\n" * 3,
+            "old.txt": None,
+        },
+        executable=["scripts/new.sh"],
+    )
+
+    run(github)
+
+    assert requests(github, "POST", "git/trees") >= 3
+    assert github.calls.count(("POST", "graphql")) == 0
+    assert waits == []
+    head = github.refs[BRANCH]
+    assert git(github.root, "rev-parse", f"{head}^{{tree}}") == git(
+        github.root, "write-tree"
+    )
+    files = tree(github.root, head)
+    assert files["scripts/new.sh"] == "100755"
+    assert "old.txt" not in files
+    # The large file and the answers, which are larger than a step here.
+    assert requests(github, "POST", "git/blobs") == 2
+
+
+def test_a_tree_that_timed_out_is_asked_again(
+    github: FakeGitHub, capsys: pytest.CaptureFixture[str], waits: list[float]
+) -> None:
+    github.tree_timeouts = 1
+    stage_modes(github)
+
+    run(github)
+
+    assert (
+        "::warning::GitHub timed out on a tree of the update" in capsys.readouterr().out
+    )
+    assert waits == [10]
+    assert requests(github, "POST", "git/trees") == 2
+    # The second try made the tree, with the modes of the files.
+    assert github.calls.count(("POST", "graphql")) == 0
+    assert tree(github.root, github.refs[BRANCH])["scripts/new.sh"] == "100755"
+
+
+@pytest.mark.parametrize(
+    ("fail", "tries", "waited"),
+    [
+        # GitHub times out every try of the tree.
+        ({}, 3, [10, 30]),
+        # Another error of GitHub isn't asked again.
+        ({("POST", "git/trees"): 500}, 1, []),
+        ({("POST", "git/commits"): 502}, 1, []),
+    ],
+)
+def test_when_the_git_data_api_fails_create_commit_on_branch_commits_the_update(
+    github: FakeGitHub,
+    capsys: pytest.CaptureFixture[str],
+    waits: list[float],
+    fail: dict[tuple[str, str], int],
+    tries: int,
+    waited: list[float],
+) -> None:
+    github.tree_timeouts = 0 if fail else 10
+    github.fail.update(fail)
+    stage_modes(github)
+
+    assert run(github) == "Opened #1: the blueprint's v1.0.0 to v1.1.0."
+
+    assert "::warning::The Git Data API failed on the commit of the update" in (
+        capsys.readouterr().out
+    )
+    assert requests(github, "POST", "git/trees") == tries
+    assert waits == waited
+    assert github.calls.count(("POST", "graphql")) == 1
+    assert set(github.refs) == {"main", BRANCH}
+    head = github.refs[BRANCH]
+    files = tree(github.root, head)
+    assert files["scripts/new.sh"] == "100644"
+    assert "old.txt" not in files
+    assert "git update-index --chmod=+x -- scripts/new.sh" in github.pulls[1]["body"]
 
 
 def test_the_modes_that_create_commit_on_branch_loses() -> None:
