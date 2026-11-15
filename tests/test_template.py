@@ -7813,10 +7813,26 @@ namespace {
 	$classes['OCP\Files\Folder']['get']->params[0]->sinks = is_int(TaintKind::INPUT_SQL)
 		? TaintKind::INPUT_SQL
 		: [TaintKind::INPUT_SQL];
-	$provider = new class($classes) {
-		public function __construct(private array $classes) {}
+	// The classes of the app, each with the classes that it extends, as Psalm has them
+	// after it populated the codebase: lowercase, with their names.
+	$app = [];
+	foreach ([
+		'OCA\App\Controller\PageController' => ['OCP\AppFramework\Controller'],
+		'OCA\App\Controller\ApiController' => ['OCP\AppFramework\OCSController', 'OCP\AppFramework\Controller'],
+		'OCA\App\Service\PageService' => [],
+		'OCA\App\Service\ControllerFactory' => ['OCA\App\Service\Factory'],
+	] as $class => $parents) {
+		$app[strtolower($class)] = (object)[
+			'parent_classes' => array_combine(array_map('strtolower', $parents), $parents),
+			'public_api' => false,
+		];
+	}
+	$provider = new class($classes, $app) {
+		private static array $all = [];
+		public function __construct(private array $classes, array $app) { self::$all = $app; }
 		public function has(string $class): bool { return isset($this->classes[$class]); }
 		public function get(string $class): object { return (object)['methods' => $this->classes[$class]]; }
+		public static function getAll(): array { return self::$all; }
 	};
 	$codebase = new Codebase($provider);
 	NextcloudTaintPlugin::afterCodebasePopulated(new AfterCodebasePopulatedEvent($codebase));
@@ -7839,6 +7855,7 @@ namespace {
 		'sinks' => [],
 		'controller' => $codebase->sources,
 		'paths' => $codebase->paths,
+		'public api' => array_map(static fn (object $storage): bool => $storage->public_api, $app),
 	];
 	foreach ($classes as $class => $methods) {
 		foreach ($methods as $method => $storage) {
@@ -7917,6 +7934,97 @@ def test_the_taint_plugin_works_with_psalm_6_and_7(
     assert found["paths"] == (
         [] if psalm == "6" else [[f"{node} specialized", node] for node in parameters]
     )
+    # Every controller is public API, as with @psalm-api, also one that extends a
+    # controller of Nextcloud's own, so that Psalm 7 searches for unused code from it;
+    # a class that is no controller isn't, whatever its name.
+    assert found["public api"] == {
+        "oca\\app\\controller\\pagecontroller": True,
+        "oca\\app\\controller\\apicontroller": True,
+        "oca\\app\\service\\pageservice": False,
+        "oca\\app\\service\\controllerfactory": False,
+    }
+
+
+# A Psalm for the step of the Variants that proves the controllers to be entry points:
+# it reads the controller and the service that the step writes, in the namespace of the
+# app, and reports as Psalm 7 does with its plugin, as Psalm 7 did without it, or
+# nothing, as when it crashes.
+ENTRY_POINT_PSALM = r"""#!/usr/bin/env bash
+controller=lib/Controller/EntryPointController.php
+service=lib/Service/EntryPointService.php
+grep -qxF 'namespace OCA\App\Controller;' "$controller" || exit 3
+grep -qxF 'use OCA\App\Service\EntryPointService;' "$controller" || exit 3
+grep -qF 'return new DataResponse($this->service->greet($name));' "$controller" || exit 3
+grep -qxF 'namespace OCA\App\Service;' "$service" || exit 3
+greet="$(grep -n 'function greet' "$service" | cut -d: -f1)"
+unused="$(grep -n 'function unused' "$service" | cut -d: -f1)"
+finding() {
+  printf '{"type": "PossiblyUnusedMethod", "file_name": "%s", "line_from": %s}' "$service" "$1"
+}
+case "$FINDS" in
+  unused) echo "[$(finding "$unused")]" ;;
+  both) echo "[$(finding "$greet"), $(finding "$unused")]" ;;
+  *) echo "Psalm crashed" >&2; exit 1 ;;
+esac
+exit 2
+"""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("finds", ["unused", "both", "nothing"])
+def test_the_variants_prove_that_psalm_takes_each_controller_as_an_entry_point(
+    tmp_path: Path, finds: str
+) -> None:
+    name = "Take each controller of the app as an entry point of Psalm"
+    variant = workflow_steps.step("variants.yml", "variant", name)
+    # Each new Nextcloud app and each that the update brings, with its own tools.
+    assert condition_of(variant) == (
+        "matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'"
+    )
+    workspace = tmp_path / "workspace"
+    project = workspace / "variant"
+    (project / "appinfo").mkdir(parents=True)
+    (project / "appinfo/info.xml").write_text(
+        "<?xml version='1.0'?>\n<info><id>app</id><namespace>App</namespace></info>\n",
+        encoding="utf-8",
+    )
+    psalm = project / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    psalm.write_text(ENTRY_POINT_PSALM, encoding="utf-8", newline="\n")
+    psalm.chmod(0o755)
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "variant",
+        name,
+        env={"FINDS": finds},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        workspace=workspace,
+    )
+
+    # The controller and the service are gone, whatever Psalm found.
+    assert sorted(path.name for path in (project / "lib").rglob("*.php")) == []
+    if finds == "unused":
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert done.stdout == (
+            "Psalm takes the controller as an entry point: it finds the method that"
+            " nothing calls, and nothing else.\n"
+        )
+        return
+    assert done.returncode == 1
+    service = "lib/Service/EntryPointService.php"
+    found = {
+        "both": f"{service}:8 PossiblyUnusedMethod\n{service}:12 PossiblyUnusedMethod",
+        "nothing": "nothing, or wrote no report",
+    }[finds]
+    assert done.stdout.startswith(
+        "Psalm (exit code "
+        + ("2" if finds == "both" else "1")
+        + f") should find only: {service}:12 PossiblyUnusedMethod\n"
+        f"It found: {found}\n"
+        "::error::Psalm takes a controller of a Nextcloud app for no entry point,"
+    ), done.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
