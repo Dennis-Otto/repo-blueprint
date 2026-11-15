@@ -18891,27 +18891,40 @@ def test_the_flaky_test_bot_runs_only_the_run_of_the_head_of_a_pull_request_agai
     if not again:
         assert summary == (
             f"abc1234 {NOT_AGAIN}, so the failed jobs of its run of CI (python) don't "
-            "run again: they would cancel the run for the newer commit.\n"
+            "run again.\n"
         )
 
 
 @WITH_JQ
 @pytest.mark.parametrize(
-    ("event", "tip", "again"),
+    ("event", "tip", "said"),
     [
-        ("push", {"main": {"object": {"sha": "abc1234def"}}}, True),
-        # A newer push to the branch replaced the commit.
-        ("push", {"main": {"object": {"sha": "fedcba9"}}}, False),
-        # The branch is gone.
-        ("push", {"main.error": "gh: Not Found (HTTP 404)\n"}, False),
+        ("push", {"main": {"object": {"sha": "abc1234def"}}}, ""),
+        # A newer push to the branch replaced the commit, and its run would cancel the
+        # run for the newer commit.
+        (
+            "push",
+            {"main": {"object": {"sha": "fedcba9"}}},
+            "abc1234 is no longer the head of main, so the failed jobs of its run of "
+            "CI (python) don't run again: they would cancel the run for the newer "
+            "commit.\n",
+        ),
+        # The branch is gone, and with it any newer commit.
+        (
+            "push",
+            {"main.error": "gh: Not Found (HTTP 404)\n"},
+            "The branch main of abc1234 is gone, so the failed jobs of its run of "
+            "CI (python) don't run again.\n",
+        ),
         # A run of a schedule or by hand shares its concurrency group with no other run.
-        ("schedule", {}, True),
-        ("workflow_dispatch", {}, True),
+        ("schedule", {}, ""),
+        ("workflow_dispatch", {}, ""),
     ],
 )
 def test_the_flaky_test_bot_runs_only_the_run_of_the_head_of_a_branch_again(
-    tmp_path: Path, event: str, tip: dict[str, object], again: bool
+    tmp_path: Path, event: str, tip: dict[str, object], said: str
 ) -> None:
+    again = not said
     calls, summary, _ = run_a_bot_after_the_checks(
         tmp_path,
         "rerun",
@@ -18931,7 +18944,8 @@ def test_the_flaky_test_bot_runs_only_the_run_of_the_head_of_a_branch_again(
 
     assert ("run rerun 5 --failed" in calls) == again
     assert any("git/ref/heads/main" in call for call in calls) == (event == "push")
-    assert ("abc1234 is no longer the head of main" in summary) != again
+    if not again:
+        assert summary == said
 
 
 @WITH_JQ
@@ -19097,12 +19111,24 @@ def test_the_bot_for_stopped_checks_fails_when_github_refuses_the_rerun(
     ("event", "head", "said"),
     [
         # A newer push to the pull request replaced the commit, or it closed.
-        ("pull_request", r"commits/abc1234def/pulls", ("", NOT_AGAIN)),
+        (
+            "pull_request",
+            r"commits/abc1234def/pulls",
+            (
+                "",
+                f"{NOT_AGAIN}, so the failed jobs of its run of CodeQL don't run again.",
+            ),
+        ),
         # A newer push to main replaced the commit.
         (
             "push",
             r"git/ref/heads/main",
-            ("fedcba9\n", "is no longer the head of main"),
+            (
+                "fedcba9\n",
+                "is no longer the head of main, so the failed jobs of its run of "
+                "CodeQL don't run again: they would cancel the run for the newer "
+                "commit.",
+            ),
         ),
     ],
 )
@@ -19134,10 +19160,7 @@ def test_the_bot_for_stopped_checks_leaves_the_run_of_a_replaced_commit_alone(
 
     assert done.returncode == 0, done.stderr
     assert not done.called("run rerun")
-    assert done.summary == (
-        f"abc1234 {words}, so the failed jobs of its run of CodeQL don't run again: "
-        "they would cancel the run for the newer commit.\n"
-    )
+    assert done.summary == (f"abc1234 {words}\n")
 
 
 def variants_of_a_run(

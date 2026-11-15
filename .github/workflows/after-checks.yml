@@ -444,7 +444,10 @@ jobs:
                 grep -q "HTTP 404" "$RUNNER_TEMP/gh-errors" || exit 1
                 tip=""
               fi
-              if [[ "$tip" != "$SHA" ]]; then
+              if [[ -z "$tip" ]]; then
+                echo "The branch $BRANCH of ${SHA:0:7} is gone, so the failed jobs of its run of $NAME don't run again." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              elif [[ "$tip" != "$SHA" ]]; then
                 echo "${SHA:0:7} is no longer the head of $BRANCH, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
@@ -453,7 +456,7 @@ jobs:
               number="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/commits/$SHA/pulls" \
                 --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
               if [[ -z "$number" ]]; then
-                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again." >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
               ;;
@@ -1529,7 +1532,10 @@ jobs:
                 grep -q "HTTP 404" "$RUNNER_TEMP/gh-errors" || exit 1
                 tip=""
               fi
-              if [[ "$tip" != "$SHA" ]]; then
+              if [[ -z "$tip" ]]; then
+                echo "The branch $BRANCH of ${SHA:0:7} is gone, so the failed jobs of its run of $NAME don't run again." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              elif [[ "$tip" != "$SHA" ]]; then
                 echo "${SHA:0:7} is no longer the head of $BRANCH, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
@@ -1538,7 +1544,7 @@ jobs:
               number="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/commits/$SHA/pulls" \
                 --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
               if [[ -z "$number" ]]; then
-                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again." >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
               ;;
