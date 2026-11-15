@@ -6,7 +6,10 @@ fails runs these commands on the head of its pull request, or on main, with `fix
 and keeps each file that they changed as an artifact fixes-<job>. After the checks,
 the fix bot of after-checks.yml takes these artifacts as data that the pull request
 made: it runs nothing of them and lets through only text files that the commit has
-already, by paths of plain names, outside .git and .github/workflows. Where nobody
+already, by paths of plain names, outside .git and .github/workflows, and only where
+the explanation of the check of the artifact names the path in writes, by the
+catalog of main; a fix of a check that names none reaches only a pull request whose
+author reads the commit. Where nobody
 reads its commit before the merge, on the pull request of a bot, on one whose
 auto-merge is on and on that of main, it leaves to a person each file that decides
 what a workflow runs or runs with its rights, such as blueprint.py. It reads the
@@ -60,7 +63,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -88,6 +91,7 @@ from blueprint.coach import (
 )
 from blueprint.diagrams import COMMIT, PART, git
 from blueprint.github import Api, GitHubError, Json
+from blueprint.locks import WILDCARDS
 from blueprint.migrate import MOVABLE
 from blueprint.pages import command as tool_command
 from blueprint.update import BRANCH as UPDATE_BRANCH
@@ -315,10 +319,86 @@ def fix_text(root: Path) -> list[str]:
 @dataclass(frozen=True)
 class Fixes:
     """The files that the checks fixed, by their paths, and those that the bot leaves
-    to a person, each with the reason."""
+    to a person, each with the reason; unnamed holds the paths that came from a check
+    whose explanation names no paths in writes, which only a person's pull request
+    takes."""
 
     files: dict[str, bytes]
     left: dict[str, str] = field(default_factory=dict)
+    unnamed: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class Writes:
+    """What the fixes of an artifact fixes-<name> may write: the globs of writes of the
+    explanations of its check, and whether one of them names none."""
+
+    check: str
+    globs: tuple[str, ...] = ()
+    unnamed: bool = True
+
+
+# A leg of a matrix job keeps fixes-<name>-<index> of the strategy.
+LEG = re.compile(r"-[0-9]+\Z")
+# The folder that collect downloads an artifact into: the id of its run, then its name.
+DOWNLOADED = re.compile(r"\A[0-9]+-")
+
+
+def writes_of(catalog: Catalog, root: Path, artifact: str) -> Writes:
+    """What the fixes of an artifact may write, as the catalog of main says: fixes-<name>
+    holds the fixes of the check <name>, or of <name> (*) for each of its kinds or legs,
+    as fixes-check those of check (*), whose job runs scripts/check.sh, so that each of
+    its steps names its own. A check that the catalog doesn't know names nothing."""
+    name = artifact.removeprefix(ARTIFACT)
+    entry = None
+    for candidate in dict.fromkeys((name, LEG.sub("", name))):
+        entry = catalog.check(candidate) or catalog.checks.get(f"{candidate} (*)")
+        if entry is not None:
+            break
+    if entry is None:
+        return Writes(name)
+    if entry.key != OWN_CHECKS:
+        return Writes(entry.key, entry.writes or (), entry.writes is None)
+    steps = [catalog.step(step) for step in check_steps(root)]
+    fixing = [step for step in steps if step is not None and step.autofix]
+    globs = [glob for step in fixing for glob in step.writes or ()]
+    return Writes(
+        entry.key,
+        tuple(dict.fromkeys(globs)),
+        any(step.writes is None for step in fixing),
+    )
+
+
+def writes_in(root: Path) -> Callable[[str], Writes]:
+    """What the fixes of each artifact may write, by the catalog and scripts/check.sh
+    in root, the checkout of main that the bot runs from."""
+    catalog = Catalog.load(root)
+    return lambda artifact: writes_of(catalog, root, artifact)
+
+
+def written_by(glob: str, path: str) -> bool:
+    """Whether a glob of writes matches a path, as the ignorePaths of Renovate do."""
+    parts = re.split(r"(\*\*/|\*\*|\*|\?)", glob)
+    pattern = "".join(WILDCARDS.get(part, re.escape(part)) for part in parts)
+    return re.fullmatch(pattern, path) is not None
+
+
+def named(writes: Writes, path: str) -> bool:
+    """Whether a glob of writes of the check names the path."""
+    return any(written_by(glob, path) for glob in writes.globs)
+
+
+def beyond(writes: Writes, path: str) -> str:
+    """Why the bot doesn't take a fix of path from the artifact of a check: the
+    explanation of that check names the paths that its fixes write, and not this one.
+    What runs in a check, such as a dependency of the branch, writes the files that it
+    keeps, so a fix of another file isn't what the check's commands make."""
+    if writes.unnamed or named(writes, path):
+        return ""
+    return (
+        f"no path that the fixes of the check {code(writes.check, NAME_LENGTH)} write, "
+        "by writes of its explanation, so a person commits its fix"
+    )
 
 
 def allowed(path: str) -> bool:
@@ -360,6 +440,11 @@ UNREAD = {
     "the commit",
 }
 UNREAD_UNKNOWN = "nobody may read the commit before the pull request merges"
+# What a commit onto a pull request that its author reads says of a fix of such a file.
+READ_FIRST = (
+    "It changes files that decide what a workflow runs or that run with its rights: "
+    "read them before the merge, and before auto-merge goes on:"
+)
 
 
 def runs_with_rights(path: str) -> bool:
@@ -395,7 +480,9 @@ def for_unread(fixes: Fixes, why: str | None) -> Fixes:
     and a job without rights must not reach one with them that way. Where the author
     reads the commit, why is empty and every fix stays; None means it isn't known. On
     the update of the blueprint, a file that a migration moves stays too, as decision
-    0111 has the bot commit the move (blueprint/migrate.py)."""
+    0111 has the bot commit the move (blueprint/migrate.py). Nor does such a commit take
+    a fix whose check names no paths in writes, as an explanation of a project may not
+    yet: what its check may write is unknown."""
     if why == "":
         return fixes
     reason = UNREAD.get(why or "", UNREAD_UNKNOWN)
@@ -407,9 +494,14 @@ def for_unread(fixes: Fixes, why: str | None) -> Fixes:
                 f"decides what a workflow runs, and {reason}, so a person commits "
                 "its fix"
             )
+        elif path in fixes.unnamed:
+            left[path] = (
+                "comes from a check whose explanation names no paths in writes, and "
+                f"{reason}, so a person commits its fix"
+            )
         else:
             kept[path] = data
-    return Fixes(kept, dict(sorted(left.items())))
+    return replace(fixes, files=kept, left=dict(sorted(left.items())))
 
 
 def refused(path: Path, relative: str) -> str:
@@ -425,13 +517,19 @@ def refused(path: Path, relative: str) -> str:
     return ""
 
 
-def load(folders: Iterable[Path]) -> Fixes:
+def load(
+    folders: Iterable[Path], writes: Callable[[str], Writes] | None = None
+) -> Fixes:
     """The fixes that the checks kept, each folder an artifact with its files under
     files/. They come from a pull request: only text files by allowed paths count, at
-    most MOST_FILES of them, and the rest is left to a person."""
+    most MOST_FILES of them, and the rest is left to a person. writes says for the name
+    of an artifact what its check may write, by the catalog of main: a file counts only
+    where its check allows its path, and one whose check names no paths is unnamed."""
     files: dict[str, bytes] = {}
     left: dict[str, str] = {}
+    unnamed: set[str] = set()
     for folder in folders:
+        allows = writes(DOWNLOADED.sub("", folder.name)) if writes else None
         base = folder / "files"
         for directory, subfolders, names in os.walk(base):
             for name in sorted([*subfolders, *names]):
@@ -445,15 +543,21 @@ def load(folders: Iterable[Path]) -> Fixes:
                 if relative in files:
                     continue
                 reason = refused(path, relative)
+                if not reason and allows is not None:
+                    reason = beyond(allows, relative)
                 if reason:
                     left[relative] = reason
-                else:
-                    files[relative] = path.read_bytes()
+                    continue
+                files[relative] = path.read_bytes()
+                # A check that allows the path wins over one that doesn't.
+                left.pop(relative, None)
+                if allows is not None and not named(allows, relative):
+                    unnamed.add(relative)
     kept = dict(sorted(files.items())[:MOST_FILES])
     left |= {
         path: "one file too many for one commit" for path in files if path not in kept
     }
-    return Fixes(kept, dict(sorted(left.items())))
+    return Fixes(kept, dict(sorted(left.items())), frozenset(unnamed & set(kept)))
 
 
 def blob_sha(data: bytes) -> str:
@@ -486,7 +590,7 @@ def changeable(files: dict[str, tuple[str, str]], sha: str, fixes: Fixes) -> Fix
             left[path] = f"no file of {sha[:7]}; the bot changes files, it adds none"
         elif blob != blob_sha(data):
             kept[path] = data
-    return Fixes(kept, dict(sorted(left.items())))
+    return replace(fixes, files=kept, left=dict(sorted(left.items())))
 
 
 def listing(fixes: Fixes) -> list[str]:
@@ -950,11 +1054,21 @@ def commit_onto_branch(
             else "The bot leaves every fix to a person."
         )
         return "\n".join([said, "", *listing(fixes), ""])
-    body = signed_off(api, app, f"{MADE_BY} {url}")
+    # Where the author reads the commit, the bot decided so as it planned: a later
+    # auto-merge, or a merge right after the checks pass, takes a fix of such a file
+    # without another look, so the commit says that it needs one.
+    guarded = sorted(
+        path for path in fixes.files if unread == "" and runs_with_rights(path)
+    )
+    note = f"\n\n{READ_FIRST} {', '.join(guarded)}" if guarded else ""
+    body = signed_off(api, app, f"{MADE_BY} {url}{note}")
     made = onto_branch(api, repo, branch, sha, fixes, body)
     if not made:
         return moved_on(branch, sha)
     lines = [f"The fix bot committed {made[:7]} onto {code(branch, NAME_LENGTH)}:", ""]
+    if guarded:
+        named_files = ", ".join(code(path, NAME_LENGTH) for path in guarded)
+        lines += [f"{READ_FIRST} {named_files}", ""]
     return "\n".join([*lines, *listing(fixes), ""])
 
 
@@ -1434,7 +1548,7 @@ def for_fork(api: Api, repo: str, number: int, fixes: Fixes) -> Fixes:
             left[path] = "no file that the pull request changes"
         else:
             kept[path] = data
-    return Fixes(kept, dict(sorted(left.items())))
+    return replace(fixes, files=kept, left=dict(sorted(left.items())))
 
 
 @dataclass(frozen=True)

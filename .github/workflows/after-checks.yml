@@ -106,7 +106,8 @@ name: After the checks
 # as a new rule of a tool, repairs itself the same way before it fails the next pull
 # request; a weekly run that passes starts no job here, so a quiet week takes no runner
 # of the bot. blueprint.py of main lets through only text files that the commit has
-# already, outside .git and the workflows. It commits at most twice in a row onto its own commits,
+# already, outside .git and the workflows, at the paths that the explanation of the
+# check of each artifact names in writes of the catalog of main. It commits at most twice in a row onto its own commits,
 # and leaves a pull request with the label no-bot-fixes alone. When the bot fails, it
 # says so on the pull request; on main, it keeps one issue open until it passes again.
 # A check still running after the wait, such as long end-to-end tests, leaves the commit
