@@ -37,7 +37,7 @@ def hooks(at: Path | None = None) -> ModuleType:
     """The hooks of the website, as MkDocs loads them, from beside the blueprint's
     code; with at, as if they were the file at, beside the pictures there."""
     spec = importlib.util.spec_from_file_location(
-        "mkdocs_blueprint_of_the_steps", ROOT / ".github/mkdocs_blueprint.py"
+        "mkdocs_blueprint", ROOT / ".github/mkdocs_blueprint.py"
     )
     assert spec is not None
     assert spec.loader is not None
