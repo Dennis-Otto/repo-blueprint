@@ -516,6 +516,90 @@ jobs:
         if: matrix.start != 'adopted'
         working-directory: ${{ env.PROJECT }}
         run: bash scripts/check.sh
+      # Nextcloud creates a controller by its route and calls its actions itself, so no
+      # code of the app calls them; Psalm 7 searches for unused code from the entry
+      # points alone, and the plugin of the taint analysis makes each controller one
+      # (#934). With the Psalm that the app locks: a controller whose action calls a
+      # service, beside a method of the service that nothing calls, which Psalm has to
+      # find, and nothing else. The two files are gone after the step.
+      - name: Take each controller of the app as an entry point of Psalm
+        if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
+        timeout-minutes: 5
+        run: |
+          cd "$PROJECT"
+          namespace="OCA\\$(python3 -c 'from xml.etree import ElementTree; print(ElementTree.parse("appinfo/info.xml").findtext("namespace"))')"
+          controller=lib/Controller/EntryPointController.php
+          service=lib/Service/EntryPointService.php
+          mkdir -p lib/Controller lib/Service
+          cat > "$controller" <<EOF
+          <?php
+
+          declare(strict_types=1);
+
+          namespace $namespace\\Controller;
+
+          use $namespace\\Service\\EntryPointService;
+          use OCP\\AppFramework\\Controller;
+          use OCP\\AppFramework\\Http\\DataResponse;
+          use OCP\\IRequest;
+
+          final class EntryPointController extends Controller {
+              public function __construct(IRequest \$request, private EntryPointService \$service) {
+                  parent::__construct('entrypoint', \$request);
+              }
+
+              /**
+               * @return DataResponse<200, string, array<never, never>>
+               */
+              public function greet(string \$name): DataResponse {
+                  return new DataResponse(\$this->service->greet(\$name));
+              }
+          }
+          EOF
+          cat > "$service" <<EOF
+          <?php
+
+          declare(strict_types=1);
+
+          namespace $namespace\\Service;
+
+          final class EntryPointService {
+              public function greet(string \$name): string {
+                  return 'Hello, ' . \$name;
+              }
+
+              public function unused(): string { // expect: PossiblyUnusedMethod
+                  return 'Nothing calls this method.';
+              }
+          }
+          EOF
+          expected="$service:$(grep -n 'expect: PossiblyUnusedMethod' "$service" | cut -d: -f1) PossiblyUnusedMethod"
+          report="$RUNNER_TEMP/psalm-entry-points.json"
+          status=0
+          env -u GITHUB_WORKFLOW vendor/bin/psalm --threads=1 --no-cache --no-progress \
+            --output-format=json > "$report" || status=$?
+          rm "$controller" "$service"
+          # Each finding as file:line type; nothing, when Psalm wrote no report.
+          found="$(python3 - "$report" <<'FOUND'
+          import json
+          import sys
+
+          try:
+              with open(sys.argv[1], encoding="utf-8") as report:
+                  issues = json.load(report)
+          except ValueError:
+              issues = []
+          for issue in issues:
+              print(f"{issue['file_name']}:{issue['line_from']} {issue['type']}")
+          FOUND
+          )"
+          if [[ "$found" != "$expected" ]]; then
+            echo "Psalm (exit code $status) should find only: $expected"
+            echo "It found: ${found:-nothing, or wrote no report}"
+            echo "::error::Psalm takes a controller of a Nextcloud app for no entry point, or finds unused code where the controller uses it: .github/psalm/NextcloudTaintPlugin.php marks each class that extends OCP\\AppFramework\\Controller as public API, as @psalm-api does, in afterCodebasePopulated()."
+            exit 1
+          fi
+          echo "Psalm takes the controller as an entry point: it finds the method that nothing calls, and nothing else."
       # The sample extension as Chrome for Testing loads it, as the CI of the project does.
       - name: Load the extension of the project in Chrome for Testing
         if: matrix.start != 'adopted' && matrix.kind == 'chrome-extension'

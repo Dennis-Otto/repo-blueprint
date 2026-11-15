@@ -32,7 +32,7 @@ On Windows, run them in Git Bash. While you work, the quicker steps of the check
 - `vendor/bin/phpunit --filter name`: one test.
 - `vendor/bin/phpunit --random-order-seed SEED`: the tests in the order of a run that failed; they run in a new random order each time, and PHPUnit names its seed as it starts.
 - `vendor/bin/php-cs-fixer fix`: the format of the code, in the coding standard of Nextcloud.
-- `vendor/bin/psalm --threads=1 --no-cache`, and with `--taint-analysis`: the types at the strictest level, and untrusted input, such as a parameter of a request to a controller or the answer of another server, that reaches HTML, SQL, a shell, a file, a request to another server or a header. A function that makes input safe for a sink says so with `@psalm-taint-escape` and a comment on why; `.github/psalm/` belongs to the blueprint.
+- `vendor/bin/psalm --threads=1 --no-cache`, and with `--taint-analysis`: the types at the strictest level, and untrusted input, such as a parameter of a request to a controller or the answer of another server, that reaches HTML, SQL, a shell, a file, a request to another server or a header. A function that makes input safe for a sink says so with `@psalm-taint-escape` and a comment on why. A controller needs no `@psalm-api`: the plugin in `.github/psalm/`, which belongs to the blueprint, makes each one an entry point of the search for unused code, as Nextcloud calls its actions itself.
 [%- elif stack == 'node' -%]
 On Windows, run them in Git Bash. While you work, the quicker steps of the checks:
 
