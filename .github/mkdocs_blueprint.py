@@ -8,28 +8,59 @@ https://github.com/Dennis-Otto/repo-blueprint
 from __future__ import annotations
 
 import faulthandler
-import gzip
 import html
 import importlib.util
 import json
 import logging
 import posixpath
 import re
-import shutil
 import struct
 import subprocess
 import sys
 import time
-import tomllib
 from collections import Counter
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import quote, unquote, urljoin, urlparse, urlsplit
 
 import yaml
 
 log = logging.getLogger("mkdocs.hooks.blueprint")
+
+
+def code_of(names: tuple[str, ...], module: str) -> ModuleType | None:
+    """The code of blueprint.py in the first file of names, by its path from this
+    file, loaded as module, which needs nothing but Python; None without the file."""
+    here = Path(__file__).resolve().parent
+    path = next((here / name for name in names if (here / name).is_file()), None)
+    if path is None:
+        return None
+    spec = importlib.util.spec_from_file_location(module, path)
+    # A file of Python always has a spec, with its loader.
+    assert spec is not None
+    assert spec.loader is not None
+    code = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = code
+    spec.loader.exec_module(code)
+    return code
+
+
+# The steps of the website that need no generator (decision 0164): the page of the
+# automation before the build, and the sitemaps and the map of the website after
+# it. blueprint/website.py holds them, beside this file in a repository made from
+# the blueprint, and at the root of the blueprint itself; the hooks hand them what
+# MkDocs knows, so that a build with another generator can take the same steps.
+WEBSITE_CODE = ("blueprint/website.py", "../blueprint/website.py")
+if TYPE_CHECKING:
+    from blueprint import website
+else:
+    website = code_of(WEBSITE_CODE, "blueprint_website")
+    if website is None:
+        raise ImportError(
+            "The hooks of the website need blueprint/website.py beside "
+            ".github/mkdocs_blueprint.py, which copier update brings with them."
+        )
 
 # The plugins of Material that download from other servers while the website is
 # built: privacy the fonts and scripts that the pages use, social the fonts of the
@@ -195,20 +226,6 @@ SEARCH_SCRIPT = (
 # What the scripts of Material hold while they ask for the index in the way that
 # SEARCH_SCRIPT redirects.
 SEARCH_REQUEST = ("XMLHttpRequest", "search_index.json")
-# The sitemap that the website hands to search engines, with an entry for each page.
-SITEMAP_ENTRY = re.compile(r"\s*<url>\s*<loc>(?P<loc>[^<]*)</loc>.*?</url>", re.S)
-SITEMAP_LINK = re.compile(r'\s*<xhtml:link\b[^>]*?\bhref="(?P<href>[^"]*)"[^>]*/>')
-# The map of the website for AI assistants (https://llmstxt.org/), at its root; the
-# section of the pages at the top of the menu; the folder of the decision records, at
-# any depth, which are for maintainers and stay out of it; and what a link of the map
-# can't hold, as its parsers take the first ] for the end of the name and the first )
-# for the end of the address.
-LLMS_TXT = "llms.txt"
-LLMS_PAGES = "Pages"
-DECISIONS = "decisions"
-LINK_NAME = str.maketrans("[]", "()")
-LINK_ADDRESS = str.maketrans({"(": "%28", ")": "%29"})
-SENTENCE_ENDS = ".…!?"
 # A line of a page that includes a file of the repository, --8<-- "README.md", or a
 # part of one, "README.md:loop"; a line --8<-- alone starts and ends a block with
 # one file on each line.
@@ -340,9 +357,9 @@ def on_config(config: Any) -> None:
     if (
         isinstance(config.nav, list)
         and automated(config) is not None
-        and not listed_in(config.nav, AUTOMATION)
+        and not listed_in(config.nav, website.AUTOMATION)
     ):
-        add_to_menu(config.nav, AUTOMATION)
+        add_to_menu(config.nav, website.AUTOMATION)
 
 
 class Languages(NamedTuple):
@@ -660,7 +677,7 @@ def on_files(files: Any, config: Any) -> Any:
                 str(picture.parent),
                 config.site_dir,
                 config.use_directory_urls,
-                dest_uri=f"{SERVED}/{picture.name}",
+                dest_uri=f"{website.SERVED}/{picture.name}",
             )
         )
     return files
@@ -908,20 +925,7 @@ def changelog_code() -> ModuleType | None:
     """blueprint/changelog.py, the code of blueprint.py that reads the changelog and its
     fragments as the release bot does, loaded from its file, which needs nothing but
     Python; None without the file."""
-    here = Path(__file__).resolve().parent
-    path = next(
-        (here / name for name in CHANGELOG_CODE if (here / name).is_file()), None
-    )
-    if path is None:
-        return None
-    spec = importlib.util.spec_from_file_location("blueprint_changelog", path)
-    # A file of Python always has a spec, with its loader.
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return code_of(CHANGELOG_CODE, "blueprint_changelog")
 
 
 def included(
@@ -1609,12 +1613,14 @@ def on_post_build(config: Any) -> None:
     each language: decisions/ and de/decisions/ on decisions/0006-beta-channel.html.
     The i18n plugin writes a single sitemap with every language at the root, so every
     other folder that holds a page gets a copy.
+
+    The sitemaps and the map are steps of blueprint/website.py, which need no
+    generator: the hook hands them what the build knows, the pages that no search
+    engine lists and the menu of each language.
     """
     site = Path(config.site_dir)
-    sitemap = site / "sitemap.xml"
-    for path in (sitemap, site / "sitemap.xml.gz"):
-        unlist(path, BUILT.unlisted)
-    write_map(site / LLMS_TXT, config)
+    website.unlist_pages(site, BUILT.unlisted)
+    write_map(site / website.LLMS_TXT, config)
     found = languages(config)
     if found is None:
         return
@@ -1622,10 +1628,7 @@ def on_post_build(config: Any) -> None:
     if index.is_file():
         search_by_language(index, found, BUILT.untranslated)
         search_request(site / "assets/javascripts")
-    if not sitemap.is_file():
-        return
-    for folder in {page.parent for page in site.rglob("*.html")} - {site}:
-        shutil.copyfile(sitemap, folder / "sitemap.xml")
+    website.copy_sitemap(site)
 
 
 # After the i18n plugin, which writes the search index of every language with -100,
@@ -1656,119 +1659,29 @@ def write_map(path: Path, config: Any) -> None:
         for language in (config.plugins["i18n"].config.languages if found else ())
     }
     further = {language: names[language] for language in spoken[1:]}
-    path.write_text(map_of_website(spoken[0], further), encoding="utf-8", newline="\n")
-
-
-def map_of_website(default: str, further: dict[str, str]) -> str:
-    """llms.txt (https://llmstxt.org/) of the website, in default, its language: its
-    name, its description and a section for each part of its menu, with the pages of
-    that part. A link names the page of each language of further, by its name, that
-    has a version of its own."""
-    menu = BUILT.menus[default]
-    lines = [f"# {one_line(menu.name)}", ""]
-    if menu.summary:
-        lines += [f"> {one_line(menu.summary)}", ""]
-    translated = (
-        f", each with its page in {' and '.join(further.values())} where there is one"
-        if further
-        else ""
-    )
-    lines += [f"The pages of this website, in the order of its menu{translated}.", ""]
-    versions = {
-        language: {page.url: page for page in pages_in(BUILT.menus[language].nav.items)}
-        for language in further
+    menus = {
+        language: website.Menu(menu.name, menu.summary, menu_items(menu.nav.items))
+        for language, menu in BUILT.menus.items()
     }
-    for heading, pages in parts_of(menu.nav):
-        items = [
-            map_item(page, further, versions)
-            for page in pages
-            if page.canonical_url not in BUILT.unlisted
-            and DECISIONS not in page.url.split("/")
-        ]
-        if items:
-            lines += [f"## {one_line(heading)}", "", *items, ""]
-    return "\n".join(lines)
+    text = website.map_of_website(menus, spoken[0], further, BUILT.unlisted)
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def parts_of(nav: Any) -> list[tuple[str, list[Any]]]:
-    """The parts of a menu, each with its pages in the order of the menu: the pages at
-    its top under LLMS_PAGES, and then each of its sections, with the pages of the
-    sections inside it. A link to another site is no page of the website."""
-    top = [item for item in nav.items if item.is_page]
-    sections = [item for item in nav.items if item.is_section]
-    return [
-        (LLMS_PAGES, top),
-        *((section.title, pages_in(section.children)) for section in sections),
-    ]
-
-
-def pages_in(items: list[Any]) -> list[Any]:
-    """The pages among items of a menu, and inside its sections, in the order of the
-    menu."""
-    pages: list[Any] = []
+def menu_items(items: list[Any]) -> tuple[website.Item, ...]:
+    """The items of a menu of MkDocs as the map of the website reads them: each page
+    with its title, its path on the website, its full address and its description,
+    and each section with its items. A link to another site is no page of the
+    website."""
+    found: list[website.Item] = []
     for item in items:
         if item.is_section:
-            pages += pages_in(item.children)
+            found.append(website.Section(item.title, menu_items(item.children)))
         elif item.is_page:
-            pages.append(item)
-    return pages
-
-
-def map_item(
-    page: Any, further: dict[str, str], versions: dict[str, dict[str, Any]]
-) -> str:
-    """The item of the map for page: its title, which links it, and after it its
-    description and its version in each language of further, in versions by its path
-    on the website, unless no search engine may list that version: it shows the page
-    untranslated, or its own front matter says noindex."""
-    description = one_line(page.meta.get("description") or "")
-    if description and description[-1] not in SENTENCE_ENDS:
-        description += "."
-    links = []
-    for language, name in further.items():
-        there = f"{language}/{page.url}"
-        version = versions[language].get(there)
-        if version is not None and version.canonical_url not in BUILT.unlisted:
-            links.append(f"{name}: {map_link(version)}")
-    notes = " ".join(filter(None, (description, ". ".join(links))))
-    return f"- {map_link(page)}: {notes}" if notes else f"- {map_link(page)}"
-
-
-def map_link(page: Any) -> str:
-    """A link of the map to page, by its title and its full address."""
-    address = page.canonical_url.translate(LINK_ADDRESS)
-    return f"[{one_line(page.title)}]({address})"
-
-
-def one_line(text: str) -> str:
-    """text for the map: on one line, with a space between two words, and with
-    parentheses for its brackets."""
-    return " ".join(text.split()).translate(LINK_NAME)
-
-
-def unlist(path: Path, addresses: set[str]) -> None:
-    """Take the pages at addresses out of a sitemap, sitemap.xml or the packed
-    sitemap.xml.gz, and the links to them out of its other pages."""
-    if not path.is_file():
-        return
-
-    def keep(text: str) -> str:
-        text = SITEMAP_ENTRY.sub(
-            lambda m: "" if html.unescape(m["loc"]) in addresses else m[0], text
-        )
-        return SITEMAP_LINK.sub(
-            lambda m: "" if html.unescape(m["href"]) in addresses else m[0], text
-        )
-
-    if path.suffix != ".gz":
-        text = path.read_text(encoding="utf-8")
-        path.write_text(keep(text), encoding="utf-8", newline="\n")
-        return
-    with gzip.GzipFile(path) as reader:
-        text = reader.read().decode("utf-8")
-        built = reader.mtime
-    with gzip.GzipFile(path, "wb", mtime=built) as writer:
-        writer.write(keep(text).encode("utf-8"))
+            description = item.meta.get("description") or ""
+            found.append(
+                website.Entry(item.title, item.url, item.canonical_url, description)
+            )
+    return tuple(found)
 
 
 def search_by_language(index: Path, found: Languages, copies: set[str]) -> None:
@@ -1942,58 +1855,14 @@ def not_found(output: str, config: Any) -> str:
 
 # ---------------------------------------------------------- the page of the automation
 
-# The page of every website that shows how its repository looks after itself: each
-# workflow of .github/workflows/ with the comment at its top, what starts it, which
-# of its checks main requires, and the environments and secrets that it uses. The
-# hooks write it at every build, so it changes with the workflows. A page of the
-# project by the same name, docs/automation.md, takes its place, and
-# docs/automation.de.md that of the German version.
-AUTOMATION = "automation.md"
+# The page of every website that shows how its repository looks after itself, which
+# blueprint/website.py writes from the workflows at every build (AUTOMATION there):
+# the hooks add it to the files and the menu of the website, serve its pictures and
+# fold the section of each workflow.
 # The page of the menu after which the page of the automation comes, when the menu
 # of a project doesn't name it.
 SECURITY = "security.md"
-# The settings as code, whose required_checks of [branch] main requires.
-SETTINGS = ("repository.toml", "repository.project.toml")
-# The workflows of the blueprint that only it runs: every job of them asks for
-# another repository than the one of the website.
-GUARD = re.compile(
-    r"\s*(?:\$\{\{\s*)?github\.repository\s*!=\s*'(?P<repository>[^']+)'\s*(?:\}\}\s*)?"
-)
-# The secrets that a workflow uses; GitHub gives every run GITHUB_TOKEN.
-SECRET = re.compile(r"\bsecrets\.(?P<name>[A-Za-z_]\w*)")
-GIVEN = frozenset({"GITHUB_TOKEN"})
-# The address with which the comment of a workflow of the blueprint ends, which the
-# page shows as the origin of the workflow on the websites of other repositories.
-BLUEPRINT = "https://github.com/Dennis-Otto/repo-blueprint"
-# What the comment at the top of a workflow names as code, or as an address.
-CODE_OR_ADDRESS = re.compile(
-    r"(?<!`)`(?P<code>[^`]+)`(?!`)"
-    r"|(?P<address>https?://[^\s<>\"'`]*[^\s<>\"'`.,;:!?)])"
-)
-# The groups of the page, in its order, and the words of the file names of the
-# workflows that put one into its group: the first group with such a word, in the
-# order of KEYWORDS, takes it. A workflow without one is a check when a push or a
-# pull request starts it, maintenance when a schedule does, and a bot otherwise.
-GROUPS = ("checks", "releases", "bots", "security", "maintenance")
-KEYWORDS = (
-    ("security", {"codeql", "dependency", "findings", "fuzz", "osv", "scorecard"}),
-    ("security", {"secret", "security", "zizmor"}),
-    ("releases", {"deploy", "publish", "register", "release", "rollout", "sbom"}),
-    ("bots", {"after", "area", "automerge", "branches", "issue", "pictures"}),
-    ("bots", {"renovate", "screenshot", "screenshots", "update", "welcome"}),
-    ("maintenance", {"cleanup", "dashboard", "health", "labels", "report"}),
-    ("maintenance", {"settings", "translations", "upstream"}),
-    ("checks", {"ci", "diagrams", "docs", "downstream", "e2e", "lint", "links"}),
-    ("checks", {"mutation", "newest", "properties", "runner", "test", "title"}),
-    ("checks", {"variants", "visual", "windows"}),
-)
-CHANGES = frozenset({"push", "pull_request", "pull_request_target", "merge_group"})
-# The headings of the page that are not those of a workflow, by their anchors, the
-# same in every language.
-SECTIONS = ("required-checks", "at-a-glance", *GROUPS)
-# The attribute of the heading of the table of the workflows by which blueprint.py
-# site-check knows the page of the hooks from a page of the project with such a heading.
-AUTOMATION_MARK = 'data-blueprint-automation="true"'
+
 # The section of a workflow in the HTML of the page: its heading, the only kind that
 # the page has at this level, without the link to it that the extension toc puts in
 # it, and what follows it, up to the next heading of a workflow or a group, or the end
@@ -2005,288 +1874,15 @@ WORKFLOW_SECTION = re.compile(
     r"(?P<body>.*?)(?=<h[23]\b|</div>|\Z)",
     re.S,
 )
-# The words of the page in each language that it has. The comments of the
-# workflows are English on every page.
-WORDS: dict[str, dict[str, str]] = {
-    "en": {
-        "title": "Automation",
-        "description": (
-            "How {site} looks after itself: its {count} workflows of GitHub Actions, "
-            "what starts each one, which checks a pull request needs and which "
-            "workflows hold secrets."
-        ),
-        "intro": (
-            "How this repository looks after itself: its {count} workflows of GitHub "
-            "Actions, in `.github/workflows/`, check every change, make a release of "
-            "what reaches `main`, answer issues and pull requests, look for "
-            "vulnerabilities and keep the repository current. The website writes "
-            "this page from the workflows at every build, with the comment at the "
-            "top of each, so it is always as current as they are."
-        ),
-        "required-checks": "What a pull request needs",
-        "required intro": (
-            "A pull request merges into `main` once each of these checks passes, as "
-            "the settings in {files} require:"
-        ),
-        "check of": "{check} of {workflow}",
-        "at-a-glance": "At a glance",
-        "glance intro": (
-            "The times are UTC. GitHub starts a scheduled run when it can: often "
-            "some minutes late, and at busy times not at all."
-        ),
-        "workflow": "Workflow",
-        "when": "When",
-        "required": "Required checks",
-        "environments": "Environments",
-        "secrets": "Secrets",
-        "source": "Source",
-        "from": "{source}, from the [Repo Blueprint]({blueprint})",
-        "checks": "Checks",
-        "checks intro": "They check every change before it reaches `main`.",
-        "releases": "Releases",
-        "releases intro": (
-            "They make a signed release of what reaches `main`, deliver it and "
-            "verify it as its users can."
-        ),
-        "bots": "Bots",
-        "bots intro": (
-            "They answer issues and pull requests, fix what a command can fix and "
-            "keep the pull requests moving."
-        ),
-        "security": "Security",
-        "security intro": (
-            "They look for vulnerabilities, leaked secrets and risky dependencies."
-        ),
-        "maintenance": "Maintenance",
-        "maintenance intro": (
-            "They keep the repository, its settings, its labels and its reports "
-            "current."
-        ),
-        "push": "every push",
-        "push to": "every push to {branches}",
-        "tags": "every new tag",
-        "paths": " that changes certain files",
-        "pull request": "every pull request",
-        "after": "after a run of {workflows}",
-        "after many": "after {count} workflows",
-        "on merge_group": "the merge queue",
-        "on workflow_dispatch": "by hand",
-        "on workflow_call": "when another workflow calls it",
-        "on issues": "new and changed issues",
-        "on issue_comment": "comments",
-        "on release": "a release",
-        "event": "the event {event}",
-        "hourly": "every hour at :{minute}",
-        "hours": "every {step} hours at :{minute}",
-        "daily": "every day at {time}",
-        "weekly": "every {days} at {time}",
-        "monthly": "on day {day} of every month at {time}",
-        "schedule": "on the schedule {cron}",
-        "and": "and",
-        "or": "or",
-    },
-    "de": {
-        "title": "Automatisierung",
-        "description": (
-            "Wie sich {site} selbst pflegt: seine {count} Workflows von GitHub "
-            "Actions, was jeden startet, welche Prüfungen ein Pull Request braucht "
-            "und welche Workflows Secrets halten."
-        ),
-        "intro": (
-            "Wie sich dieses Repository selbst pflegt: seine {count} Workflows von "
-            "GitHub Actions in `.github/workflows/` prüfen jede Änderung, machen ein "
-            "Release aus dem, was `main` erreicht, beantworten Issues und Pull "
-            "Requests, suchen nach Schwachstellen und halten das Repository aktuell. "
-            "Die Website schreibt diese Seite bei jedem Build aus den Workflows, mit "
-            "dem englischen Kommentar am Anfang jedes Workflows, und bleibt so immer "
-            "auf ihrem Stand."
-        ),
-        "required-checks": "Was ein Pull Request braucht",
-        "required intro": (
-            "Ein Pull Request kommt nach `main`, sobald jede dieser Prüfungen "
-            "besteht, wie es die Einstellungen in {files} verlangen:"
-        ),
-        "check of": "{check} aus {workflow}",
-        "at-a-glance": "Auf einen Blick",
-        "glance intro": (
-            "Die Zeiten sind UTC. GitHub startet einen geplanten Lauf, wenn es kann: "
-            "oft einige Minuten später und zu Spitzenzeiten auch gar nicht."
-        ),
-        "workflow": "Workflow",
-        "when": "Wann",
-        "required": "Pflichtprüfungen",
-        "environments": "Umgebungen",
-        "secrets": "Secrets",
-        "source": "Quelle",
-        "from": "{source}, aus dem [Repo Blueprint]({blueprint})",
-        "checks": "Prüfungen",
-        "checks intro": "Sie prüfen jede Änderung, bevor sie `main` erreicht.",
-        "releases": "Releases",
-        "releases intro": (
-            "Sie machen aus dem, was `main` erreicht, ein signiertes Release, liefern "
-            "es aus und prüfen es so, wie seine Nutzer es können."
-        ),
-        "bots": "Bots",
-        "bots intro": (
-            "Sie beantworten Issues und Pull Requests, beheben, was ein Befehl "
-            "beheben kann, und bringen die Pull Requests voran."
-        ),
-        "security": "Sicherheit",
-        "security intro": (
-            "Sie suchen nach Schwachstellen, verratenen Secrets und riskanten "
-            "Abhängigkeiten."
-        ),
-        "maintenance": "Pflege",
-        "maintenance intro": (
-            "Sie halten das Repository, seine Einstellungen, seine Labels und seine "
-            "Berichte aktuell."
-        ),
-        "push": "jeder Push",
-        "push to": "jeder Push auf {branches}",
-        "tags": "jedes neue Tag",
-        "paths": ", der bestimmte Dateien ändert",
-        "pull request": "jeder Pull Request",
-        "after": "nach einem Lauf von {workflows}",
-        "after many": "nach {count} Workflows",
-        "on merge_group": "die Merge-Queue",
-        "on workflow_dispatch": "von Hand",
-        "on workflow_call": "wenn ein anderer Workflow ihn aufruft",
-        "on issues": "neue und geänderte Issues",
-        "on issue_comment": "Kommentare",
-        "on release": "ein Release",
-        "event": "das Ereignis {event}",
-        "hourly": "jede Stunde um :{minute}",
-        "hours": "alle {step} Stunden um :{minute}",
-        "daily": "jeden Tag um {time}",
-        "weekly": "jeden {days} um {time}",
-        "monthly": "am {day}. jedes Monats um {time}",
-        "schedule": "nach dem Zeitplan {cron}",
-        "and": "und",
-        "or": "oder",
-    },
-}
-# The days of the week as cron counts them, from Sunday.
-WEEKDAYS = {
-    "en": (
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ),
-    "de": (
-        "Sonntag",
-        "Montag",
-        "Dienstag",
-        "Mittwoch",
-        "Donnerstag",
-        "Freitag",
-        "Samstag",
-    ),
-}
-# The diagrams of the page, which the blueprint shows in its README and on its page of
-# the releases: how a repository looks after itself, and from a change to a release. The page shows the pictures that
-# scripts/diagrams.sh draws of them, NAME.svg and NAME.dark.svg, NAME.de.svg and
-# NAME.de.dark.svg in German, which every repository gets in PICTURES beside this
-# file and the website serves in SERVED; the blueprint itself has them in
-# docs/images/diagrams/.
-DIAGRAMS = ("how-a-repository-looks-after-itself", "from-a-change-to-a-release")
-PICTURES = "mkdocs-blueprint-diagrams"
-SERVED = "assets/images/automation"
-# The title and the description of a diagram in its picture, from its accTitle and
-# accDescr, which the text of the picture repeats.
-TITLE = re.compile(r"<title\b[^>]*>(?P<text>[^<]*)</title>")
-DESC = re.compile(r"<desc\b[^>]*>(?P<text>[^<]*)</desc>")
-
-
-class Workflow(NamedTuple):
-    """A workflow of .github/workflows/, as the page of the automation shows it: its
-    file, its name, the paragraphs of the comment at its top, its events with their
-    settings, the names of its jobs, which are those of their checks, the
-    environments and secrets that it uses, and whether it comes from the blueprint."""
-
-    file: str
-    name: str
-    about: tuple[str, ...]
-    events: dict[str, Any]
-    jobs: tuple[str, ...]
-    environments: tuple[str, ...]
-    secrets: tuple[str, ...]
-    blueprint: bool = False
-
-    @property
-    def anchor(self) -> str:
-        """The anchor of its heading on the page, from the name of its file."""
-        slug = re.sub(r"[^a-z0-9]+", "-", Path(self.file).stem.lower()).strip("-")
-        return f"{slug}-workflow" if slug in SECTIONS or not slug else slug
-
-    @property
-    def group(self) -> str:
-        """The group of the page that shows it, one of GROUPS."""
-        words = set(re.split(r"[^a-z0-9]+", Path(self.file).stem.lower()))
-        for group, keywords in KEYWORDS:
-            if words & keywords:
-                return group
-        if CHANGES & set(self.events):
-            return "checks"
-        return "maintenance" if "schedule" in self.events else "bots"
-
-    def when(
-        self, language: str, anchors: dict[str, str], brief: bool = False
-    ) -> list[str]:
-        """What starts it, in words: each event once, the workflows after whose run
-        it runs linked to their headings, or only counted when brief."""
-        words = WORDS[language]
-        found: list[str] = []
-        for event, value in self.events.items():
-            settings = value if isinstance(value, dict) else {}
-            changes = settings.get("paths") or settings.get("paths-ignore")
-            if event == "schedule":
-                phrases = [
-                    cron(str(entry.get("cron", "")), language)
-                    for entry in (value if isinstance(value, list) else [])
-                    if isinstance(entry, dict)
-                ]
-            elif event == "push":
-                phrases = [
-                    pushed(settings, words) + (words["paths"] if changes else "")
-                ]
-            elif event in ("pull_request", "pull_request_target"):
-                phrases = [words["pull request"] + (words["paths"] if changes else "")]
-            elif event == "workflow_run" and settings.get("workflows"):
-                names = [str(name) for name in settings["workflows"]]
-                phrases = [after(names, words, anchors, brief)]
-            else:
-                phrases = [
-                    words.get(f"on {event}") or words["event"].format(event=code(event))
-                ]
-            for phrase in phrases:
-                if phrase not in found:
-                    found.append(phrase)
-        return found
-
-
-def after(
-    names: list[str], words: dict[str, str], anchors: dict[str, str], brief: bool
-) -> str:
-    """The workflows after whose run a workflow runs, in words: each linked to its
-    heading on the page, or only counted when brief."""
-    if brief and len(names) > 1:
-        return words["after many"].format(count=len(names))
-    linked = [
-        f"[{plain(name)}](#{anchors[name]})" if name in anchors else plain(name)
-        for name in names
-    ]
-    return words["after"].format(workflows=listing(linked, words["or"]))
 
 
 def automated(config: Any) -> Path | None:
     """The folder of the workflows that the page of the automation shows, or None
     for a website without workflows and for one whose project writes the page."""
     folder = Path(config.config_file_path).parent / ".github/workflows"
-    if (Path(config.docs_dir) / AUTOMATION).exists() or not any(folder.glob("*.y*ml")):
+    if (Path(config.docs_dir) / website.AUTOMATION).exists() or not any(
+        folder.glob("*.y*ml")
+    ):
         return None
     return folder
 
@@ -2322,281 +1918,34 @@ def place(nav: list[Any], page: str) -> tuple[list[Any], int] | None:
 
 def automation_pages(folder: Path, config: Any) -> dict[str, str]:
     """The page of the automation in the language of the website, and in each
-    further one that has WORDS and no page of the project, by their paths in docs/.
+    further one that has its words and no page of the project, by their paths in
+    docs/, as blueprint/website.py writes them.
 
     BUILT.sources becomes the files that they are made of: the workflows and the
-    settings, by which redate dates them.
+    settings, by which redate dates them. BUILT.pictures becomes the pictures of
+    their diagrams in PICTURES beside this file, which the website serves in SERVED;
+    in the blueprint, which has no such folder, those of docs/images/diagrams/ are
+    files of the website already. A missing picture warns, which stops the strict
+    build.
     """
-    root = folder.parent.parent
-    settings = [root / ".github" / name for name in SETTINGS]
-    settings = [path for path in settings if path.is_file()]
-    required: list[str] = []
-    for path in settings:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-        required += data.get("branch", {}).get("required_checks", [])
-    required = list(dict.fromkeys(required))
-    BUILT.sources = [folder, *settings]
-    BUILT.pictures = []
-    address = repository_address(config)
-    flows = workflows(folder, urlparse(address).path.strip("/"))
-    names = [path.name for path in settings]
     found = languages(config)
-    default = found.default if found else str(config.theme.get("language"))
-    shown = default if default in WORDS else "en"
-    pages = {
-        AUTOMATION: automation_page(
-            flows, required, names, config, shown, diagrams(config, shown)
-        )
-    }
-    for language in found.further if found else ():
-        name = AUTOMATION.replace(".md", f".{language}.md")
-        if language in WORDS and not (Path(config.docs_dir) / name).exists():
-            pages[name] = automation_page(
-                flows, required, names, config, language, diagrams(config, language)
-            )
-    return pages
-
-
-def diagrams(config: Any, language: str) -> list[str]:
-    """The diagrams of the page of the automation in language, each as the
-    <picture> of its pictures for the light and the dark scheme, as a page of docs/
-    shows one, with its title and its description as the text of the picture, or
-    "" for one whose pictures are missing.
-
-    Those in PICTURES beside this file go into BUILT.pictures, which the website
-    serves in SERVED; in the blueprint, which has no such folder, those of
-    docs/images/diagrams/ are files of the website already.
-    """
-    docs = Path(config.docs_dir)
-    folders = (Path(__file__).resolve().parent / PICTURES, docs / "images/diagrams")
-    suffix = "" if language == "en" else f".{language}"
-    shown = []
-    for diagram in DIAGRAMS:
-        names = [f"{diagram}{suffix}{scheme}.svg" for scheme in ("", ".dark")]
-        folder = next(
-            (
-                folder
-                for folder in folders
-                if all((folder / n).is_file() for n in names)
-            ),
-            None,
-        )
-        if folder is None:
-            log.warning(
-                f"The page of the automation lacks the pictures {', '.join(names)}, "
-                f"which copier update brings into .github/{PICTURES}/."
-            )
-            shown.append("")
-            continue
-        light, dark = (folder / name for name in names)
-        if folder.is_relative_to(docs):
-            sources = [path.relative_to(docs).as_posix() for path in (light, dark)]
-        else:
-            BUILT.pictures += [light, dark]
-            sources = [f"{SERVED}/{path.name}" for path in (light, dark)]
-        shown.append(picture_of(light, *sources))
-    return shown
-
-
-def picture_of(light: Path, src: str, dark: str) -> str:
-    """The <picture> of a diagram, as scripts/diagrams.sh --extract writes it, whose
-    text is the title and the description in the picture light."""
-    svg = light.read_text(encoding="utf-8")
-    parts = [found["text"] for found in (TITLE.search(svg), DESC.search(svg)) if found]
-    alt = html.escape(": ".join(html.unescape(part).strip() for part in parts))
-    return (
-        "<picture>\n"
-        f'  <source media="(prefers-color-scheme: dark)" srcset="{dark}">\n'
-        f'  <img src="{src}" alt="{alt}">\n'
-        "</picture>"
+    made = website.automation(
+        folder,
+        Path(config.docs_dir),
+        Path(__file__).resolve().parent / website.PICTURES,
+        site_name=config.site_name,
+        repository=repository_address(config),
+        default=found.default if found else str(config.theme.get("language")),
+        further=found.further if found else (),
     )
-
-
-def workflows(folder: Path, repository: str) -> list[Workflow]:
-    """The workflows in folder, by the names of their files, without those of which
-    no job runs in repository, the owner/name of the website's, such as the checks
-    of the kinds of projects in the blueprint itself. A file that is no workflow
-    shows by its name alone."""
-    found = []
-    for path in sorted(folder.glob("*.y*ml")):
-        text = path.read_text(encoding="utf-8")
-        try:
-            data = yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
-        except yaml.YAMLError:
-            data = None
-        data = data if isinstance(data, dict) else {}
-        jobs = data.get("jobs")
-        jobs = {
-            str(key): job
-            for key, job in (jobs.items() if isinstance(jobs, dict) else ())
-            if isinstance(job, dict)
-        }
-        if jobs and idle(jobs, repository):
-            continue
-        # YAML 1.1 reads the key on as true.
-        events = data.get(True, data.get("on"))
-        if isinstance(events, str):
-            events = {events: None}
-        elif isinstance(events, list):
-            events = dict.fromkeys(map(str, events))
-        about = header(text)
-        blueprint = bool(about) and about[-1].endswith(BLUEPRINT)
-        if blueprint:
-            about[-1] = about[-1].removesuffix(BLUEPRINT).rstrip()
-        found.append(
-            Workflow(
-                file=path.name,
-                name=str(data.get("name") or path.stem),
-                about=tuple(paragraph for paragraph in about if paragraph),
-                events=events if isinstance(events, dict) else {},
-                jobs=tuple(str(job.get("name") or key) for key, job in jobs.items()),
-                environments=tuple(
-                    sorted(
-                        {name for job in jobs.values() if (name := environment(job))}
-                    )
-                ),
-                secrets=tuple(sorted(set(SECRET.findall(text)) - GIVEN)),
-                blueprint=blueprint,
-            )
+    for names in made.missing:
+        log.warning(
+            f"The page of the automation lacks the pictures {', '.join(names)}, "
+            f"which copier update brings into .github/{website.PICTURES}/."
         )
-    return found
-
-
-def idle(jobs: dict[str, dict[str, Any]], repository: str) -> bool:
-    """Whether no job of a workflow runs in repository: each asks for another
-    repository, or waits only for jobs that don't run."""
-    skipped = {key for key, job in jobs.items() if elsewhere(job.get("if"), repository)}
-    waiting = True
-    while waiting:
-        waiting = False
-        for key, job in jobs.items():
-            needs = job.get("needs") or []
-            needs = [needs] if isinstance(needs, str) else list(needs)
-            if key not in skipped and needs and set(needs) <= skipped:
-                skipped.add(key)
-                waiting = True
-    return skipped == set(jobs)
-
-
-def elsewhere(condition: Any, repository: str) -> bool:
-    """Whether the condition if: of a job asks for another repository than this
-    one, github.repository != 'owner/name' with the name of this one."""
-    match = GUARD.fullmatch(str(condition or ""))
-    return bool(match and match["repository"].lower() == repository.lower())
-
-
-def environment(job: dict[str, Any]) -> str:
-    """The name of the environment of a job, or an empty one."""
-    value = job.get("environment")
-    if isinstance(value, dict):
-        value = value.get("name")
-    return str(value or "")
-
-
-def header(text: str) -> list[str]:
-    """The paragraphs of the comment at the top of a workflow, before its first key
-    other than its name; an empty line of the comment ends a paragraph, and the
-    lines of its license, SPDX-…, are none."""
-    paragraphs: list[str] = []
-    lines: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("#"):
-            words = line[1:].strip()
-            if words.startswith("SPDX-"):
-                continue
-            if words:
-                lines.append(words)
-                continue
-        elif line.strip() and not line.startswith("name:"):
-            break
-        if lines:
-            paragraphs.append(" ".join(lines))
-            lines = []
-    if lines:
-        paragraphs.append(" ".join(lines))
-    return paragraphs
-
-
-def pushed(settings: dict[str, Any], words: dict[str, str]) -> str:
-    """A push that starts a workflow, in words: to its branches, of a tag, or any."""
-    branches = [code(str(branch)) for branch in settings.get("branches") or []]
-    if branches:
-        return words["push to"].format(branches=listing(branches, words["or"]))
-    return words["tags"] if settings.get("tags") else words["push"]
-
-
-def cron(expression: str, language: str) -> str:
-    """A schedule of cron in words, such as every Tuesday at 04:40 UTC, or as it is
-    when it says more than its minute, its hour and a day of the week or month."""
-    words = WORDS[language]
-    fields = expression.split()
-    if len(fields) == 5 and fields[0].isdigit() and fields[3] == "*":
-        minute, hour, day, _, weekday = fields
-        at = f"{int(minute):02d}"
-        step = re.fullmatch(r"\*/(\d+)", hour)
-        every = day == "*" and weekday == "*"
-        if hour == "*" and every:
-            return words["hourly"].format(minute=at)
-        if step and every:
-            return words["hours"].format(step=step[1], minute=at)
-        time = f"{int(hour):02d}:{at} UTC" if hour.isdigit() else ""
-        days = weekdays(weekday, language) if weekday != "*" else None
-        if time and every:
-            return words["daily"].format(time=time)
-        if time and day == "*" and days:
-            return words["weekly"].format(days=listing(days, words["and"]), time=time)
-        if time and day.isdigit() and weekday == "*":
-            return words["monthly"].format(day=int(day), time=time)
-    return words["schedule"].format(cron=code(expression))
-
-
-def weekdays(field: str, language: str) -> list[str]:
-    """The days of the week of cron in the field of a schedule, such as 1,3 or 1-5,
-    by their names; none for a field that names them otherwise, such as MON."""
-    days: list[int] = []
-    for part in field.split(","):
-        bounds = part.split("-")
-        if len(bounds) > 2 or not all(b.isdigit() and int(b) <= 7 for b in bounds):
-            return []
-        days += range(int(bounds[0]), int(bounds[-1]) + 1)
-    return [WEEKDAYS[language][day % 7] for day in days]
-
-
-def listing(items: list[str], conjunction: str) -> str:
-    """items in a sentence: A, B or C."""
-    if len(items) < 2:
-        return "".join(items)
-    return f"{', '.join(items[:-1])} {conjunction} {items[-1]}"
-
-
-def code(value: str) -> str:
-    """value as code, in HTML, which Markdown leaves as it is."""
-    return f"<code>{html.escape(value, quote=False)}</code>"
-
-
-def plain(value: str) -> str:
-    """value as text of Markdown, without a mark that would format it."""
-    return re.sub(r"([\\`*_{}\[\]#])", r"\\\1", html.escape(value, quote=False))
-
-
-def prose(text: str, language: str) -> str:
-    """A paragraph of the comment of a workflow as a paragraph of HTML, with its
-    `code` as code and its addresses as links, and in English on a page of another
-    language (WCAG 3.1.2). The comment is no Markdown: a ```mermaid at the start of
-    a line of it would start a block of code."""
-    parts = []
-    last = 0
-    for match in CODE_OR_ADDRESS.finditer(text):
-        parts.append(html.escape(text[last : match.start()], quote=False))
-        if match["code"] is not None:
-            parts.append(code(match["code"]))
-        else:
-            address = match["address"]
-            parts.append(f'<a href="{html.escape(address)}">{html.escape(address)}</a>')
-        last = match.end()
-    parts.append(html.escape(text[last:], quote=False))
-    english = "" if language == "en" else ' lang="en"'
-    return f"<p{english}>{''.join(parts)}</p>"
+    BUILT.sources = made.sources
+    BUILT.pictures = made.pictures
+    return made.pages
 
 
 def repository_address(config: Any) -> str:
@@ -2612,101 +1961,6 @@ def repository_address(config: Any) -> str:
         if address.netloc and (len(parts) == 2 or (not exact and len(parts) > 2)):
             return f"{address.scheme}://{address.netloc}/{parts[0]}/{parts[1]}"
     return ""
-
-
-def automation_page(
-    flows: list[Workflow],
-    required: list[str],
-    settings: list[str],
-    config: Any,
-    language: str,
-    shown: list[str],
-) -> str:
-    """The page of the automation in language, as Markdown: what the workflows do,
-    with the diagrams shown, what a pull request needs by the files of settings in
-    .github/ that require it, a table of what starts each, and each workflow in its
-    group."""
-    words = WORDS[language]
-    overview, release = shown
-    count = len(flows)
-    anchors = {flow.name: flow.anchor for flow in flows}
-    providers: dict[str, Workflow] = {}
-    for flow in flows:
-        for job in flow.jobs:
-            providers.setdefault(job, flow)
-    description = words["description"].format(site=config.site_name, count=count)
-    lines = [
-        "---",
-        f"description: {json.dumps(description, ensure_ascii=False)}",
-        "---",
-        "",
-        f"# {words['title']}",
-        "",
-        words["intro"].format(count=count),
-        "",
-    ]
-    if overview:
-        lines += [overview, ""]
-    if required:
-        lines += [f"## {words['required-checks']} {{#required-checks}}", ""]
-        files = listing([f"`.github/{name}`" for name in settings], words["and"])
-        lines += [words["required intro"].format(files=files), ""]
-        for check in required:
-            provider = providers.get(check)
-            lines.append(
-                "- "
-                + (
-                    words["check of"].format(
-                        check=code(check),
-                        workflow=f"[{plain(provider.name)}](#{provider.anchor})",
-                    )
-                    if provider
-                    else code(check)
-                )
-            )
-        lines.append("")
-    groups = {
-        group: [flow for flow in flows if flow.group == group] for group in GROUPS
-    }
-    lines += [f"## {words['at-a-glance']} {{#at-a-glance {AUTOMATION_MARK}}}", ""]
-    lines += [words["glance intro"], ""]
-    lines += [f"| {words['workflow']} | {words['when']} |", "| --- | --- |"]
-    for flow in (flow for group in GROUPS for flow in groups[group]):
-        when = ", ".join(flow.when(language, anchors, brief=True))
-        lines.append(f"| [{plain(flow.name)}](#{flow.anchor}) | {when} |")
-    lines.append("")
-    repository = repository_address(config)
-    for group in GROUPS:
-        if not groups[group]:
-            continue
-        lines += [f"## {words[group]} {{#{group}}}", "", words[f"{group} intro"], ""]
-        if group == "releases" and release:
-            lines += [release, ""]
-        for flow in groups[group]:
-            lines += [f"### {plain(flow.name)} {{#{flow.anchor}}}", ""]
-            for paragraph in flow.about:
-                lines += [prose(paragraph, language), ""]
-            path = f".github/workflows/{flow.file}"
-            source = (
-                f"[`{path}`]({repository}/blob/HEAD/{path})"
-                if repository
-                else f"`{path}`"
-            )
-            if flow.blueprint and repository != BLUEPRINT:
-                source = words["from"].format(source=source, blueprint=BLUEPRINT)
-            facts = (
-                ("when", ", ".join(flow.when(language, anchors))),
-                (
-                    "required",
-                    ", ".join(code(job) for job in flow.jobs if job in required),
-                ),
-                ("environments", ", ".join(map(code, flow.environments))),
-                ("secrets", ", ".join(map(code, flow.secrets))),
-                ("source", source),
-            )
-            lines += [f"- **{words[key]}:** {value}" for key, value in facts if value]
-            lines.append("")
-    return "\n".join(lines)
 
 
 def folded_workflows(html_text: str) -> str:
