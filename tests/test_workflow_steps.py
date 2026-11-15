@@ -486,6 +486,11 @@ TESTED = {
         "Say on the pull request that the bot failed",
     ): "test_diagrams.py",
     (
+        "after-checks.yml",
+        "diagrams",
+        "Say on the pull request that the bot has no private key",
+    ): "test_diagrams.py",
+    (
         "build-release.yml",
         "assets",
         "Attach the assets and their signed provenance to the draft",

@@ -1346,6 +1346,7 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
         (),
         EVENT="workflow_dispatch",
         APP="",
+        FORK="false",
         HEAD_REPOSITORY="",
     )
 
@@ -1375,35 +1376,51 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
 
 
 ARTIFACT = "The artifact `diagrams` of this run holds the files."
+# The bot runs once a runner is free, which can be long after the check when Actions
+# has a queue, so the check promises no time (#913).
 BOT = (
-    "The diagram bot commits it onto this branch in a minute; the artifact `diagrams`"
-    " of this run holds the files as well."
+    "The diagram bot commits it onto this branch once a runner of the workflow After"
+    " the checks is free, and says on this pull request when it can't; the artifact"
+    " `diagrams` of this run holds the files as well."
 )
 DIFFER = ("lint.yml", "diagrams", "Report the diagrams that differ")
 # A pull request from a branch of this repository, which has the release app.
-SAME_REPOSITORY = {"EVENT": "pull_request", "APP": "Iv23li", "HEAD_REPOSITORY": "o/r"}
+SAME_REPOSITORY = {
+    "EVENT": "pull_request",
+    "APP": "Iv23li",
+    "FORK": "false",
+    "HEAD_REPOSITORY": "o/r",
+}
 # A pull request from a fork, onto whose branch no bot commits.
-FORK = {"EVENT": "pull_request", "APP": "", "HEAD_REPOSITORY": "fork/r"}
+FORK = {
+    "EVENT": "pull_request",
+    "APP": "",
+    "FORK": "false",
+    "HEAD_REPOSITORY": "fork/r",
+}
 
 
 @runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
-    ("head", "app", "fix"),
+    ("head", "app", "fork", "fix"),
     [
-        ("o/r", "Iv23li", BOT),
+        ("o/r", "Iv23li", "false", BOT),
         (
             "o/r",
             "",
+            "false",
             "No bot commits it here, because this repository has no release app (the"
             " variable RELEASE_AUTOMATION_CLIENT_ID); the artifact `diagrams` of this"
             " run holds the files.",
         ),
-        ("someone/r", "Iv23li", ARTIFACT),
+        ("someone/r", "Iv23li", "false", ARTIFACT),
+        # A repository that is a fork itself: After the checks leaves out the bot.
+        ("o/r", "Iv23li", "true", ARTIFACT),
     ],
 )
 def test_the_check_promises_the_bot_only_where_it_commits(
-    tmp_path: Path, head: str, app: str, fix: str
+    tmp_path: Path, head: str, app: str, fork: str, fix: str
 ) -> None:
     root = with_tools(repository(tmp_path / "repository", MAIN))
     commit(root, "Main")
@@ -1417,6 +1434,7 @@ def test_the_check_promises_the_bot_only_where_it_commits(
         (),
         EVENT="pull_request",
         APP=app,
+        FORK=fork,
         HEAD_REPOSITORY=head,
     )
     reported = run_step(DIFFER, root, tmp_path, {}, (), FIX=fix)
@@ -1844,9 +1862,59 @@ def test_a_diagram_bot_that_fails_says_so_on_the_pull_request(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.commands == [
         f"pr comment {target} --body The diagram bot couldn't commit the diagrams"
-        " of this pull request (https://github.com/o/r/actions/runs/8). Run"
+        " of this pull request; the summary of its run says why"
+        " (https://github.com/o/r/actions/runs/8). Run"
         " `bash scripts/diagrams.sh --extract` with Docker and commit what it changes,"
         " or take the files from the artifact `diagrams` of the check *diagrams*."
+    ]
+
+
+KEYLESS = (
+    "after-checks.yml",
+    "diagrams",
+    "Say on the pull request that the bot has no private key",
+)
+
+
+@needs_bash
+def test_a_diagram_bot_without_the_key_of_the_app_says_so_on_the_pull_request(
+    tmp_path: Path,
+) -> None:
+    # The check promises the bot's commit by the name of the release app alone, as it
+    # can't see the secret of the environment; a bot without the private key ended
+    # with a warning in a run that no one looks at, and the pull request waited (#913).
+    assert workflow_steps.condition_of(workflow_steps.step(*KEYLESS)) == (
+        "steps.drawn.outputs.found == 'true' &&"
+        " steps.release-app.outputs.ready != 'true' &&"
+        " vars.RELEASE_AUTOMATION_CLIENT_ID != ''"
+    )
+    # Before the wait for Harden-Runner, after which only steps of a failure come.
+    names = [step.get("name") for step in workflow_steps.job(*KEYLESS[:2])["steps"]]
+    assert names.index(KEYLESS[2]) < names.index(
+        "Wait until Harden-Runner has removed Docker"
+    )
+
+    result = run_step(
+        KEYLESS,
+        tmp_path,
+        tmp_path,
+        {},
+        [Answer(r"pr comment .*")],
+        BRANCH="feature",
+        NUMBER="7",
+        URL="https://github.com/o/r/actions/runs/8",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.commands == [
+        "pr comment 7 --body The diagram bot can't commit the diagrams of this pull"
+        " request (https://github.com/o/r/actions/runs/8): this repository names its"
+        " release app, but has no private key of it in the secret"
+        " `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`, which"
+        " `python3 .github/blueprint.py app connect --key-file FILE` sets. Until then,"
+        " run `bash scripts/diagrams.sh --extract` with Docker and commit what it"
+        " changes, or take the files from the artifact `diagrams` of the check"
+        " *diagrams*."
     ]
 
 

@@ -2539,6 +2539,24 @@ jobs:
           if [[ -s "$RUNNER_TEMP/comment.md" ]]; then
             once gh pr comment "${NUMBER:-$BRANCH}" --body-file "$RUNNER_TEMP/comment.md"
           fi
+      # The check promises the bot's commit wherever the repository names the release
+      # app, which it can't see the private key of: a bot without the key says so on
+      # the pull request rather than leave it waiting for a commit that doesn't come
+      # (#913).
+      - name: Say on the pull request that the bot has no private key
+        if: >-
+          steps.drawn.outputs.found == 'true' &&
+          steps.release-app.outputs.ready != 'true' &&
+          vars.RELEASE_AUTOMATION_CLIENT_ID != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          eval "$OUTAGE"
+          once gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot can't commit the diagrams of this pull request ($URL): this repository names its release app, but has no private key of it in the secret \`RELEASE_AUTOMATION_PRIVATE_KEY\` of the environment \`release\`, which \`python3 .github/blueprint.py app connect --key-file FILE\` sets. Until then, run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*."
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
@@ -2561,4 +2579,4 @@ jobs:
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           eval "$OUTAGE"
-          once gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot couldn't commit the diagrams of this pull request ($URL). Run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*."
+          once gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot couldn't commit the diagrams of this pull request; the summary of its run says why ($URL). Run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*."

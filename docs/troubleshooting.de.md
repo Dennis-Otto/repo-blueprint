@@ -285,6 +285,20 @@ Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --o
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
 
+## Kein Commit des Diagramm-Bots kommt
+
+**Was du siehst:** Die Prüfung *diagrams* eines Pull Requests scheitert mit *Diagrams that not every reader sees* und sagt, dass der Diagramm-Bot die Dateien auf den Branch committet, aber eine Weile kommt kein Commit *docs: draw the diagrams anew*.
+
+**Warum:** Der Bot läuft im Job *commit the diagrams* des Workflows After the checks, der startet, wenn die Prüfung *diagrams* gescheitert ist, und dann wie jeder Job auf einen Runner wartet. Hat Actions eine Warteschlange, etwa wenn die Jobs aller Repositorys eines Kontos zugleich laufen, kann das viele Minuten dauern. Ein Push in der Zwischenzeit bringt den Branch weiter, und der Bot lässt ihn dann in Ruhe: Die Prüfungen des neuen Stands zeichnen die Diagramme noch einmal. Wo der Bot nicht committen kann, sagt er es in einem Kommentar am Pull Request: wenn sein Lauf scheitert, oder wenn das Repository die Release-App in [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) nennt, aber ihren privaten Schlüssel nicht in der Umgebung `release` hat. Ohne die Release-App und in einem Pull Request aus einem Fork sagt schon die Prüfung, dass kein Bot committet.
+
+**Was zu tun ist:** Warte auf den Lauf von After the checks, dessen Job *commit the diagrams* in seiner Zusammenfassung sagt, was er getan hat. Oder nimm die Dateien gleich aus dem Artefakt `diagrams` der Prüfung, oder zeichne sie mit Docker, und committe, was sich ändert:
+
+```sh
+bash scripts/diagrams.sh --extract
+```
+
+Nach einem Kommentar, dass der Bot nicht committen konnte, nennt die Zusammenfassung seines Laufs, was fehlt, und [Ein Bot sagt, dass er die Release-App braucht](#ein-bot-sagt-dass-er-die-release-app-braucht), wie du es einrichtest.
+
 ## Der Titel eines Pull Requests hat sich geändert, oder eine Datei ist in changelog.d aufgetaucht
 
 **Was du siehst:** Die Timeline des Pull Requests zeigt, dass die Release-App seinen Titel geändert hat, oder ein Commit *docs: draft the entry of the changelog from the title* hat eine Datei in `changelog.d/` hinzugefügt.
