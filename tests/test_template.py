@@ -18600,6 +18600,16 @@ def runs_of_the_branch(*before: int, conclusion: str = "failure") -> dict[str, o
     }
 
 
+# The heads that GitHub names for the commit of the run, abc1234def: it is the head of
+# pull request 7 and of main, so the bots run its failed jobs again.
+STILL_THE_HEAD: dict[str, object] = {
+    "repos/o/r/commits/abc1234def/pulls": [
+        {"number": 7, "state": "open", "head": {"sha": "abc1234def"}}
+    ],
+    "repos/o/r/git/ref/heads/main": {"object": {"sha": "abc1234def"}},
+}
+
+
 def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
     job = after_the_checks_job("rerun")
     condition = condition_of(job)
@@ -18608,9 +18618,14 @@ def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
         """contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion)"""
         in condition
     )
-    # It reads the jobs of the runs and their annotations, and starts the failed jobs
-    # again; it checks out nothing.
-    assert job["permissions"] == {"actions": "write", "checks": "read"}
+    # It reads the jobs of the runs and their annotations and the head of the pull
+    # request or of the branch, and starts the failed jobs again; it checks out nothing.
+    assert job["permissions"] == {
+        "actions": "write",
+        "checks": "read",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     assert not steps_using(job, "actions/checkout")
     # The values of the event reach the script as variables only.
     assert all("${{" not in step.get("run", "") for step in job["steps"])
@@ -18644,6 +18659,7 @@ def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
     again: bool,
 ) -> None:
     answers: dict[str, object] = {
+        **STILL_THE_HEAD,
         "repos/o/r/actions/runs/5/attempts/1/jobs": {
             "jobs": [
                 job_of_a_run(11, "test (3.12)", first),
@@ -18694,6 +18710,7 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
 ) -> None:
     # The commit before broke one of the two jobs: the other may be flaky.
     answers: dict[str, object] = {
+        **STILL_THE_HEAD,
         "repos/o/r/actions/runs/5/attempts/1/jobs": {
             "jobs": [
                 job_of_a_run(11, "test (3.12)", "failure"),
@@ -18793,6 +18810,7 @@ def test_the_flaky_test_bot_runs_a_job_again_that_harden_runner_stopped_twice(
     # An outage of GitHub that lasts over two commits stops the same job for both:
     # that is no real failure of the tests (decision 0134).
     answers: dict[str, object] = {
+        **STILL_THE_HEAD,
         "repos/o/r/actions/runs/5/attempts/1/jobs": {
             "jobs": [
                 job_of_a_run(11, "test (3.12)", "failure"),
@@ -18826,6 +18844,144 @@ def test_the_flaky_test_bot_runs_a_job_again_that_harden_runner_stopped_twice(
     assert "broke for the commit before" not in summary
 
 
+# The pull requests that GitHub names for the commit of the run, abc1234def, when a
+# newer push replaced it, as in paperless-sync#486, or when its pull request closed.
+NOT_THE_HEAD = {
+    "replaced": [{"number": 7, "state": "open", "head": {"sha": "fedcba9"}}],
+    "closed": [{"number": 7, "state": "closed", "head": {"sha": "abc1234def"}}],
+    "none": [],
+}
+NOT_AGAIN = "is not the head of an open pull request any more"
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("event", "head", "again"),
+    [
+        # The run of the head of a pull request, of a fork too, runs again.
+        ("pull_request", STILL_THE_HEAD["repos/o/r/commits/abc1234def/pulls"], True),
+        (
+            "pull_request_target",
+            STILL_THE_HEAD["repos/o/r/commits/abc1234def/pulls"],
+            True,
+        ),
+        # The run of a commit that a newer push replaced would cancel the run for the
+        # head: it stays as it is, and so does the run of a closed pull request.
+        ("pull_request", NOT_THE_HEAD["replaced"], False),
+        ("pull_request", NOT_THE_HEAD["closed"], False),
+        ("pull_request", NOT_THE_HEAD["none"], False),
+    ],
+)
+def test_the_flaky_test_bot_runs_only_the_run_of_the_head_of_a_pull_request_again(
+    tmp_path: Path, event: str, head: object, again: bool
+) -> None:
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/commits/abc1234def/pulls": head,
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "test (3.12)", "failure")]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT=event,
+        HEAD_REPO="fork/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    # It asks for the head last, just before the rerun.
+    assert "repos/o/r/commits/abc1234def/pulls" in calls[-1 - again]
+    if not again:
+        assert summary == (
+            f"abc1234 {NOT_AGAIN}, so the failed jobs of its run of CI (python) don't "
+            "run again.\n"
+        )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("event", "tip", "said"),
+    [
+        ("push", {"main": {"object": {"sha": "abc1234def"}}}, ""),
+        # A newer push to the branch replaced the commit, and its run would cancel the
+        # run for the newer commit.
+        (
+            "push",
+            {"main": {"object": {"sha": "fedcba9"}}},
+            "abc1234 is no longer the head of main, so the failed jobs of its run of "
+            "CI (python) don't run again: they would cancel the run for the newer "
+            "commit.\n",
+        ),
+        # The branch is gone, and with it any newer commit.
+        (
+            "push",
+            {"main.error": "gh: Not Found (HTTP 404)\n"},
+            "The branch main of abc1234 is gone, so the failed jobs of its run of "
+            "CI (python) don't run again.\n",
+        ),
+        # A run of a schedule or by hand shares its concurrency group with no other run.
+        ("schedule", {}, ""),
+        ("workflow_dispatch", {}, ""),
+    ],
+)
+def test_the_flaky_test_bot_runs_only_the_run_of_the_head_of_a_branch_again(
+    tmp_path: Path, event: str, tip: dict[str, object], said: str
+) -> None:
+    again = not said
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **{f"repos/o/r/git/ref/heads/{key}": value for key, value in tip.items()},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "test (3.12)", "failure")]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT=event,
+        BRANCH="main",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert any("git/ref/heads/main" in call for call in calls) == (event == "push")
+    if not again:
+        assert summary == said
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_fails_when_github_refuses_the_head(
+    tmp_path: Path,
+) -> None:
+    # Only a branch that is gone has no head; any other refusal is a fault of the bot.
+    done = run_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/git/ref/heads/main.error": "HTTP 403: Resource not accessible\n",
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "test (3.12)", "failure")]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+    )
+
+    assert done.returncode == 1
+    assert "HTTP 403" in done.stderr
+    assert not done.called("run rerun")
+
+
 def test_the_bot_for_stopped_checks_takes_the_other_checks_once() -> None:
     job = after_the_checks_job("stopped")
     condition = condition_of(job)
@@ -18835,9 +18991,22 @@ def test_the_bot_for_stopped_checks_takes_the_other_checks_once() -> None:
     assert '"Pull request title"' in condition
     assert "github.event.workflow_run.name != 'Release'" in condition
     assert "!github.event.repository.fork" in condition
-    assert job["permissions"] == {"actions": "write", "checks": "read"}
+    assert job["permissions"] == {
+        "actions": "write",
+        "checks": "read",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     assert not steps_using(job, "actions/checkout")
     assert all("${{" not in step.get("run", "") for step in job["steps"])
+
+
+# The run of a pull request, for its commit abc1234def.
+OF_THE_PULL_REQUEST = {
+    "EVENT": "pull_request",
+    "BRANCH": "feature",
+    "SHA": "abc1234def",
+}
 
 
 def run_the_bot_for_stopped_checks(
@@ -18864,9 +19033,10 @@ def run_the_bot_for_stopped_checks(
                 f"{message}\n{EXITED}\n",
             ),
             Answer(r"api repos/o/r/actions/runs/5 --jq .+", f"{state}\n"),
+            Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", "7\n"),
             exact("run rerun 5 --failed"),
         ],
-        env={"RUN": "5", "NAME": "Pull request title"},
+        env={"RUN": "5", "NAME": "Pull request title", **OF_THE_PULL_REQUEST},
     )
     assert done.returncode == 0, done.stderr
     return done.commands, done.summary
@@ -18906,13 +19076,14 @@ def test_the_bot_for_stopped_checks_tolerates_a_run_that_started_again(
             Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
             Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
             Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", "7\n"),
             Answer(
                 r"run rerun 5 --failed",
                 err="run 5 is already running",
                 code=1,
             ),
         ],
-        env={"RUN": "5", "NAME": "CodeQL"},
+        env={"RUN": "5", "NAME": "CodeQL", **OF_THE_PULL_REQUEST},
     )
 
     assert done.returncode == 0, done.stderr
@@ -18932,13 +19103,71 @@ def test_the_bot_for_stopped_checks_fails_when_github_refuses_the_rerun(
             Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
             Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
             Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", "7\n"),
             Answer(r"run rerun 5 --failed", err="HTTP 403: forbidden", code=1),
         ],
-        env={"RUN": "5", "NAME": "CodeQL"},
+        env={"RUN": "5", "NAME": "CodeQL", **OF_THE_PULL_REQUEST},
     )
 
     assert done.returncode == 1
     assert "HTTP 403: forbidden" in done.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("event", "head", "said"),
+    [
+        # A newer push to the pull request replaced the commit, or it closed.
+        (
+            "pull_request",
+            r"commits/abc1234def/pulls",
+            (
+                "",
+                f"{NOT_AGAIN}, so the failed jobs of its run of CodeQL don't run again.",
+            ),
+        ),
+        # A newer push to main replaced the commit.
+        (
+            "push",
+            r"git/ref/heads/main",
+            (
+                "fedcba9\n",
+                "is no longer the head of main, so the failed jobs of its run of "
+                "CodeQL don't run again: they would cancel the run for the newer "
+                "commit.",
+            ),
+        ),
+    ],
+)
+def test_the_bot_for_stopped_checks_leaves_the_run_of_a_replaced_commit_alone(
+    tmp_path: Path, event: str, head: str, said: tuple[str, str]
+) -> None:
+    # Run again, it would cancel the run for the head, as the flaky-test bot did in
+    # paperless-sync#486.
+    answer, words = said
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "stopped",
+        "Run the jobs again that Harden-Runner stopped",
+        answers=[
+            Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
+            Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(rf"api repos/o/r/{head} --jq .+", answer),
+        ],
+        env={
+            "RUN": "5",
+            "NAME": "CodeQL",
+            **OF_THE_PULL_REQUEST,
+            "EVENT": event,
+            "BRANCH": "main",
+        },
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert not done.called("run rerun")
+    assert done.summary == (f"abc1234 {words}\n")
 
 
 def variants_of_a_run(
@@ -18998,6 +19227,7 @@ def test_the_flaky_test_bot_runs_a_cancelled_run_again_only_when_it_ran_out_of_t
         "rerun",
         "Run the failed jobs once more",
         {
+            **STILL_THE_HEAD,
             **variants_of_a_run(
                 "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
             ),
@@ -19034,6 +19264,7 @@ def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
         "rerun",
         "Run the failed jobs once more",
         {
+            **STILL_THE_HEAD,
             "repos/o/r/actions/runs/5/attempts/1/jobs": {
                 "jobs": [
                     job_of_a_run(11, "variant (generic)", "failure"),
@@ -19079,6 +19310,7 @@ def rerun_a_flaky_test(tmp_path: Path, *first: Answer) -> workflow_steps.StepRes
             *first,
             *gh_answers(
                 {
+                    **STILL_THE_HEAD,
                     "repos/o/r/actions/runs/5/attempts/1/jobs": {
                         "jobs": [job_of_a_run(11, "test (3.12)", "failure")]
                     },
@@ -19324,6 +19556,7 @@ def test_the_flaky_test_bot_runs_a_job_again_that_no_runner_took(
         "Run the failed jobs once more",
         answers=gh_answers(
             {
+                **STILL_THE_HEAD,
                 "repos/o/r/actions/runs/5/attempts/1/jobs": {
                     "jobs": [
                         {**job_of_a_run(11, "test (3.12)", "failure"), "steps": []}
