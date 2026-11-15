@@ -23,6 +23,8 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from blueprint import website as steps
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -3975,11 +3977,9 @@ def test_the_required_checks_name_each_file_of_settings(tmp_path: Path) -> None:
     ],
 )
 def test_a_schedule_reads_as_words(expression: str, english: str, german: str) -> None:
-    module = hooks()
-
-    assert module.cron(expression, "en") == english
+    assert steps.cron(expression, "en") == english
     if german:
-        assert module.cron(expression, "de") == german
+        assert steps.cron(expression, "de") == german
 
 
 @pytest.mark.parametrize(
@@ -4006,19 +4006,18 @@ def test_a_schedule_reads_as_words(expression: str, english: str, german: str) -
 def test_each_workflow_has_its_group(
     file: str, events: dict[str, Any], group: str
 ) -> None:
-    workflow = hooks().Workflow(file, "A workflow", (), events, (), (), ())
+    workflow = steps.Workflow(file, "A workflow", (), events, (), (), ())
 
     assert workflow.group == group
 
 
 def test_a_workflow_without_a_name_of_letters_has_an_anchor_still() -> None:
-    workflow = hooks().Workflow("---.yml", "Dashes", (), {}, (), (), ())
+    workflow = steps.Workflow("---.yml", "Dashes", (), {}, (), (), ())
 
     assert workflow.anchor == "-workflow"
 
 
 def test_the_events_of_a_workflow_read_as_words() -> None:
-    module = hooks()
     events = {
         "push": {"tags": ["v*"]},
         "schedule": "not a list",
@@ -4028,7 +4027,7 @@ def test_the_events_of_a_workflow_read_as_words() -> None:
         "release": {"types": ["published"]},
     }
 
-    workflow = module.Workflow("x.yml", "X", (), events, (), (), ())
+    workflow = steps.Workflow("x.yml", "X", (), events, (), (), ())
 
     assert workflow.when("en", {}) == [
         "every new tag",
@@ -4037,10 +4036,10 @@ def test_the_events_of_a_workflow_read_as_words() -> None:
         "the merge queue",
         "a release",
     ]
-    assert module.Workflow("x.yml", "X", (), {"push": None}, (), (), ()).when(
+    assert steps.Workflow("x.yml", "X", (), {"push": None}, (), (), ()).when(
         "de", {}
     ) == ["jeder Push"]
-    after = module.Workflow(
+    after = steps.Workflow(
         "x.yml", "X", (), {"workflow_run": {"workflows": ["CI"]}}, (), (), ()
     )
     assert after.when("en", {}, brief=True) == ["after a run of CI"]
@@ -4221,7 +4220,7 @@ def test_the_automation_page_shows_the_diagrams_of_the_readme(
     readme = (ROOT / f"README{suffix}.md").read_text(encoding="utf-8")
     releases = (ROOT / f"docs/features/releases{suffix}.md").read_text(encoding="utf-8")
     shown = (readme, releases)
-    for name, page in zip(hooks().DIAGRAMS, shown, strict=True):
+    for name, page in zip(steps.DIAGRAMS, shown, strict=True):
         assert (ROOT / f"docs/diagrams/{name}{suffix}.mmd").is_file(), name
         for scheme in ("", ".dark"):
             picture = f"images/diagrams/{name}{suffix}{scheme}.svg"
@@ -4306,7 +4305,7 @@ def test_every_repository_serves_the_pictures_beside_the_hook(tmp_path: Path) ->
         f"assets/images/automation/{name}{scheme}.svg": str(
             beside.resolve() / f"{name}{scheme}.svg"
         )
-        for name in module.DIAGRAMS
+        for name in steps.DIAGRAMS
         for scheme in ("", ".dark")
     }
     assert {file.site for file in files if file.dest_uri in served} == {

@@ -22638,7 +22638,7 @@ def test_every_website_shows_the_automation_of_its_repository(
     # The diagrams of the blueprint's README, as their pictures, which every
     # repository gets beside the hook and its website serves: no Mermaid.
     pictures = project / ".github/mkdocs-blueprint-diagrams"
-    for name in hooks.DIAGRAMS:
+    for name in hooks.website.DIAGRAMS:
         for scheme in ("", ".dark", ".de", ".de.dark"):
             picture = f"{name}{scheme}.svg"
             assert (pictures / picture).read_bytes() == (
@@ -22646,7 +22646,9 @@ def test_every_website_shows_the_automation_of_its_repository(
             ).read_bytes(), picture
         assert f'  <img src="assets/images/automation/{name}.svg" alt="' in page
     assert sorted(path.name for path in hooks.BUILT.pictures) == sorted(
-        f"{name}{scheme}.svg" for name in hooks.DIAGRAMS for scheme in ("", ".dark")
+        f"{name}{scheme}.svg"
+        for name in hooks.website.DIAGRAMS
+        for scheme in ("", ".dark")
     )
     assert "\n```mermaid\n" not in page
 
@@ -27744,6 +27746,7 @@ def test_every_website_shows_the_fragments_under_unreleased(
         ".github/mkdocs_blueprint.py",
         ".github/mkdocs-blueprint-pins.toml",
         ".github/blueprint/changelog.py",
+        ".github/blueprint/website.py",
     ):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(project / name, tmp_path / name)

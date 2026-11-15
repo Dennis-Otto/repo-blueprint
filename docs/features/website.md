@@ -23,7 +23,35 @@ More languages work the same way, such as `/de/`, `/nl/` and `/fr/` once `mkdocs
 
 A page whose front matter isn't a mapping of YAML stops the build, such as a description with a colon and a space and no quotes: MkDocs would show it as text at the top of the page, and Zensical refuses the page.
 
-**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it and a trial build with Zensical measures it ([decision 0160](../decisions/0160-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
+**Steps that outlive the generator:** the page *Automation*, the sitemaps and `llms.txt` are steps of `blueprint.py`, not of MkDocs, so that the move to another generator keeps them ([decision 0166](../decisions/0166-the-steps-of-a-website-that-need-no-generator-are-steps-of-blueprint-py.md)). The hooks take them in every build, and a build with another generator takes them around it:
+
+```sh
+python3 .github/blueprint.py website automation build --site-name "My project" --repository https://github.com/owner/name --language en --language de
+python3 .github/blueprint.py website finish site --site-url https://owner.github.io/name/ --menu menu.json
+```
+
+The first writes the page of each language and the pictures of its diagrams into `build`, a copy of `docs/` that the generator builds, never into `docs/` itself, and nothing where the project has its own `docs/automation.md`; the second takes every page whose head says `noindex` out of both sitemaps, copies the sitemap of a website in several languages into every folder of pages and writes `llms.txt` from the menu of each language in `menu.json`, unless the website has one. The menu names the default language and, for each language, the name of the website, its `summary`, the `label` of a further language and its `items`: a page with its `title`, `url`, `address` and `description`, a section with its `title` and `children`:
+
+```json
+{
+  "default": "en",
+  "languages": {
+    "en": {
+      "name": "My project",
+      "summary": "What it does",
+      "items": [
+        {"title": "Home", "url": "index.html", "address": "https://owner.github.io/name/", "description": "Where it starts"},
+        {"title": "Guides", "children": [
+          {"title": "Install", "url": "install.html", "address": "https://owner.github.io/name/install.html"}
+        ]}
+      ]
+    },
+    "de": {"name": "Mein Projekt", "label": "Deutsch", "items": []}
+  }
+}
+```
+
+**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0146](../decisions/0146-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it and a trial build with Zensical measures it ([decision 0160](../decisions/0160-a-trial-build-with-zensical-measures-the-move.md)), `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `blueprint/website.py`, `.github/a11y/`.
 
 ## Diagrams that fix themselves
 

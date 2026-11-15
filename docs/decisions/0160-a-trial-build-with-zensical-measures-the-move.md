@@ -15,13 +15,11 @@ python3 -m venv .venv-zensical
 .venv-zensical/bin/zensical build -f mkdocs.yml
 ```
 
-| What the build showed | What it means |
-| --- | --- |
-| It stopped at once: `error reading page metadata 'reference/variables.md': mapping values are not allowed in this context` | The description in the front matter of the page, which `reference.py` writes, held a colon and a space, so it was no mapping of YAML. MkDocs gives no warning for that and keeps the front matter as Markdown: the [published page](https://dennis-otto.github.io/repo-blueprint/reference/variables.html) showed a line and a heading *description: Every variable…* above its title, and its description was lost. A bug of today's website, which only Zensical named. |
-| With the description in quotes, it built the website in about 4 seconds, with no warning on an English page | It reads the YAML tags `!ENV` and `!!python/name` of `.github/mkdocs-blueprint.yml`, and the Markdown of the pages with its extensions builds without a complaint. |
-| 55 warnings *anchor does not exist*, every one in a German page | It builds `guide.de.md` as `guide.de.html` beside `guide.html`, without a folder `de/`, and a link of a German page to `guide.md#ein-repository-anlegen` reaches the English page, whose headings are English. The website in several languages of 0146 is still missing. |
-| No page *Automation*, no `llms.txt`, no stylesheet and script of the blueprint, the pictures of the README with the paths of the repository | No MkDocs hook runs, as 0146 says: each of them is a hook of `.github/mkdocs_blueprint.py`. |
-| Its plugin `privacy` downloaded the scripts of its own bundle, such as Pyodide, Ace and Plyr, and warned that it couldn't download one of Google | The strict build of the check *docs* would fail on that warning alone, before the move takes the plugin. |
+- **It stopped at once: `error reading page metadata 'reference/variables.md': mapping values are not allowed in this context`.** The description in the front matter of the page, which `reference.py` writes, held a colon and a space, so it was no mapping of YAML. MkDocs gives no warning for that and keeps the front matter as Markdown: the [published page](https://dennis-otto.github.io/repo-blueprint/reference/variables.html) showed a line and a heading *description: Every variable…* above its title, and its description was lost. A bug of today's website, which only Zensical named.
+- **With the description in quotes, it built the website in about 4 seconds, with no warning on an English page.** It reads the YAML tags `!ENV` and `!!python/name` of `.github/mkdocs-blueprint.yml`, and the Markdown of the pages with its extensions builds without a complaint.
+- **55 warnings *anchor does not exist*, every one in a German page.** It builds `guide.de.md` as `guide.de.html` beside `guide.html`, without a folder `de/`, and a link of a German page to `guide.md#ein-repository-anlegen` reaches the English page, whose headings are English. The website in several languages of 0146 is still missing.
+- **No page *Automation*, no `llms.txt`, no stylesheet and script of the blueprint, the pictures of the README with the paths of the repository.** No MkDocs hook runs, as 0146 says: each of them is a hook of `.github/mkdocs_blueprint.py`.
+- **Its plugin `privacy` downloaded the scripts of its own bundle, such as Pyodide, Ace and Plyr, and warned that it couldn't download one of Google.** The strict build of the check *docs* would fail on that warning alone, before the move takes the plugin.
 
 ## Options
 
@@ -37,7 +35,7 @@ Option 4, since it fixes what is wrong today and loses nothing that the websites
 - **No website moves yet.** Without the hooks and the languages, a website built with Zensical would lose most of what [the page of the website](../features/website.md) promises, and every German page would link to English headings; decision 0146 stays as it is, with its dates.
 - **Front matter reads alike in both:** the hooks of every website warn about a page whose front matter MkDocs couldn't read as a mapping of YAML, which stops the strict build of the check *docs*, and `reference.py` writes the front matter of its pages with PyYAML, which puts a value in quotes where plain YAML would read it otherwise.
 - **The first step of 0146 is open work that waits for nothing:** the hooks that read the files before the build or `site/` after it, the page *Automation*, the sitemaps and `llms.txt`, become steps of `blueprint.py`. The trial build showed exactly these as missing in Zensical, so they come first. They are a change of every website and of the template of its own size, with tests of each, so they follow in a pull request of their own under [#872](https://github.com/Dennis-Otto/repo-blueprint/issues/872), well before the look of 1 February 2027.
-- **Each look at Zensical starts with this trial build,** by 1 February 2027 at the latest, as 0146 asks: a finding that is wrong for MkDocs as well, as the front matter was, is fixed at once, and the others are written down here, against the table of 0146.
+- **Each look at Zensical starts with this trial build,** by 1 February 2027 at the latest, as 0146 asks: a finding that is wrong for MkDocs as well, as the front matter was, is fixed at once, and the others are written down here, against the list of 0146.
 
 ## Consequences
 
