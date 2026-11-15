@@ -8,7 +8,6 @@ import re
 import runpy
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -3814,9 +3813,17 @@ def test_a_run_stops_waiting_once_its_budget_is_spent(waits: list[float]) -> Non
     ],
 )
 def test_a_rate_limit_waits_before_the_one_more_try(
-    headers: dict[str, str], wait: float, waits: list[float]
+    headers: dict[str, str],
+    wait: float,
+    waits: list[float],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    soon = str(int(time.time()) + 10)
+    # A clock that stands still: on the real one, the reset ten seconds from a whole
+    # second came less than ten seconds away when the test began late in a second
+    # and the request took a moment, on a busy runner (#926).
+    now = 1_800_000_000
+    monkeypatch.setattr("blueprint.github.time.time", lambda: float(now))
+    soon = str(now + 10)
     headers = {key: value.format(soon=soon) for key, value in headers.items()}
     limited = http(
         403, {"message": "You have exceeded a secondary rate limit."}, **headers
@@ -3826,7 +3833,7 @@ def test_a_rate_limit_waits_before_the_one_more_try(
     Api(runner).post("repos/x/issues", {"title": "t"})
 
     assert len(calls) == 2
-    assert waits == [pytest.approx(wait, abs=1)]
+    assert waits == [wait]
 
 
 def test_too_many_requests_waits_the_time_that_github_names(
