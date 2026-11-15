@@ -2331,6 +2331,42 @@ def test_the_bot_keeps_a_fix_only_where_its_check_allows_the_path(
     assert both.unnamed == {"app.py", "web/a.ts"}
 
 
+def test_a_check_that_names_the_path_wins_over_a_first_one_that_names_none(
+    tmp_path: Path,
+) -> None:
+    root = with_catalog(tmp_path / "main")
+    e2e = kept(tmp_path / "fixes/1-fixes-e2e", {"README.md": "# E\n", "app.py": "e\n"})
+    lint = kept(
+        tmp_path / "fixes/2-fixes-lint", {"README.md": "# L\n", "app.py": "l\n"}
+    )
+    unknown = kept(tmp_path / "fixes/3-fixes-unknown", {"app.py": "u\n"})
+
+    fixes = load([e2e, lint, unknown], writes_in(root))
+
+    # Lint names README.md, so its copy counts as named; it doesn't name app.py,
+    # which keeps the first copy, unnamed, and no reason of Lint for it, nor does
+    # the third check, which names no paths either.
+    assert fixes.files == {"README.md": b"# L\n", "app.py": b"e\n"}
+    assert fixes.left == {}
+    assert fixes.unnamed == {"app.py"}
+
+
+def test_without_scripts_check_sh_the_fixes_of_the_check_are_unnamed(
+    tmp_path: Path,
+) -> None:
+    # A checkout of main without scripts/check.sh says nothing of what fixes-check
+    # writes: a person who reads the commit still gets its fixes.
+    root = with_catalog(tmp_path)
+    (root / "scripts/check.sh").unlink()
+
+    assert writes_in(root)("fixes-check") == Writes("check (*)")
+    fixes = load(
+        [kept(tmp_path / "fixes/1-fixes-check", {"a.md": "x\n"})], writes_in(root)
+    )
+    assert fixes.files == {"a.md": b"x\n"}
+    assert fixes.unnamed == {"a.md"}
+
+
 def test_only_a_person_reads_a_fix_whose_check_names_no_paths() -> None:
     fixes = Fixes({"README.md": b"# A\n", "app.py": b"y\n"}, {}, frozenset({"app.py"}))
 
@@ -4418,6 +4454,8 @@ def test_the_fix_bot_has_only_what_it_needs() -> None:
         if step.get("uses", "").startswith("actions/checkout@")
     ]
     assert checkout["with"]["sparse-checkout"].startswith(".github\nblueprint\n")
+    # scripts/check.sh of main says what the fixes of fixes-check may write.
+    assert "scripts" in checkout["with"]["sparse-checkout"].split()
     assert "ref" not in checkout["with"]
     assert "github.event.workflow_run.conclusion == 'failure'" in condition_of(bot)
     assert bot["concurrency"]["cancel-in-progress"] is False
@@ -4992,6 +5030,29 @@ def decided(
     )
 
 
+def test_the_command_promises_no_commit_of_fixes_beyond_the_writes(
+    tmp_path: Path,
+) -> None:
+    # Lint names only Markdown, so its fix of app.py is what the commit job leaves.
+    root = with_catalog(tmp_path / "main")
+    api = api_of(with_a_fix(FakeGitHub()))
+
+    found = decide_command(
+        api,
+        REPO,
+        42,
+        "maintainer",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        WATCHED,
+        no_wait,
+        writes_in(root),
+    )
+
+    assert found.action == ""
+    assert found.text.startswith("No command fixed what the checks of")
+
+
 def test_a_branch_of_the_repository_gets_the_commit_at_the_command(
     tmp_path: Path,
 ) -> None:
@@ -5538,6 +5599,8 @@ def test_the_command_runs_nothing_of_the_pull_request() -> None:
     )
     # main alone, as the workflow runs on the default branch for a comment.
     assert set(checkout["with"]) == {"persist-credentials", "sparse-checkout"}
+    # With scripts/check.sh, which says what the fixes of fixes-check may write.
+    assert "scripts" in checkout["with"]["sparse-checkout"].split()
     token = step_in(job, "Create a token of the release app for the branch")
     assert {key for key in token["with"] if key.startswith("permission-")} == {
         "permission-contents",

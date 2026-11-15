@@ -839,6 +839,7 @@ def fix_command_command(
             arguments.folder,
             downloader(api, repo),
             watched(root),
+            writes=writes_in(root),
         )
     except NoList as error:
         print(f"::error::{error}", file=sys.stderr)

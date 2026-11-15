@@ -1798,9 +1798,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # scripts/check.sh says which steps fix, and so what fixes-check may write.
           sparse-checkout: |
             .github
             blueprint
+            scripts
       - name: Collect the fixes of the checks of the commit
         id: collect
         env:

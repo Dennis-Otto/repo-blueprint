@@ -585,6 +585,20 @@ def question_section(question: Question, values: Mapping[str, Any]) -> list[str]
     return lines
 
 
+def front_matter(description: str) -> list[str]:
+    """The lines of the front matter of a page with its description, as YAML writes
+    it: in quotes where plain YAML would read it otherwise, such as a description with
+    a colon and a space, which MkDocs showed as a heading of the page and Zensical
+    refused to build."""
+    meta = yaml.safe_dump(
+        {"description": description},
+        allow_unicode=True,
+        width=float("inf"),
+        sort_keys=False,
+    )
+    return ["---", *meta.splitlines(), "---"]
+
+
 def questions_page(text: str) -> str:
     """docs/reference/questions.md from the text of copier.yml."""
     found = questions(text)
@@ -593,11 +607,11 @@ def questions_page(text: str) -> str:
     asked = [question for question in found if question.asked]
     worked_out = [question for question in found if not question.asked]
     lines = [
-        "---",
-        "description: Every question of the Copier template of Repo Blueprint, with its"
-        " default, when Copier asks it and the answers it refuses, the values worked"
-        " out from the answers and the files that belong to a project.",
-        "---",
+        *front_matter(
+            "Every question of the Copier template of Repo Blueprint, with its default,"
+            " when Copier asks it and the answers it refuses, the values worked out from"
+            " the answers and the files that belong to a project."
+        ),
         "",
         "# The questions of Copier",
         "",
@@ -900,11 +914,11 @@ def variables_page(
     titles = {flow.file: flow.title for flow in workflows}
     scope = scopes(template_files)
     lines = [
-        "---",
-        "description: Every variable and secret that the workflows of Repo Blueprint"
-        " read or that its settings as code set: what it does, who sets it and which"
-        " workflows read it.",
-        "---",
+        *front_matter(
+            "Every variable and secret that the workflows of Repo Blueprint read or that"
+            " its settings as code set: what it does, who sets it and which workflows"
+            " read it."
+        ),
         "",
         "# Variables and secrets",
         "",

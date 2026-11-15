@@ -361,6 +361,10 @@ def writes_of(catalog: Catalog, root: Path, artifact: str) -> Writes:
         return Writes(entry.key, entry.writes or (), entry.writes is None)
     steps = [catalog.step(step) for step in check_steps(root)]
     fixing = [step for step in steps if step is not None and step.autofix]
+    if not fixing:
+        # Without scripts/check.sh in the checkout, or none of its steps fixing, nothing
+        # says what the fixes of fixes-check write: unnamed, not an empty allow-list.
+        return Writes(entry.key)
     globs = [glob for step in fixing for glob in step.writes or ()]
     return Writes(
         entry.key,
@@ -539,19 +543,26 @@ def load(
                     continue
                 # Where two checks fixed a file, the first one wins; the checks of the
                 # commit of the bot find what the other one fixes, and the bot's next
-                # commit, the one more that it makes onto its own, brings it.
-                if relative in files:
+                # commit, the one more that it makes onto its own, brings it. Only a
+                # check that names the path wins over a first one that names none.
+                if relative in files and relative not in unnamed:
                     continue
                 reason = refused(path, relative)
                 if not reason and allows is not None:
                     reason = beyond(allows, relative)
                 if reason:
-                    left[relative] = reason
+                    if relative not in files:
+                        left[relative] = reason
+                    continue
+                naming = allows is None or named(allows, relative)
+                if relative in files and not naming:
                     continue
                 files[relative] = path.read_bytes()
                 # A check that allows the path wins over one that doesn't.
                 left.pop(relative, None)
-                if allows is not None and not named(allows, relative):
+                if naming:
+                    unnamed.discard(relative)
+                else:
                     unnamed.add(relative)
     kept = dict(sorted(files.items())[:MOST_FILES])
     left |= {
@@ -1459,6 +1470,7 @@ def decide_command(
     download: Download,
     workflows: Watched,
     wait: Callable[[float], None] = time.sleep,
+    writes: Callable[[str], Writes] | None = None,
 ) -> Command:
     """Decides what the bot does at the command /fix of user on a pull request: only a
     person with write access starts it, as GitHub answers now, and the bot takes the
@@ -1494,7 +1506,8 @@ def decide_command(
             f"{still_running(found.late, sha)} The bot commits nothing yet, so that one "
             f"commit holds every fix: say `{COMMAND}` again once they have ended.\n",
         )
-    if not load(found.folders).files:
+    # The fixes that the commit job keeps, by the writes of the catalog of main.
+    if not load(found.folders, writes).files:
         return Command(
             "",
             f"No command fixed what the checks of {sha[:7]} found; the PR coach names "
