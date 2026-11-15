@@ -117,6 +117,18 @@
       },
     },
     {
+      // The version of markdownlint-cli2 that the action of the check lint runs at
+      // its new commit, which pins.py reads from its package.json into
+      // .github/pins.toml; tests/test_pins.py fails while the image runs another.
+      matchManagers: ["github-actions"],
+      matchDepNames: ["DavidAnson/markdownlint-cli2-action"],
+      postUpgradeTasks: {
+        commands: ["python3 pins.py"],
+        fileFilters: [".github/pins.toml"],
+        executionMode: "branch",
+      },
+    },
+    {
       matchFileNames: ["requirements-dev.txt"],
       semanticCommitType: "chore",
       groupName: "the tools of the blueprint's tests",

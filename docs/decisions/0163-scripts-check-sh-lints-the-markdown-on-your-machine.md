@@ -1,6 +1,6 @@
 # scripts/check.sh lints the Markdown on your machine, and leaves it to lint in the CI
 
-- Status: accepted
+- Status: accepted, amended by [0167](0167-the-action-and-the-image-of-markdownlint-cli2-move-together.md), with which the action and the image move in one pull request and the tests fail while their versions differ
 - Date: 2026-11-15
 
 ## Context
