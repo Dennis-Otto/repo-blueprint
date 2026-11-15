@@ -188,7 +188,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 - **Community:** README, Leitfaden für Beiträge, Verhaltenskodex, Sicherheitsrichtlinie und das Sicherheitsdesign der Software.
 - **Entwicklung:** Ein Dev-Container für VS Code und Codespaces, und ein Hook, der die Prüfungen vor jedem Push ausführt.
 - **Coding-Agents:** Die Regeln des Repositorys für Claude Code, Codex, GitHub Copilot und Cursor, in `AGENTS.md`.
-- **Werkzeuge:** `scripts/check.sh`, `scripts/diagrams.sh` und `scripts/social-preview.sh`, in jedem Repository dieselben.
+- **Werkzeuge:** `scripts/check.sh`, `scripts/diagrams.sh`, `scripts/markdownlint.sh` und `scripts/social-preview.sh`, in jedem Repository gleich.
 
 ## Ein Repository einrichten
 

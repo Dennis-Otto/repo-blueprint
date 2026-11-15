@@ -19,6 +19,7 @@ On Windows, run them in Git Bash, with `py -3` in place of `python3` and `.venv/
 - `pytest -n logical --maxprocesses=8 --cov`: the tests on every core, with every line and branch covered, as `scripts/check.sh` runs them.
 - `pytest tests/test_template.py -k name`: one test; the tests of the template render every kind of project, which takes a while.
 - `ruff format . && ruff check --fix .`: the format of the code, and the fixes that Ruff can make.
+- `bash scripts/markdownlint.sh --fix`: the Markdown of every document, with the version and the rules of the check *lint*, and the fixes that markdownlint can make, with Node 22 or newer or with Docker.
 - `python3 blueprint.py fix run`: every fix that a command makes for a step of `scripts/check.sh`, such as those of the text files, the pages and Ruff, as the fix bot makes them in a pull request.
 - `python3 blueprint.py locks --compile --fix`: compiles each lock file of pip-compile again after a change of its source, with uv, for its Python and on the versions that it pins.
 - `mypy`: the types, in the strict mode of mypy.

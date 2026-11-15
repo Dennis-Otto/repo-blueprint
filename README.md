@@ -186,7 +186,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Community:** README, contributing guide, code of conduct, security policy and the security design of the software.
 - **Development:** A dev container for VS Code and Codespaces, and a hook that runs the checks before every push.
 - **Coding agents:** The rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor, in `AGENTS.md`.
-- **Tools:** `scripts/check.sh`, `scripts/diagrams.sh` and `scripts/social-preview.sh`, the same in every repository.
+- **Tools:** `scripts/check.sh`, `scripts/diagrams.sh`, `scripts/markdownlint.sh` and `scripts/social-preview.sh`, alike in every repository.
 
 ## Set up a repository
 
