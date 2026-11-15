@@ -162,6 +162,8 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
     assert found == [
         ("Text files", "{blueprint} fix text"),
         ("Pages in one column", "{blueprint} pages --fix"),
+        # Nothing in the CI, where the check lint fixes the Markdown.
+        ("Markdown", "bash scripts/markdownlint.sh --fix"),
         ("Files of the project", "{blueprint} migrate --fix"),
         ("Changelog fragments", "{blueprint} fragments --fix"),
         ("Records of decisions", "{blueprint} decisions --fix"),
@@ -183,7 +185,7 @@ def test_another_check_fixes_itself_by_its_own_commands() -> None:
     catalog = Catalog.load(ROOT)
 
     assert fixers(catalog, ROOT, "markdown") == [
-        ("markdown", 'npx markdownlint-cli2 --fix "**/*.md"')
+        ("markdown", "bash scripts/markdownlint.sh --fix")
     ]
     # A check whose findings need a person, and one without an explanation.
     assert fixers(catalog, ROOT, "dco") == []
