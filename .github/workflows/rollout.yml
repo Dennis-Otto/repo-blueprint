@@ -581,7 +581,10 @@ jobs:
           # about a minute after it ended, as it does for every bot but at a start
           # that failed, and that second try passed each time that GitHub had timed
           # out (#931). So only the latest attempt counts: after a first one that
-          # failed, the rollout looks up to 5 more times for the second try.
+          # failed, the rollout looks up to 5 more times for the second try. A first
+          # attempt that was cancelled waits for it too: GitHub cancels a run at its
+          # time limit, which Bot health tries once more, as it does not one cancelled
+          # by hand, and the conclusion of the run doesn't tell the two apart.
           second_try=5
           if [[ -n "$RUN" ]]; then
             while :; do

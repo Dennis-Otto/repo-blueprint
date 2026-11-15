@@ -602,6 +602,8 @@ def test_the_next_repository_waits_for_the_update_of_this_one(
         ),
         # No second try comes within 5 looks.
         (["completed 1 failure"] * 6, 5),
+        # A cancelled first attempt waits for it too: it may have run out of time.
+        (["completed 1 cancelled"] * 6, 5),
         # A start that failed gets no second try, nor a run that timed out once more.
         (["completed 1 startup_failure"], 0),
         (["completed 2 timed_out"], 0),
