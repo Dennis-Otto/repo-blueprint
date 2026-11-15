@@ -366,7 +366,7 @@ Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate a
 
 ## Ein Release ändert eine Datei des Projekts
 
-**Was du siehst:** Der Schritt *Files of the project* von `scripts/check.sh` scheitert, meist am Pull Request eines Blueprint-Updates, und nennt die Datei und die Änderung, etwa `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+**Was du siehst:** Der Schritt *Files of the project* von `scripts/check.sh` scheitert, meist am Pull Request eines Blueprint-Updates, und nennt die Datei und die Änderung, etwa `.github/labels.toml: the labels good first issue and help wanted move to the group contribution` oder `.github/issue-assistant/config.toml: the hosts and the files that this project added to the issue assistant move to .github/issue-assistant/config.project.toml`.
 
 **Warum:** Ein Update überschreibt nie eine Datei des Projekts. Ein Release, das so eine Datei ändern muss, bringt die Änderung deshalb als Migration von `blueprint.py` mit, die dieser Schritt prüft. Auf einem Branch des Repositorys committet der Fix-Bot die Änderung innerhalb von Minuten selbst.
 
@@ -377,6 +377,8 @@ python3 .github/blueprint.py migrate --fix
 ```
 
 **Um die Änderung eines Labels abzulehnen,** schreibe einen Kommentar hinter seine Zeile, etwa `group = "decision" # keine Kandidaten des Issue-Assistenten`, dann lässt der Schritt dieses Label in Ruhe. Ein Label, das die Datei nicht hat, ändert sich ebenfalls nicht.
+
+**Die Hosts und Dateien des Issue-Assistenten,** die ein Projekt in `config.toml` ergänzt hat, einer Datei des Blueprints, wandern ans Ende der Listen in `config.project.toml`, der Datei des Projekts, jede einmal. `config.toml` behält die Vorgaben seiner Art, damit das nächste Update sie ohne Konflikt ändert. Der Issue-Assistent ergänzt die Listen beider Dateien, also verlinken seine Kommentare dieselben Hosts wie vorher und seine Fußzeilen dieselbe Datei ([Entscheidung 0162](decisions/0162-the-hosts-and-files-of-the-issue-assistant-of-a-project-have-a-file-of-their-own.md), englisch).
 
 ## Ein geplanter Workflow ist nicht gelaufen
 

@@ -366,7 +366,7 @@ The last command takes the presets of the blueprint out of the rules, since Reno
 
 ## A release moves a file of the project
 
-**What you see:** the step *Files of the project* of `scripts/check.sh` fails, usually on the pull request of a blueprint update, and names the file and what moves, such as `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+**What you see:** the step *Files of the project* of `scripts/check.sh` fails, usually on the pull request of a blueprint update, and names the file and what moves, such as `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`, or `.github/issue-assistant/config.toml: the hosts and the files that this project added to the issue assistant move to .github/issue-assistant/config.project.toml`.
 
 **Why:** an update never overwrites a file of the project, so a release that needs such a file changed brings the change as a migration of `blueprint.py`, which this step checks. On a branch of the repository, the fix bot commits the move by itself within minutes.
 
@@ -377,6 +377,8 @@ python3 .github/blueprint.py migrate --fix
 ```
 
 **To decline the move of a label,** write a comment behind its line, such as `group = "decision" # no candidates of the issue assistant`, and the step leaves that label alone. A label that the file doesn't have moves nowhere either.
+
+**The hosts and files of the issue assistant** that a project added to `config.toml`, a file of the blueprint, move to the end of the lists in `config.project.toml`, the file of the project, each once; `config.toml` keeps the defaults of its kind, so that the next update changes them without a conflict. The issue assistant adds the lists of both files, so its comments link the same hosts as before, and its footers the same file ([decision 0162](decisions/0162-the-hosts-and-files-of-the-issue-assistant-of-a-project-have-a-file-of-their-own.md)).
 
 ## A scheduled workflow didn't run
 
