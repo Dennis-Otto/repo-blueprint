@@ -1025,8 +1025,10 @@ writes = ["**/*.md"]
 [step."Files of the project"]
 problem = """A file that belongs to this project, which an update of the blueprint leaves
 as it is, lacks what a release of the blueprint moved, such as the labels `good first
-issue` and `help wanted` in the group `contribution` of `.github/labels.toml`; the log
-names each file and what moves."""
+issue` and `help wanted` in the group `contribution` of `.github/labels.toml`, or the
+hosts and files that the project added to `.github/issue-assistant/config.toml`, which
+go to `.github/issue-assistant/config.project.toml`; the log names each file and what
+moves."""
 why = """The files of the blueprint in the update count on that move, and an update never
 overwrites a file of the project. Without it the repository stays behind every new one,
 and a feature of the release stays off without a word."""
