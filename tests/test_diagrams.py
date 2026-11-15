@@ -1876,9 +1876,33 @@ KEYLESS = (
 )
 
 
+KEYLESS_MARKER = "<!-- the diagram bot has no private key -->"
+KEYLESS_COMMENT = (
+    "pr comment 7 --body The diagram bot can't commit the diagrams of this pull"
+    " request (https://github.com/o/r/actions/runs/8): this repository names its"
+    " release app, but has no private key of it in the secret"
+    " `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`, which"
+    " `python3 .github/blueprint.py app connect --key-file FILE` sets. Until then,"
+    " run `bash scripts/diagrams.sh --extract` with Docker and commit what it"
+    " changes, or take the files from the artifact `diagrams` of the check"
+    f" *diagrams*.{KEYLESS_MARKER}"
+)
+
+
 @needs_bash
+@pytest.mark.parametrize(
+    ("head", "comments", "says"),
+    [
+        # The first run of the head of the pull request says so.
+        ("abc1234def", "Looks good\n", True),
+        # A branch that moved on gets its say from the checks of its new head.
+        ("fedcba9876", "Looks good\n", False),
+        # The pull request already says so: every further push adds no comment.
+        ("abc1234def", f"Earlier.{KEYLESS_MARKER}\n", False),
+    ],
+)
 def test_a_diagram_bot_without_the_key_of_the_app_says_so_on_the_pull_request(
-    tmp_path: Path,
+    tmp_path: Path, head: str, comments: str, says: bool
 ) -> None:
     # The check promises the bot's commit by the name of the release app alone, as it
     # can't see the secret of the environment; a bot without the private key ended
@@ -1899,23 +1923,25 @@ def test_a_diagram_bot_without_the_key_of_the_app_says_so_on_the_pull_request(
         tmp_path,
         tmp_path,
         {},
-        [Answer(r"pr comment .*")],
+        [
+            Answer(r"api .*repos/o/r/git/ref/heads/feature .*", f"{head}\n"),
+            Answer(r"pr view 7 --json comments .*", comments),
+            Answer(r"pr comment .*"),
+        ],
+        GH_REPO="o/r",
         BRANCH="feature",
         NUMBER="7",
+        SHA="abc1234def",
         URL="https://github.com/o/r/actions/runs/8",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.commands == [
-        "pr comment 7 --body The diagram bot can't commit the diagrams of this pull"
-        " request (https://github.com/o/r/actions/runs/8): this repository names its"
-        " release app, but has no private key of it in the secret"
-        " `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`, which"
-        " `python3 .github/blueprint.py app connect --key-file FILE` sets. Until then,"
-        " run `bash scripts/diagrams.sh --extract` with Docker and commit what it"
-        " changes, or take the files from the artifact `diagrams` of the check"
-        " *diagrams*."
-    ]
+    assert result.called("pr comment") == ([KEYLESS_COMMENT] if says else [])
+    if head != "abc1234def":
+        assert "feature moved on from abc1234" in result.summary
+        assert not result.called("pr view")
+    elif not says:
+        assert "already says" in result.summary
 
 
 # The diagram bot in an outage of GitHub, as on 9 November 2026: it ends with a

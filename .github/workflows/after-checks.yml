@@ -2542,7 +2542,8 @@ jobs:
       # The check promises the bot's commit wherever the repository names the release
       # app, which it can't see the private key of: a bot without the key says so on
       # the pull request rather than leave it waiting for a commit that doesn't come
-      # (#913).
+      # (#913). It says so once on each pull request, and not for a head that the
+      # branch moved on from, whose checks run again.
       - name: Say on the pull request that the bot has no private key
         if: >-
           steps.drawn.outputs.found == 'true' &&
@@ -2553,10 +2554,22 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           eval "$OUTAGE"
-          once gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot can't commit the diagrams of this pull request ($URL): this repository names its release app, but has no private key of it in the secret \`RELEASE_AUTOMATION_PRIVATE_KEY\` of the environment \`release\`, which \`python3 .github/blueprint.py app connect --key-file FILE\` sets. Until then, run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*."
+          head="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)"
+          if [[ "$head" != "$SHA" ]]; then
+            echo "$BRANCH moved on from ${SHA:0:7}; the checks of its new head draw the diagrams again." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          marker="<!-- the diagram bot has no private key -->"
+          comments="$(tried gh pr view "${NUMBER:-$BRANCH}" --json comments --jq '.comments[].body')"
+          if grep -qF "$marker" <<<"$comments"; then
+            echo "The pull request already says that the diagram bot has no private key." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          once gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot can't commit the diagrams of this pull request ($URL): this repository names its release app, but has no private key of it in the secret \`RELEASE_AUTOMATION_PRIVATE_KEY\` of the environment \`release\`, which \`python3 .github/blueprint.py app connect --key-file FILE\` sets. Until then, run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*.$marker"
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
