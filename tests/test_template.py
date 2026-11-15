@@ -100,6 +100,12 @@ from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
 from blueprint.migrate import (
+    ISSUE_ASSISTANT,
+    ISSUE_ASSISTANT_PROJECT,
+    ISSUE_ASSISTANT_PROJECT_TEXT,
+    LINK_HOSTS,
+    MIGRATIONS,
+    NEXT,
     NO_BOT_FIXES_LABEL,
     contribution_labels,
     migrate,
@@ -13974,24 +13980,10 @@ def test_the_issue_assistant_names_its_ai_by_default(
 
 
 # The hosts that the comments of the issue assistant may link to besides the
-# repository, by kind: the documentation that a helpful answer points to. A Chrome
-# extension and a Cloudflare Worker have the stack node, but their reporters need
-# the pages of Chrome and of Cloudflare, not those of a package of npm (#848).
-LINK_HOSTS = {
-    "home-assistant": [
-        "www.home-assistant.io",
-        "developers.home-assistant.io",
-        "hacs.xyz",
-    ],
-    "nextcloud-app": ["docs.nextcloud.com", "apps.nextcloud.com"],
-    "github-action": ["docs.github.com"],
-    "python-package": ["docs.python.org", "pypi.org"],
-    "node-package": ["nodejs.org", "www.npmjs.com"],
-    "chrome-extension": ["developer.chrome.com", "chromewebstore.google.com"],
-    "cloudflare-worker": ["developers.cloudflare.com"],
-    "container": ["docs.docker.com"],
-    "generic": [],
-}
+# repository, by kind, are LINK_HOSTS of blueprint/migrate.py, whose move of what a
+# project added keeps those of the template: the documentation that a helpful answer
+# points to. A Chrome extension and a Cloudflare Worker have the stack node, but their
+# reporters need the pages of Chrome and of Cloudflare, not those of npm (#848).
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -14001,7 +13993,79 @@ def test_the_issue_assistant_may_link_to_the_documentation_of_its_kind(
     config = tomllib.loads(
         (projects[kind] / ".github/issue-assistant/config.toml").read_text("utf-8")
     )
-    assert config["links"]["hosts"] == LINK_HOSTS[kind]
+    assert config["links"]["hosts"] == list(LINK_HOSTS[kind])
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_hosts_and_files_of_the_issue_assistant_have_a_file_of_the_project(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    text = (project / ISSUE_ASSISTANT_PROJECT).read_text(encoding="utf-8")
+    assert text == ISSUE_ASSISTANT_PROJECT_TEXT
+    assert tomllib.loads(text) == {
+        "links": {"hosts": []},
+        "transparency": {"files": []},
+    }
+    # It belongs to the project: no update overwrites it, and the check of ownership
+    # names no change of it.
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert ISSUE_ASSISTANT in owned.splitlines()
+    assert ISSUE_ASSISTANT_PROJECT not in owned
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    assert ISSUE_ASSISTANT_PROJECT in questions["_skip_if_exists"]
+    assert "config.project.toml" in (project / ISSUE_ASSISTANT).read_text("utf-8")
+    # A new repository has nothing to move.
+    assert not migrate(project, False, (*MIGRATIONS, *NEXT))
+
+
+def test_the_issue_assistant_reads_the_file_of_the_project() -> None:
+    # Its release 1.12.0 adds the lists of config.project.toml to those of
+    # config.toml; an older one would leave out what a project moved there.
+    text = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
+    )
+    versions = re.findall(
+        r"Dennis-Otto/issue-assistant[\w/.-]*@[0-9a-f]{40} # v(\d+)\.(\d+)\.(\d+)", text
+    )
+    assert versions
+    assert min(tuple(map(int, version)) for version in versions) >= (1, 12, 0)
+
+
+# The lines at the top of config.toml of the issue assistant that point to the file of
+# the project.
+ISSUE_ASSISTANT_TOP = (
+    "# This file belongs to the blueprint, whose updates change it: the hosts and the "
+    "files\n# of this project go into config.project.toml, which adds to them.\n"
+)
+# The repositories that follow the blueprint and added hosts or files of the issue
+# assistant to its config.toml, as each had it at release 1.18.3, by their kind.
+ADDED_TO_THE_ISSUE_ASSISTANT = {
+    "homedarts-for-autodarts": "home-assistant",
+    "paperless-sync": "nextcloud-app",
+    "paperless-unified-search": "nextcloud-app",
+    "issue-assistant": "github-action",
+}
+
+
+@pytest.mark.parametrize("name", sorted(ADDED_TO_THE_ISSUE_ASSISTANT))
+def test_the_move_gives_a_real_repository_the_config_of_the_template_again(
+    projects: Mapping[str, Path], tmp_path: Path, name: str
+) -> None:
+    kind = ADDED_TO_THE_ISSUE_ASSISTANT[name]
+    (tmp_path / ISSUE_ASSISTANT).parent.mkdir(parents=True)
+    shutil.copy(
+        ROOT / f"tests/data/issue-assistant/{name}.toml", tmp_path / ISSUE_ASSISTANT
+    )
+    shutil.copy(projects[kind] / ".copier-answers.yml", tmp_path)
+    assert migrate(tmp_path, True, NEXT)
+    # What the template renders, but for the lines at the top that came after 1.18.3:
+    # the update brings them without a conflict, and the next one changes the lists.
+    rendered = (projects[kind] / ISSUE_ASSISTANT).read_text(encoding="utf-8")
+    assert (tmp_path / ISSUE_ASSISTANT).read_text(encoding="utf-8") == rendered.replace(
+        ISSUE_ASSISTANT_TOP, ""
+    )
 
 
 # The badge that the README of the issue assistant offers to a repository that uses

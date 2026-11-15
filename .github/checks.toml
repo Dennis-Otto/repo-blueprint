@@ -1037,7 +1037,11 @@ commands = ["python3 .github/blueprint.py migrate --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#a-release-moves-a-file-of-the-project"
 autofix = ["{blueprint} migrate --fix"]
 # MOVABLE of blueprint/migrate.py.
-writes = [".github/labels.toml"]
+writes = [
+  ".github/issue-assistant/config.project.toml",
+  ".github/issue-assistant/config.toml",
+  ".github/labels.toml",
+]
 
 [step."Binary files"]
 problem = """Git holds a binary file that nobody can review: a program, a library,

@@ -40,6 +40,7 @@ _skip_if_exists:
   - /docs/security.md
   - /docs/releases.md
   - .github/issue-assistant/project.md
+  - .github/issue-assistant/config.project.toml
   - .github/agents.project.md
   - /docs/decisions
   - .github/ISSUE_TEMPLATE/bug_report.yml
