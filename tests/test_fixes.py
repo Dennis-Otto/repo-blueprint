@@ -94,7 +94,7 @@ from blueprint.fixes import (
     written_by,
 )
 from blueprint.github import Api, GitHubError
-from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE
+from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE, NEXT
 from blueprint.update import BRANCH as UPDATE_BRANCH
 from blueprint.versions import PLACES
 
@@ -2229,8 +2229,11 @@ def test_the_update_of_the_blueprint_gets_the_move_of_a_migration() -> None:
 
 
 def test_a_migration_moves_only_data_that_the_bot_may_commit() -> None:
-    # The bot of main decides, so a new path comes to MOVABLE before its migration.
-    assert {migration.path for migration in MIGRATIONS} <= MOVABLE
+    # The bot of main decides, so a new path comes to MOVABLE before its migration,
+    # and those of the next release are in it already.
+    assert {
+        path for migration in (*MIGRATIONS, *NEXT) for path in migration.paths
+    } <= MOVABLE
     for path in MOVABLE:
         assert not path.startswith((".github/workflows/", ".github/actions/"))
         assert path.endswith(".toml")
