@@ -285,6 +285,20 @@ The header then reads `uv pip compile --generate-hashes --python-version=3.12 --
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
 
+## No commit of the diagram bot comes
+
+**What you see:** the check *diagrams* of a pull request fails with *Diagrams that not every reader sees* and says that the diagram bot commits the files onto the branch, but no commit *docs: draw the diagrams anew* comes for a while.
+
+**Why:** the bot runs in the job *commit the diagrams* of the workflow After the checks, which starts when the check *diagrams* has failed and then waits for a runner like any job. While Actions has a queue, such as when a plan's jobs of every repository run at once, that can take many minutes. A push in the meantime moves the branch on, and the bot then leaves it: the checks of the new head draw the diagrams again. Where the bot can't commit, it says so in a comment on the pull request: when its run fails, or when the repository names the release app in [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) but has no private key of it in the environment `release`. Without the release app, and in a pull request from a fork, the check itself says that no bot commits.
+
+**What to do:** wait for the run of After the checks, whose job *commit the diagrams* says in its summary what it did. Or take the files at once from the artifact `diagrams` of the check, or draw them with Docker, and commit what changes:
+
+```sh
+bash scripts/diagrams.sh --extract
+```
+
+After a comment that the bot couldn't commit, the summary of its run names what is missing, and [A bot says that it needs the release app](#a-bot-says-that-it-needs-the-release-app) how to set it up.
+
 ## The title of a pull request changed, or a file appeared in changelog.d
 
 **What you see:** the timeline of the pull request shows that the release app changed its title, or a commit *docs: draft the entry of the changelog from the title* added a file of `changelog.d/`.

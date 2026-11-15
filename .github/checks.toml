@@ -152,8 +152,10 @@ why = """The GitHub app, HACS, the stores of the projects and the e-mails of Git
 no Mermaid, so only a picture of its source shows a diagram to every reader, and the
 picture has to show what its source says."""
 fix = """On a branch of this repository with the release app, the diagram bot commits
-the fix in a minute. Otherwise, and from a fork, turn the blocks into sources and draw
-their pictures with Docker, then commit what changed:"""
+the fix once a runner of the workflow After the checks is free, which takes a while when
+Actions has a queue, and says on the pull request when it can't. Otherwise, and from a
+fork, take the files from the artifact `diagrams` of the check, or turn the blocks into
+sources and draw their pictures with Docker, then commit what changed:"""
 commands = ["bash scripts/diagrams.sh --extract"]
 docs = "CONTRIBUTING.md#diagrams"
 autofix = """The diagram bot draws the pictures with Docker, in a job of its own, and
