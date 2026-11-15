@@ -577,13 +577,29 @@ jobs:
             sleep 60
           }
           # The bot first, to tell whether it brought the release, when GitHub named
-          # its run.
+          # its run. Bot health runs the failed jobs of its first attempt once more,
+          # about a minute after it ended, as it does for every bot but at a start
+          # that failed, and that second try passed each time that GitHub had timed
+          # out (#931). So only the latest attempt counts: after a first one that
+          # failed, the rollout looks up to 5 more times for the second try. A first
+          # attempt that was cancelled waits for it too: GitHub cancels a run at its
+          # time limit, which Bot health tries once more, as it does not one cancelled
+          # by hand, and the conclusion of the run doesn't tell the two apart.
+          second_try=5
           if [[ -n "$RUN" ]]; then
             while :; do
-              bot="$(gh run view "$RUN" --repo "$REPOSITORY" --json status,conclusion --jq '"\(.status) \(.conclusion)"')" || bot=""
-              read -r status conclusion <<<"$bot"
+              bot="$(gh run view "$RUN" --repo "$REPOSITORY" --json status,attempt,conclusion --jq '"\(.status) \(.attempt) \(.conclusion)"')" || bot=""
+              # The conclusion last: it is empty while the bot runs.
+              read -r status attempt conclusion <<<"$bot"
               if [[ "$status" == completed ]]; then
-                break
+                if [[ "$conclusion" == success || "$conclusion" == startup_failure || "${attempt:-1}" != 1 ]] ||
+                  ((second_try == 0)); then
+                  break
+                fi
+                second_try=$((second_try - 1))
+                # Out of looks, the failure of the first attempt stands.
+                another_look || break
+                continue
               fi
               if ! another_look; then
                 echo "The blueprint bot still ran after 15 minutes; the rollout goes on." >> "$GITHUB_STEP_SUMMARY"
@@ -594,6 +610,9 @@ jobs:
               echo "::error::The blueprint bot failed in $REPOSITORY: https://github.com/$REPOSITORY/actions/runs/$RUN"
               echo "✘ The blueprint bot failed in $REPOSITORY." >> "$GITHUB_STEP_SUMMARY"
               exit 1
+            fi
+            if [[ "${attempt:-1}" != 1 ]]; then
+              echo "The blueprint bot of $REPOSITORY passed at attempt $attempt, after Bot health ran its failed jobs again." >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
           if [[ "$LAST" == true ]]; then
