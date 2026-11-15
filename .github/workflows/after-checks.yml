@@ -16,7 +16,11 @@ name: After the checks
 # its steps had passed failed in no test: its runner never reported that the job
 # ended, and the summary names it as the runner's fault, outside the issue. A job that
 # fails again is a real failure and stays red, and so does one that failed the same
-# way for the commit before: running it again would only keep a runner busy. The
+# way for the commit before: running it again would only keep a runner busy. Only the
+# run of the head of its pull request, or of its branch, runs again: just before the
+# rerun, the bot asks GitHub for the head, as a run of a commit that a newer push
+# replaced shares the concurrency group of the run for the head and would cancel it,
+# as in Dennis-Otto/paperless-sync#486; the bot for stopped checks asks the same. The
 # Downstream workflow of the blueprint updates the repositories that take it as they
 # are at that moment, so one of its jobs that passes when it runs again found a
 # repository that changed in between, such as one that merged what the pull request
@@ -222,6 +226,8 @@ jobs:
     permissions:
       actions: write
       checks: read
+      contents: read # the head of a branch
+      pull-requests: read # the head of a pull request
     steps:
       - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -425,6 +431,33 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # Run again, the run of a commit that a newer push replaced would share the
+          # concurrency group of the run for the newest commit, and cancel it, as in
+          # Dennis-Otto/paperless-sync#486: only the run of the head of its pull request,
+          # or of its branch, runs again. The bot looks last, just before the rerun, as
+          # a push may land while it reads the jobs; a run of a schedule or by hand
+          # shares its group with no other run.
+          case "$EVENT" in
+            push)
+              # A branch that is gone has no head.
+              if ! tip="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)"; then
+                grep -q "HTTP 404" "$RUNNER_TEMP/gh-errors" || exit 1
+                tip=""
+              fi
+              if [[ "$tip" != "$SHA" ]]; then
+                echo "${SHA:0:7} is no longer the head of $BRANCH, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              ;;
+            pull_request | pull_request_target)
+              number="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/commits/$SHA/pulls" \
+                --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
+              if [[ -z "$number" ]]; then
+                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              ;;
+          esac
           # A person or a try before may have started it again already, which is fine.
           if ! tried gh run rerun "$RUN" --failed; then
             if grep -q "already running" "$RUNNER_TEMP/gh-errors"; then
@@ -1372,6 +1405,8 @@ jobs:
     permissions:
       actions: write
       checks: read
+      contents: read # the head of a branch
+      pull-requests: read # the head of a pull request
     steps:
       - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -1453,6 +1488,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN: ${{ github.event.workflow_run.id }}
           NAME: ${{ github.event.workflow_run.name }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           eval "$OUTAGE"
           # A job that the step "Make sure that Harden-Runner blocks" stopped says so in
@@ -1478,6 +1516,33 @@ jobs:
             echo "$NAME ran again already; the bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # Run again, the run of a commit that a newer push replaced would share the
+          # concurrency group of the run for the newest commit, and cancel it, as the
+          # flaky-test bot found in Dennis-Otto/paperless-sync#486: only the run of the
+          # head of its pull request, or of its branch, runs again. The bot looks last,
+          # just before the rerun; a run of a schedule or by hand shares its group with
+          # no other run.
+          case "$EVENT" in
+            push)
+              # A branch that is gone has no head.
+              if ! tip="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)"; then
+                grep -q "HTTP 404" "$RUNNER_TEMP/gh-errors" || exit 1
+                tip=""
+              fi
+              if [[ "$tip" != "$SHA" ]]; then
+                echo "${SHA:0:7} is no longer the head of $BRANCH, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              ;;
+            pull_request | pull_request_target)
+              number="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/commits/$SHA/pulls" \
+                --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
+              if [[ -z "$number" ]]; then
+                echo "${SHA:0:7} is not the head of an open pull request any more, so the failed jobs of its run of $NAME don't run again: they would cancel the run for the newer commit." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              ;;
+          esac
           # It may also start again between the look and the rerun.
           if ! output="$(tried gh run rerun "$RUN" --failed)"; then
             if grep -q "already running" "$RUNNER_TEMP/gh-errors"; then
