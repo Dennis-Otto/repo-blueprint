@@ -681,7 +681,7 @@ fix = """On the settings page of the app that the summary names, under *Permissi
 events*, set *Dependabot alerts* to *Read and write* and save. GitHub then asks the
 owner to accept the new permission on the installation of the app (*Settings →
 Applications → Configure*, *Review request*); accept it, and run the workflow
-*OSV-Scanner* again. With the GitHub CLI of a maintainer, this shows which alerts the
+*Release* again. With the GitHub CLI of a maintainer, this shows which alerts the
 job would close or open again (in the blueprint itself, the tool is `blueprint.py`
 without `.github/`):"""
 commands = [

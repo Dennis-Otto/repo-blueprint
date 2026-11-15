@@ -4,4 +4,8 @@
     every other build gets none. -#]
 [%- set nothing = "    # The build gets none of the secrets of the release, only the token of its job.\n" -%]
 [%- set signing = "    # The build signs the Nextcloud app with the key of its environment signing. A\n    # called workflow sees no secret that its caller doesn't pass, and the secret of\n    # the environment of the called job takes the place of the value passed, which is\n    # empty as this job enters no environment. No other secret reaches the build.\n    secrets:\n      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n" -%]
-{= replaced(".github/workflows/release.yml", [[nothing, signing if publish_to == 'nextcloud-appstore' else nothing]]) -=}
+[#- A refused token of the Dependabot alert bot fails its check only in the
+    repositories of the blueprint's owner, whose apps have the permission, and leaves a
+    notice in those of every other owner (decision 0086). -#]
+[%- set strict = '          STRICT: "true"' -%]
+{= replaced(".github/workflows/release.yml", [[nothing, signing if publish_to == 'nextcloud-appstore' else nothing], [strict, '          STRICT: "' ~ ('true' if owner == blueprint_owner.account else 'false') ~ '"']]) -=}

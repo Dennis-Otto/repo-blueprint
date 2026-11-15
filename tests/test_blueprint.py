@@ -5085,11 +5085,11 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     assert lines[installed + 1] == (
         "      https://github.com/apps/demo-release-automation/installations/new"
     )
-    # Which app the OSV-Scanner workflow closes the accepted Dependabot alerts as, and
+    # Which app the Release workflow closes the accepted Dependabot alerts as, and
     # the permission that it needs, which no API tells.
     assert lines[installed + 2] == (
         "  · The settings app, or the release app without one, may write the Dependabot"
-        " alerts, so that the OSV-Scanner workflow closes those that osv-scanner.toml"
+        " alerts, so that the Release workflow closes those that osv-scanner.toml"
         " accepts"
     )
     assert "set Dependabot alerts to Read and write" in lines[installed + 3]
