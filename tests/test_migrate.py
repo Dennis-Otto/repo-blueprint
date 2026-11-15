@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import tomllib
-from functools import partial
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from blueprint.migrate import (
     ISSUE_ASSISTANT_PROJECT_TEXT,
     LABELS,
     LINK_HOSTS,
-    NEXT,
     NO_BOT_FIXES_LABEL,
     Migration,
     contribution_labels,
@@ -464,7 +462,7 @@ def test_the_hosts_and_files_of_a_real_repository_move_to_its_own_file(
     root = assistant_repository(tmp_path, text, KIND_OF[name])
     before = as_the_assistant_reads(root)
     hosts, files = ADDED[name]
-    found = migrate(root, True, NEXT)
+    found = migrate(root, True)
     assert bool(found) == bool(hosts or files)
     # The issue assistant reads every host and file that it read before, none more,
     # and the file that its footers link stays the first.
@@ -489,7 +487,7 @@ def test_the_hosts_and_files_of_a_real_repository_move_to_its_own_file(
     else:
         assert moved == text
         assert not (root / ISSUE_ASSISTANT_PROJECT).exists()
-    assert not migrate(root, False, NEXT)
+    assert not migrate(root, False)
 
 
 def test_a_repository_without_the_kind_or_the_file_has_nothing_to_move(
@@ -531,7 +529,7 @@ def test_a_list_that_the_move_cant_follow_stays_as_it_is(tmp_path: Path) -> None
         '[links]\nhosts = [\n  "a.example",  # see [docs]\n  "b.example",\n]\n',
     )
     assert not issue_assistant_project(root)
-    assert not migrate(root, True, NEXT)
+    assert not migrate(root, True)
     assert not (root / ISSUE_ASSISTANT_PROJECT).exists()
 
 
@@ -569,7 +567,7 @@ def test_without_the_ai_no_file_names_it_by_default(tmp_path: Path) -> None:
     root = assistant_repository(
         tmp_path, '[transparency]\nfiles = ["SUPPORT.md"]\n', "generic", ai=False
     )
-    assert migrate(root, True, NEXT)
+    assert migrate(root, True)
     config, project = read_lists(root)
     assert config == {"hosts": [], "files": []}
     assert project == {"hosts": [], "files": ["SUPPORT.md"]}
@@ -580,8 +578,9 @@ def test_the_command_names_the_move_of_the_issue_assistant(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The command of every repository moves it since the release after 1.19.0, which
+    # brought its paths to the fix bot of main; until then it waited in NEXT.
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setattr("blueprint.cli.migrate", partial(migrate, migrations=NEXT))
     text = (REAL / "paperless-sync.toml").read_text(encoding="utf-8")
     root = assistant_repository(tmp_path, text, "nextcloud-app")
     assert main(["migrate"], root=root) == 1
