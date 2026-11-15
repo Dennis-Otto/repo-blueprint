@@ -401,6 +401,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Tests, with every line and branch covered",
         "Text files",
         "Pages in one column",
+        "Markdown",
         "Files of the project",
         "Changelog fragments",
         "Records of decisions",
@@ -417,7 +418,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
     ]
     markdown = explained.check("markdown")
     assert markdown
-    assert markdown.autofix == ('npx markdownlint-cli2 --fix "**/*.md"',)
+    assert markdown.autofix == ("bash scripts/markdownlint.sh --fix",)
 
 
 def test_an_explanation_without_its_autofix_fails_the_verification(
@@ -1422,7 +1423,7 @@ def test_the_report_explains_each_linter_that_failed_in_lint() -> None:
 
     part = sections(body_of(github))["lint"]
     assert "**The Markdown of the documents** · <code>markdown</code>" in part
-    assert '```sh\nnpx markdownlint-cli2 --fix "**/*.md"\n```' in part
+    assert "```sh\nbash scripts/markdownlint.sh --fix\n```" in part
     assert "**The license of every file** · <code>reuse</code>" in part
     assert "<code>workflow-lint</code>" not in part
     # Not the explanation of lint itself, which is for a step before the linters.

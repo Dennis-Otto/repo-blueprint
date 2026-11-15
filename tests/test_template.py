@@ -2931,6 +2931,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "release-please-config.json",
         "scripts/check.sh",
         "scripts/diagrams.sh",
+        "scripts/markdownlint.sh",
         ".github/FUNDING.yml",
         ".github/findings.toml",
         ".github/checks.toml",
@@ -8964,6 +8965,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "docs/README.md",
         "scripts/check.sh",
         "scripts/diagrams.sh",
+        "scripts/markdownlint.sh",
         "changelog.d/.gitkeep",
         "AGENTS.md",
         "CLAUDE.md",
@@ -11288,6 +11290,7 @@ THE_TOOLS = [
     ("github-actions", "action", ".github/workflows/ci.yml"),
     ("custom.regex", "", ".github/workflows/docs.yml"),
     ("custom.regex", "", "scripts/diagrams.sh"),
+    ("custom.regex", "", "scripts/markdownlint.sh"),
     ("pip-compile", "", ".github/docs-requirements.txt"),
     ("dockerfile", "final", ".devcontainer/Dockerfile"),
     ("dockerfile", "final", ".github/social-preview/Dockerfile"),
@@ -16334,6 +16337,7 @@ def test_every_project_fixes_what_a_command_can_fix(
     expected = [
         "Text files",
         "Pages in one column",
+        "Markdown",
         "Files of the project",
         "Changelog fragments",
         "Records of decisions",
@@ -23005,6 +23009,298 @@ def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
                     (match["depName"], match["currentValue"], match["currentDigest"])
                 )
     assert found == [image.groups()]
+
+
+MARKDOWNLINT_IMAGE = re.compile(
+    r'^image="(davidanson/markdownlint-cli2):v([^@"]+)@(sha256:[0-9a-f]{64})"$', re.M
+)
+
+
+def markdown_step(check: str) -> str:
+    start = check.index('\nstep "Markdown"\n')
+    return check[start : check.index('\nstep "Files of the project"\n', start) + 1]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_lints_its_markdown_as_the_check_lint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # A pull request that passes scripts/check.sh and the hook before a push passes
+    # the Markdown of the check lint too: the step runs the script of the blueprint.
+    project = projects[kind]
+    script = (project / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    assert script == (ROOT / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert markdown_step(check) == markdown_step(
+        (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+    )
+    assert "\nbash scripts/markdownlint.sh\n" in markdown_step(check)
+    assert (
+        check.index('\nstep "Pages in one column"\n')
+        < check.index('\nstep "Markdown"\n')
+        < check.index('\nstep "Files of the project"\n')
+    )
+    # The same files and the same command as the check lint.
+    assert step_named(workflows(project)["lint.yml"], "markdown")["with"] == {
+        "globs": "**/*.md"
+    }
+    assert script.count('"**/*.md"\n') == 2
+    # The step explains itself, and fixes what markdownlint can fix in the Markdown.
+    catalog = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    step = catalog["step"]["Markdown"]
+    assert step["autofix"] == ["bash scripts/markdownlint.sh --fix"]
+    assert step["writes"] == ["**/*.md"]
+    assert catalog["check"]["markdown"]["autofix"] == step["autofix"]
+
+
+def test_the_markdown_lints_with_one_version_everywhere() -> None:
+    # One image of markdownlint-cli2, which Renovate keeps current, in the script and
+    # in the Variants workflow, and npx takes the version of its tag: the comment in
+    # the Lint workflow names no version of its own that could stay behind.
+    script = (ROOT / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    image = MARKDOWNLINT_IMAGE.search(script)
+    assert image
+    name, version, digest = image.groups()
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    assert re.findall(r"davidanson/markdownlint-cli2:\S+", variants) == [
+        f"{name}:v{version}@{digest}"
+    ]
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    assert "npx markdownlint-cli2" not in lint
+    assert "Locally: bash scripts/markdownlint.sh" in lint
+    rules = renovate_rules(
+        (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    found = []
+    for manager in rules["customManagers"]:
+        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
+        if not any(name.search("scripts/markdownlint.sh") for name in files):
+            continue
+        for pattern in manager["matchStrings"]:
+            for match in re.finditer(pattern.replace("(?<", "(?P<"), script):
+                found.append(
+                    (match["depName"], match["currentValue"], match["currentDigest"])
+                )
+    assert found == [(name, f"v{version}", digest)]
+
+
+def markdownlint_in(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A repository with the script, a folder for the stubs of node, npx and docker,
+    and the file in which each stub writes its arguments, one per line, after its name."""
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    shutil.copy(ROOT / "scripts/markdownlint.sh", repository / "scripts")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    return repository, stubs, tmp_path / "calls"
+
+
+def stub(stubs: Path, name: str, calls: Path, body: str = "") -> None:
+    (stubs / name).write_text(
+        "#!/usr/bin/env bash\n"
+        f"{body}\n"
+        f"printf '%s\\n' {name} \"$@\" >> '{calls.as_posix()}'\n"
+        'exit "${STATUS:-0}"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / name).chmod(0o755)
+
+
+def lint_markdown(
+    repository: Path,
+    path: str,
+    *arguments: str,
+    variables: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name != "CI" and not name.startswith("GITHUB_")
+    }
+    environment |= {"PATH": path, **(variables or {})}
+    assert BASH
+    return subprocess.run(
+        [BASH, "scripts/markdownlint.sh", *arguments],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def markdownlint_version() -> str:
+    image = MARKDOWNLINT_IMAGE.search(
+        (ROOT / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    )
+    assert image
+    return image[2]
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("arguments", [(), ("--fix",)])
+def test_the_markdown_lints_with_node_through_npx(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    repository, stubs, calls = markdownlint_in(tmp_path)
+    without = path_without(tmp_path / "bin", "node", "npx", "docker")
+    stub(stubs, "node", calls, 'if [[ "$1" == -p ]]; then echo 22; exit; fi')
+    stub(stubs, "npx", calls)
+    stub(stubs, "docker", calls)
+    path = f"{stubs}{os.pathsep}{without}"
+
+    result = lint_markdown(repository, path, *arguments)
+    failing = lint_markdown(repository, path, *arguments, variables={"STATUS": "1"})
+
+    assert (result.returncode, result.stderr) == (0, "")
+    # From the cache of npx once it has the version, without the network.
+    call = [
+        "npx",
+        "--yes",
+        "--prefer-offline",
+        f"markdownlint-cli2@{markdownlint_version()}",
+        *arguments,
+        "**/*.md",
+    ]
+    assert calls.read_text(encoding="utf-8").splitlines() == call * 2
+    # A finding fails the script, and so the step of scripts/check.sh.
+    assert failing.returncode == 1
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("node", ["", 'if [[ "$1" == -p ]]; then echo 20; exit; fi'])
+@pytest.mark.parametrize("arguments", [(), ("--fix",)])
+def test_the_markdown_lints_with_docker_without_node_22(
+    tmp_path: Path, node: str, arguments: tuple[str, ...]
+) -> None:
+    repository, stubs, calls = markdownlint_in(tmp_path)
+    without = path_without(tmp_path / "bin", "node", "npx", "docker")
+    if node:
+        # An older Node, which this version of markdownlint-cli2 doesn't run on.
+        stub(stubs, "node", calls, node)
+        stub(stubs, "npx", calls)
+    stub(stubs, "docker", calls, 'if [[ "$1" == info ]]; then exit; fi')
+
+    result = lint_markdown(repository, f"{stubs}{os.pathsep}{without}", *arguments)
+
+    assert (result.returncode, result.stderr) == (0, "")
+    image = MARKDOWNLINT_IMAGE.search(
+        (ROOT / "scripts/markdownlint.sh").read_text(encoding="utf-8")
+    )
+    assert image
+    called = calls.read_text(encoding="utf-8").splitlines()
+    run = called[called.index("docker") + 1 :]
+    # Git Bash on Windows names the folder as Windows does, and Docker Desktop needs
+    # no user; elsewhere the fixes keep the owner of each file.
+    user: list[str] = []
+    if sys.platform != "win32":
+        user = ["--user", f"{os.getuid()}:{os.getgid()}"]
+    folder = run[run.index("--volume") + 1]
+    assert run == [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        *user,
+        "--volume",
+        folder,
+        image[0].removeprefix('image="').removesuffix('"'),
+        *arguments,
+        "**/*.md",
+    ]
+    assert folder.endswith("/repository:/workdir")
+    assert "npx" not in called
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+def test_the_markdown_waits_for_the_ci_without_node_or_docker(tmp_path: Path) -> None:
+    repository, stubs, calls = markdownlint_in(tmp_path)
+    without = path_without(tmp_path / "bin", "node", "npx", "docker")
+    # A Docker whose daemon doesn't run.
+    stub(stubs, "docker", calls, 'if [[ "$1" == info ]]; then exit 1; fi')
+
+    alone = lint_markdown(repository, without)
+    stopped = lint_markdown(repository, f"{stubs}{os.pathsep}{without}", "--fix")
+
+    for result in (alone, stopped):
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0,
+            "Neither Node 22 or newer nor Docker is here; "
+            "the check lint lints the Markdown in the CI.\n",
+            "",
+        )
+    # Docker was asked only whether its daemon runs.
+    assert not calls.exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+def test_the_markdown_is_left_to_the_check_lint_in_the_ci(tmp_path: Path) -> None:
+    # The check lint lints the same files with the same version in the same pull
+    # request, and its fix bot fixes them: no second download in every check job.
+    repository, stubs, calls = markdownlint_in(tmp_path)
+    for name in ("node", "npx", "docker"):
+        stub(stubs, name, calls)
+    path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
+
+    results = [
+        lint_markdown(
+            repository, path, *arguments, variables={"GITHUB_ACTIONS": "true"}
+        )
+        for arguments in [(), ("--fix",)]
+    ]
+
+    for result in results:
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0,
+            "The check lint lints the Markdown in the CI, and its fix bot fixes it.\n",
+            "",
+        )
+    assert not calls.exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("arguments", [("--check",), ("--fix", "README.md")])
+def test_the_markdown_script_names_its_usage(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    repository, _, calls = markdownlint_in(tmp_path)
+
+    result = lint_markdown(repository, os.environ["PATH"], *arguments)
+
+    assert (result.returncode, result.stdout, result.stderr) == (
+        2,
+        "",
+        "Usage: bash scripts/markdownlint.sh [--fix]\n",
+    )
+    assert not calls.exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_markdown_step_fails_on_a_finding(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Text files"')] + markdown_step(check)
+    repository, stubs, calls = markdownlint_in(tmp_path)
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    without = path_without(tmp_path / "bin", "node", "npx", "docker")
+    stub(stubs, "node", calls, 'if [[ "$1" == -p ]]; then echo 24; exit; fi')
+    stub(stubs, "npx", calls, "echo 'README.md:1 error MD018/no-missing-space-atx'")
+
+    result = run_the_steps(
+        repository,
+        script,
+        path=f"{stubs}{os.pathsep}{without}",
+        variables={"STATUS": "1"},
+    )
+
+    assert (result.returncode, result.stdout) == (
+        1,
+        "\n== Markdown\nREADME.md:1 error MD018/no-missing-space-atx\n",
+    )
 
 
 # What the default panel of the social preview shows for each kind of project, made
