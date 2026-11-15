@@ -33,6 +33,7 @@ from blueprint import (
     translations,
     versions,
 )
+from blueprint.adopt import AdoptError, adopt
 from blueprint.app import TIMEOUT, connect, register
 from blueprint.binaries import binaries
 from blueprint.bootstrap import CreateError, create, doctor
@@ -1832,6 +1833,22 @@ def add_settings_parsers(
         help="the preflight of create alone: whether Python, Git, the GitHub CLI, "
         "its sign-in, the owner and the name let create run, with what fixes each",
     )
+    adopt_parser = commands.add_parser(
+        "adopt",
+        help="what an existing repository lacks after copier copy: the version of "
+        "its latest release, the heading Unreleased and the labels of the bots",
+    )
+    adopt_parser.add_argument(
+        "--version",
+        metavar="X.Y.Z",
+        help="the version of the latest release, for one that GitHub doesn't have; "
+        "by default the tag of the latest release on GitHub",
+    )
+    adopt_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the preflight and what it would write, and write nothing",
+    )
     workflows_parser = commands.add_parser(
         "workflows",
         help="the workflows of .github/workflows/ that GitHub hasn't registered, "
@@ -2809,6 +2826,7 @@ def parser() -> argparse.ArgumentParser:
 PERSON_COMMANDS = (
     "create",
     "doctor",
+    "adopt",
     "checklist",
     "settings",
     "app",
@@ -2901,6 +2919,19 @@ def standalone_command(
         except CreateError as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
+    if arguments.command == "adopt":
+        # Git and gh only answer; it writes files of the folder, not of GitHub.
+        try:
+            done = adopt(
+                root,
+                repo=arguments.repo,
+                version=arguments.version,
+                dry_run=arguments.dry_run,
+            )
+        except (AdoptError, CreateError, OSError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+        return 0 if done else 1
     if arguments.command == "coach" and arguments.action in ("explain", "verify"):
         try:
             return explain_command(arguments, root)
