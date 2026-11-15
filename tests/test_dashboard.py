@@ -2120,6 +2120,19 @@ def test_the_dashboard_joins_the_sitemap_of_the_website(tmp_path: Path) -> None:
     )
     assert sitemap.read_text(encoding="utf-8") == expected
     assert gzip.decompress(packed.read_bytes()).decode("utf-8") == expected
+    # The folder of the dashboard has the sitemap too, as every folder of pages:
+    # Material asks the folder of the feed in the head of a page for it.
+    copy = tmp_path / "site/dashboard/sitemap.xml"
+    assert copy.read_text(encoding="utf-8") == expected
+
+
+def test_a_dashboard_in_the_folder_of_the_sitemap_keeps_it(tmp_path: Path) -> None:
+    sitemap = tmp_path / "sitemap.xml"
+    sitemap.write_text(SITEMAP, encoding="utf-8")
+
+    dashboard.copy_sitemap(sitemap, tmp_path)
+
+    assert sitemap.read_text(encoding="utf-8") == SITEMAP
 
 
 def test_a_sitemap_without_its_compressed_copy(tmp_path: Path) -> None:

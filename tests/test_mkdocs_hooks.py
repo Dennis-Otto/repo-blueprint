@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -310,17 +311,21 @@ class Network:
     class Timeout(Exception):
         pass
 
-    def __init__(self, *outcomes: int | Exception, timeout: object = 5) -> None:
+    def __init__(self, *outcomes: int | bytes | Exception, timeout: object = 5) -> None:
         self.outcomes = list(outcomes)
         self.timeout = timeout
         self.downloads: list[str] = []
 
     def get(self, url: str, **kwargs: Any) -> SimpleNamespace:
+        """The next outcome: an error, the status of an answer without a body, or the
+        body of an answer of 200."""
         assert kwargs == {"timeout": self.timeout}
         self.downloads.append(url)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        if isinstance(outcome, bytes):
+            return SimpleNamespace(status_code=200, content=outcome)
         return SimpleNamespace(status_code=outcome)
 
 
@@ -811,14 +816,24 @@ def theme(tmp_path: Path, script: str) -> File:
     return File(name, str(folder), str(tmp_path / "site"), False)
 
 
-def build(tmp_path: Path, *files: File) -> list[File]:
+def build(
+    tmp_path: Path, *files: File, module: ModuleType | None = None, **more: Any
+) -> list[File]:
+    """The files of the website after on_files, with more of the configuration."""
     config = SimpleNamespace(
-        config_file_path=str(tmp_path / "mkdocs.yml"),
-        docs_dir=str(tmp_path / "docs"),
-        site_dir=str(tmp_path / "site"),
-        use_directory_urls=False,
+        **{
+            "config_file_path": str(tmp_path / "mkdocs.yml"),
+            "docs_dir": str(tmp_path / "docs"),
+            "site_dir": str(tmp_path / "site"),
+            "use_directory_urls": False,
+            "site_url": None,
+            "plugins": {},
+            "extra_css": [],
+            "extra_javascript": [],
+            **more,
+        }
     )
-    result: list[File] = hooks().on_files(list(files), config)
+    result: list[File] = (module or hooks()).on_files(list(files), config)
     return result
 
 
@@ -894,15 +909,353 @@ def test_other_scripts_stay_as_they_are(tmp_path: Path) -> None:
 
 def test_renovate_keeps_the_pinned_mermaid_current() -> None:
     renovate = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
-    assert '"/^\\\\.github/mkdocs_blueprint\\\\.py$/"' in renovate
+    assert '"/^\\\\.github/mkdocs-blueprint-pins\\\\.toml$/"' in renovate
     # The pattern of the manager, as JSON reads its string, in the syntax of Python.
-    written = re.search(r'\n {8}("https://unpkg[^\n]+"),\n', renovate)
+    written = re.search(r'\n {8}("# renovate: [^\n]+"),\n', renovate)
     assert written is not None
     pattern = json.loads(written[1]).replace("(?<", "(?P<")
-    hook = (ROOT / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
-    found = [match.groupdict() for match in re.finditer(pattern, hook)]
+    pins = (ROOT / ".github/mkdocs-blueprint-pins.toml").read_text(encoding="utf-8")
+    found = [match.groupdict() for match in re.finditer(pattern, pins)]
     version = hooks().MERMAID.split("@")[1].split("/")[0]
-    assert found == [{"depName": "mermaid", "currentValue": version}]
+    assert found == [
+        {"datasource": "npm", "depName": "mermaid", "currentValue": version}
+    ]
+    # pins.py writes the sha256 of the release that Renovate moved to.
+    rule = renovate[renovate.index('matchDepNames: ["mermaid"]') :]
+    assert '"python3 pins.py"' in rule[: rule.index("}")]
+
+
+def privacy_plugin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, network: Network, **options: Any
+) -> Any:
+    """The privacy plugin of Material, which downloads the files of other servers for
+    the website into its cache in tmp_path, with the given options."""
+    made = plugin(monkeypatch, "privacy", network)
+    made.config = SimpleNamespace(
+        **{
+            "enabled": True,
+            "assets": True,
+            "assets_fetch": True,
+            "cache_dir": str(tmp_path / ".cache/plugin/privacy"),
+            "assets_fetch_dir": "assets/external",
+            **options,
+        }
+    )
+    return made
+
+
+SITE_URL = "https://owner.github.io/demo/"
+
+
+def served_mermaid(module: ModuleType) -> str:
+    """The path where the website serves Mermaid."""
+    return str(module.MERMAID).replace("https://", "assets/external/")
+
+
+def test_the_website_serves_mermaid_from_its_own_address(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = hooks()
+    privacy = privacy_plugin(monkeypatch, tmp_path, Network())
+    bundle = theme(tmp_path, LOADER)
+    plugins = {"material/privacy": privacy}
+
+    build(tmp_path, bundle, module=module, plugins=plugins, site_url=SITE_URL)
+
+    # The full address, as the privacy plugin names a script in a script, on the
+    # server of the website, which the plugin then leaves alone.
+    copy = Path(bundle.abs_src_path or "")
+    served = served_mermaid(module)
+    assert copy.read_text(encoding="utf-8") == f'let m="{SITE_URL}{served}";'
+    # Nothing is downloaded before a page has a ```mermaid block.
+    assert module.BUILT.mermaid is False
+    assert not (tmp_path / ".cache/plugin/privacy").exists()
+
+
+def test_a_website_without_an_address_loads_mermaid_on_every_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = hooks()
+    privacy = privacy_plugin(monkeypatch, tmp_path, Network())
+    scripts = ["assets/javascripts/blueprint.js"]
+    more = {"plugins": {"material/privacy": privacy}, "extra_javascript": scripts}
+
+    build(tmp_path, theme(tmp_path, LOADER), module=module, **more)
+    build(tmp_path, theme(tmp_path, LOADER), module=module, **more)
+
+    assert scripts == ["assets/javascripts/blueprint.js", served_mermaid(module)]
+    assert module.BUILT.mermaid is True
+
+
+@pytest.mark.parametrize(
+    "options", [{"enabled": False}, {"assets": False}, {"assets_fetch": False}]
+)
+def test_without_the_downloads_of_the_privacy_plugin_pages_load_the_pinned_mermaid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, options: dict[str, bool]
+) -> None:
+    module = hooks()
+    privacy = privacy_plugin(monkeypatch, tmp_path, Network(), **options)
+    bundle = theme(tmp_path, LOADER)
+
+    build(tmp_path, bundle, module=module, plugins={"material/privacy": privacy})
+
+    copy = Path(bundle.abs_src_path or "")
+    assert copy.read_text(encoding="utf-8") == f'let m="{module.MERMAID}";'
+
+
+def test_a_page_with_a_mermaid_block_has_the_website_serve_mermaid(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    page = File("guide.md", str(tmp_path / "docs"), "site", False)
+    page.dest_uri = "guide.html"
+
+    def content(html: str) -> None:
+        module.on_page_content(
+            html,
+            page=SimpleNamespace(file=page, meta={}),
+            config=SimpleNamespace(docs_dir=str(tmp_path / "docs"), plugins={}),
+            files=[page],
+        )
+
+    content("<h1>Steps</h1>\n<p>A diagram as its picture.</p>")
+    assert module.BUILT.mermaid is False
+    content('<pre class="mermaid"><code>flowchart TB\n</code></pre>')
+    assert module.BUILT.mermaid is True
+    # A later page without one doesn't take it back.
+    content("<h1>Other</h1>")
+    assert module.BUILT.mermaid is True
+
+
+MERMAID_SCRIPT = b"globalThis.mermaid = {};"
+
+
+def serving(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    network: Network,
+    *locales: tuple[str, bool, bool],
+    building: str = "",
+    mermaid: bool = True,
+) -> tuple[ModuleType, Path]:
+    """The hooks after on_post_build of a website whose pages have a ```mermaid block
+    when mermaid is true, with MERMAID_SCRIPT as the pinned Mermaid, and the path in
+    the folder of the website where it serves Mermaid."""
+    module = hooks()
+    digest = hashlib.sha256(MERMAID_SCRIPT).hexdigest()
+    monkeypatch.setitem(module.SHA256, module.MERMAID, digest)
+    privacy = privacy_plugin(monkeypatch, tmp_path, network)
+    settings = config(tmp_path / "site", *locales, building=building)
+    settings.plugins["material/privacy"] = privacy
+    module.on_config(mkdocs_config(plugins={"material/privacy": privacy}))
+    module.BUILT.mermaid = mermaid
+    (tmp_path / "site").mkdir(exist_ok=True)
+    module.on_post_build(settings)
+    return module, tmp_path / "site" / served_mermaid(module)
+
+
+def test_mermaid_is_downloaded_checked_and_served_once_a_page_draws_a_diagram(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, waits: list[float]
+) -> None:
+    network = Network(503, MERMAID_SCRIPT, timeout=hooks().TIMEOUT)
+
+    module, served = serving(monkeypatch, tmp_path, network)
+
+    assert network.downloads == [module.MERMAID, module.MERMAID]
+    assert waits == [1]
+    assert served.read_bytes() == MERMAID_SCRIPT
+    cached = tmp_path / ".cache/plugin/privacy" / served_mermaid(module)
+    assert cached.read_bytes() == MERMAID_SCRIPT
+    # The next build takes it from the cache.
+    again = Network()
+    shutil.rmtree(tmp_path / "site")
+    module, served = serving(monkeypatch, tmp_path, again)
+    assert again.downloads == []
+    assert served.read_bytes() == MERMAID_SCRIPT
+
+
+def test_a_website_without_a_mermaid_block_downloads_no_mermaid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    network = Network()
+
+    _, served = serving(monkeypatch, tmp_path, network, mermaid=False)
+
+    assert network.downloads == []
+    assert not served.exists()
+
+
+def test_the_build_of_a_further_language_serves_mermaid_for_the_whole_website(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The i18n plugin builds the further languages within the build of the default
+    # one, into the folder of the whole website, and the default one ends with the
+    # last further language as its current one.
+    network = Network(MERMAID_SCRIPT, timeout=hooks().TIMEOUT)
+    locales = (("en", True, True), ("de", False, True))
+
+    module, served = serving(monkeypatch, tmp_path, network, *locales, building="de")
+
+    assert served.read_bytes() == MERMAID_SCRIPT
+    assert served == tmp_path / "site" / served_mermaid(module)
+
+
+def test_a_website_without_the_downloads_of_the_privacy_plugin_serves_no_mermaid(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    module.BUILT.mermaid = True
+
+    module.on_post_build(config(tmp_path))
+
+    assert not (tmp_path / "assets").exists()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "said"),
+    [
+        (b"alert(1);", "has the sha256"),
+        (404, "the server answered 404"),
+        (OSError("Network is unreachable"), "Network is unreachable"),
+    ],
+)
+def test_a_mermaid_that_differs_or_fails_is_not_served_and_fails_a_strict_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    outcome: bytes | int | Exception,
+    said: str,
+) -> None:
+    network = Network(outcome, timeout=hooks().TIMEOUT)
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module, served = serving(monkeypatch, tmp_path, network)
+
+    assert not served.exists()
+    assert not (tmp_path / ".cache/plugin/privacy" / served_mermaid(module)).exists()
+    assert caplog.records[-1].levelno == logging.WARNING
+    assert f"Couldn't retrieve {module.MERMAID}" in caplog.records[-1].message
+    assert said in caplog.text
+    # A strict build of MkDocs fails on every warning of a logger below mkdocs.
+    assert caplog.records[-1].name.startswith("mkdocs.")
+
+
+FONT = "https://fonts.gstatic.com/s/roboto/v51/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2"
+
+
+def test_the_privacy_plugin_gets_a_pinned_file_only_with_its_sha256(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = hooks()
+    good, bad = b"font", b"other"
+    monkeypatch.setitem(module.SHA256, FONT, hashlib.sha256(good).hexdigest())
+    network = Network(good, bad, b"anything", 404)
+    privacy = plugin(monkeypatch, "privacy", network)
+    social = plugin(monkeypatch, "social", Network(bad, timeout=module.TIMEOUT))
+    plugins = {"material/privacy": privacy, "material/social": social}
+    module.on_config(mkdocs_config(plugins=plugins))
+    requests = requests_of(privacy)
+
+    assert requests.get(FONT, timeout=5).content == good
+    with (
+        caplog.at_level(logging.ERROR, logger="mkdocs.hooks.blueprint"),
+        pytest.raises(module.Mismatch, match="pins"),
+    ):
+        requests.get(FONT, timeout=5)
+    assert [record.levelno for record in caplog.records] == [logging.ERROR]
+    assert hashlib.sha256(bad).hexdigest() in caplog.text
+    # A file that PINNED doesn't name, such as a picture of a page, as it is, and
+    # an answer without a file goes to the plugin, which reports it.
+    assert requests.get(URL, timeout=5).content == b"anything"
+    assert requests.get(FONT, timeout=5).status_code == 404
+    # The social plugin draws its cards with the fonts it downloads, which the
+    # website doesn't serve.
+    assert requests_of(social).get(FONT).content == bad
+
+
+def test_a_copy_in_the_cache_that_differs_from_its_pin_is_downloaded_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = hooks()
+    good = b"font"
+    monkeypatch.setitem(module.SHA256, FONT, hashlib.sha256(good).hexdigest())
+    privacy = privacy_plugin(monkeypatch, tmp_path, Network())
+    cache = tmp_path / ".cache/plugin/privacy/assets/external"
+    font = cache / FONT.removeprefix("https://")
+    other = font.with_name("other.woff2")
+    picture = cache / "example.org/picture.png"
+    for path, data in ((font, b"tampered"), (other, b"x"), (picture, b"png")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    settings = mkdocs_config(plugins={"material/privacy": privacy})
+
+    module.on_config(settings)
+
+    assert not font.exists()
+    assert other.read_bytes() == b"x"
+    assert picture.read_bytes() == b"png"
+    font.write_bytes(good)
+    module.on_config(settings)
+    assert font.read_bytes() == good
+
+
+def test_the_website_serves_the_pinned_fonts_before_the_stylesheet(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    settings = mkdocs_config(
+        theme={"language": "en", "font": False}, extra_css=["extra.css"]
+    )
+
+    module.on_config(settings)
+    module.on_config(settings)
+
+    assert settings.extra_css == [module.FONTS, module.STYLESHEET, "extra.css"]
+    page = File("index.md", str(tmp_path / "docs"), str(tmp_path / "site"), False)
+    files = build(tmp_path, page, module=module, extra_css=settings.extra_css)
+    fonts = {file.dest_uri: file for file in files}[module.FONTS]
+    assert fonts.abs_src_path == str(ROOT / ".github/mkdocs-blueprint-fonts.css")
+    assert module.FONTS == "assets/stylesheets/blueprint-fonts.css"
+
+
+def test_a_project_with_fonts_of_its_own_gets_them_from_material(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    own = {"text": "Inter", "code": "JetBrains Mono"}
+    settings = mkdocs_config(theme={"language": "en", "font": own})
+
+    module.on_config(settings)
+
+    assert settings.extra_css == [module.STYLESHEET]
+    page = File("index.md", str(tmp_path / "docs"), str(tmp_path / "site"), False)
+    files = build(tmp_path, page, module=module, extra_css=settings.extra_css)
+    assert module.FONTS not in {file.dest_uri for file in files}
+
+
+def test_every_font_of_the_stylesheet_is_pinned_and_nothing_else() -> None:
+    settings = (ROOT / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    assert "\ntheme:\n  name: material\n" in settings
+    assert "\n  font: false\n" in settings
+    css = (ROOT / ".github/mkdocs-blueprint-fonts.css").read_text(encoding="utf-8")
+    addresses = re.findall(r"url\(([^)]+)\)", css)
+    pinned = hooks().PINNED
+    assert set(addresses) == set(pinned["fonts"])
+    # Each font by an address that names its version, and so never changes.
+    for address in addresses:
+        assert re.fullmatch(
+            r"https://fonts\.gstatic\.com/s/roboto(?:mono)?/v\d+/[\w-]+\.woff2",
+            address,
+        ), address
+    for sha256 in pinned["fonts"].values():
+        assert re.fullmatch(r"[0-9a-f]{64}", sha256)
+    assert set(pinned) == {"mermaid", "fonts"}
+    assert re.fullmatch(r"[0-9a-f]{64}", pinned["mermaid"]["sha256"])
+    # The text and the code, as Material names them with fonts of Google Fonts.
+    assert (
+        ':root {\n  --md-text-font: "Roboto";\n  --md-code-font: "Roboto Mono";' in css
+    )
+    assert set(re.findall(r"font-family: '([^']+)'", css)) == {"Roboto", "Roboto Mono"}
 
 
 def test_the_stylesheet_fixes_what_the_accessibility_check_found() -> None:
@@ -2801,6 +3154,10 @@ def previewing(tmp_path: Path, preview: bytes | None) -> ModuleType:
         docs_dir=str(tmp_path / "docs"),
         site_dir=str(tmp_path / "site"),
         use_directory_urls=False,
+        site_url=None,
+        plugins={},
+        extra_css=[],
+        extra_javascript=[],
     )
     page = File("index.md", str(tmp_path / "docs"), str(tmp_path / "site"), False)
     served = {file.dest_uri: file for file in module.on_files([page], config)}
@@ -3269,6 +3626,8 @@ def website(root: Path, *locales: str, **more: Any) -> Any:
             "edit_uri": None,
             "site_url": None,
             "extra": {},
+            "extra_css": [],
+            "extra_javascript": [],
             "theme": {"language": "en"},
             "plugins": plugins,
             **more,

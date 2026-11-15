@@ -28,6 +28,7 @@ import http.client
 import io
 import json
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -1348,6 +1349,19 @@ def add_to_sitemap(sitemap: Path, url: str, now: datetime) -> None:
         packed.write_bytes(gzip.compress(text.encode("utf-8"), mtime=0))
 
 
+def copy_sitemap(sitemap: Path, folder: Path) -> None:
+    """Copy the sitemap of the website into the folder of the dashboard, as the hooks
+    of the website copy it into every folder of its pages.
+
+    Material asks the folder of an address in the head of a page, such as that of the
+    feed of the releases, for its sitemap.xml, and the hooks copy the sitemap at the
+    build, before the dashboard is there, so dashboard/sitemap.xml was missing.
+    """
+    copy = folder / sitemap.name
+    if copy.resolve() != sitemap.resolve():
+        shutil.copyfile(sitemap, copy)
+
+
 def render(
     rows: list[Row],
     owner: str,
@@ -1461,7 +1475,10 @@ def main(
     parser.add_argument(
         "--sitemap",
         type=Path,
-        help="the sitemap.xml of the website beside the dashboard, to add it to",
+        help=(
+            "the sitemap.xml of the website beside the dashboard, to add it to and "
+            "to copy into the folder of the dashboard"
+        ),
     )
     arguments = parser.parse_args(argv)
     api = api or Api()
@@ -1516,6 +1533,7 @@ def main(
     )
     if arguments.sitemap:
         add_to_sitemap(arguments.sitemap, arguments.url, now)
+        copy_sitemap(arguments.sitemap, arguments.out.parent)
     print(
         f"Wrote the dashboard of {len(rows)} repositories to {arguments.out}, "
         f"with {len(others.repos)} of other owners."
