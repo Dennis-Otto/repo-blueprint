@@ -17,8 +17,8 @@ sha256 = "2bc625472a08fea3bb6a57982c7d8b4978d1032251d305ceef3bf2ded0ca4483"
 
 [download."infection/infection"]
 url = "https://github.com/infection/infection/releases/download/{version}/infection.phar"
-version = "0.35.9"
-sha256 = "c9b332af194380b2043eb6e309b308653f221073f41825b54e862fbef606a094"
+version = "0.35.10"
+sha256 = "aa8ac8aeb3d7b96d4e66119908c1654c6bbf29472ef8bf1d1e84900fd01d6b31"
 
 [download."ChristophWurst/krankerl"]
 url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}_amd64.deb"
@@ -37,8 +37,8 @@ sha256 = "2f1dcec6a7cdab70346e80a823ccaaa2001a6085013d9f2ae0a2606fa38c2835"
 
 [download."anchore/syft"]
 url = "https://github.com/anchore/syft/releases/download/v{version}/syft_{version}_linux_amd64.tar.gz"
-version = "1.56.0"
-sha256 = "1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528"
+version = "1.57.0"
+sha256 = "9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704"
 
 [download."gitleaks/gitleaks"]
 url = "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz"
