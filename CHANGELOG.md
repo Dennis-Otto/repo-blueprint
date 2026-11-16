@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.20.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.1...v1.20.2) (2026-11-16)
 
-
 ### Bug fixes
 
 * **deps:** update dependency @biomejs/biome to v2.6.6 ([#957](https://github.com/Dennis-Otto/repo-blueprint/issues/957)) ([6aa4e8e](https://github.com/Dennis-Otto/repo-blueprint/commit/6aa4e8e54e319d3fdce6f19b973b5af7eb59b999))
