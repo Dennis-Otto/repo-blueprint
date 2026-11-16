@@ -7,6 +7,19 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.2...v1.20.3) (2026-11-16)
+
+
+### Bug fixes
+
+* **deps:** update dependency @biomejs/biome to v2.6.6 ([#956](https://github.com/Dennis-Otto/repo-blueprint/issues/956)) ([36d55cf](https://github.com/Dennis-Otto/repo-blueprint/commit/36d55cf908c9ca7a3c6257aa235a5ab23499dfb6))
+* **deps:** update dependency anchore/syft to v1.57.0 ([#963](https://github.com/Dennis-Otto/repo-blueprint/issues/963)) ([8b0cec1](https://github.com/Dennis-Otto/repo-blueprint/commit/8b0cec10b546839c22d3a3691bb4934d6794a556))
+* **deps:** update dependency cspell to v10.4.1 ([#959](https://github.com/Dennis-Otto/repo-blueprint/issues/959)) ([8557787](https://github.com/Dennis-Otto/repo-blueprint/commit/8557787ea7b186dd4e0652760e088c54a5c0eb0f))
+* **deps:** update dependency infection/infection to v0.35.10 ([#960](https://github.com/Dennis-Otto/repo-blueprint/issues/960)) ([5fff58e](https://github.com/Dennis-Otto/repo-blueprint/commit/5fff58e3b2c42aafb2bd0da54ff929248c98148e))
+* **deps:** update dependency playwright-core to v1.65.0 ([#964](https://github.com/Dennis-Otto/repo-blueprint/issues/964)) ([9472a67](https://github.com/Dennis-Otto/repo-blueprint/commit/9472a67930f27150db66a5009148e496ab8dde71))
+* **deps:** update dependency uv to v0.13.7 ([#961](https://github.com/Dennis-Otto/repo-blueprint/issues/961)) ([119b388](https://github.com/Dennis-Otto/repo-blueprint/commit/119b388584f33dfa3e5ddf344ac5dfa056142276))
+* **deps:** update the digests of the images ([#955](https://github.com/Dennis-Otto/repo-blueprint/issues/955)) ([0a14477](https://github.com/Dennis-Otto/repo-blueprint/commit/0a14477d89ab77c04ef6fa53f124b06b35b7598c))
+
 ## [1.20.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.1...v1.20.2) (2026-11-16)
 
 ### Bug fixes
