@@ -1,6 +1,6 @@
 # The packages of Playwright come without a release age, like its images
 
-- Status: accepted
+- Status: accepted, amended by [0171](0171-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a refresh that takes a Playwright of `main` back holds until Renovate builds it anew
 - Date: 2026-11-17
 
 ## Context

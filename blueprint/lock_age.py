@@ -10,7 +10,10 @@ that new, a compile that failed, or a lock file of another package manager. It a
 the registry when each version that the pull request adds was released, PyPI for the
 lock files of pip-compile and the registry of npm for package-lock.json, whose dates
 the registries set and no author can choose; a version that it can't date, or a
-changed file whose versions it can't read, holds the refresh as well."""
+changed file whose versions it can't read, holds the refresh as well. A version of
+main that the refresh replaces only with versions released before it, such as the fix
+of a vulnerability that npm's refresh resolves back, holds it for as long as it does,
+however old that version is."""
 
 from __future__ import annotations
 
@@ -145,7 +148,8 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
         ]
         # npm's refresh resolves each range anew from the versions a week old, and
         # takes back a young version that main got within the range, such as the fix
-        # of a vulnerability: the refresh holds until that version is a week old.
+        # of a vulnerability: the refresh holds for as long as it does, also once
+        # that version is a week old, until Renovate builds the refresh anew.
         staying = {package for package, _ in new}
         versions += [
             Added(name, manager, package, version, replaced=True)
@@ -199,6 +203,17 @@ def pypi_released(
     return min(moment(file.get("upload_time_iso_8601")) for file in files)
 
 
+def pypi_uploaded(
+    name: str, version: str, opener: Callable[..., Any] | None = None
+) -> datetime | None:
+    """When PyPI received the first file of a version, the first that uv's cutoff
+    lets through; none when the check can't learn it."""
+    try:
+        return pypi_released(name, version, opener)
+    except Undated:
+        return None
+
+
 def npm_released(
     name: str, version: str, opener: Callable[..., Any] | None
 ) -> datetime:
@@ -229,27 +244,61 @@ def young(
     opener: Callable[..., Any] | None = None,
 ) -> list[str]:
     """What holds the refresh: each version released less than a week before now, or
-    whose release the check can't learn, one sentence each."""
+    whose release the check can't learn, one sentence each; and each version of main
+    that the refresh replaces only with versions released before it, however old it
+    is, since the refresh would take it back, such as the fix of a vulnerability."""
+
+    def dated(version: Added) -> datetime | Undated:
+        try:
+            return released(version, opener)
+        except Undated as error:
+            return error
+
+    unique = sorted(set(versions))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        dates = dict(zip(unique, pool.map(dated, unique), strict=True))
 
     def judge(version: Added) -> str:
-        try:
-            date = released(version, opener)
-        except Undated as error:
-            return f"{version}: the check can't learn its release: {error}."
-        if now - date >= AGE:
+        found = dates[version]
+        if isinstance(found, Undated):
+            return f"{version}: the check can't learn its release: {found}."
+        when = f"{found.astimezone(UTC):%Y-%m-%d %H:%M} UTC"
+        if version.replaced and taken_back(version, found):
+            return (
+                f"{version.file}: the refresh replaces {version.name} "
+                f"{version.version}, which main has and which came out {when}, with "
+                "a version released before it, and so would take back what main got, "
+                "such as the fix of a vulnerability; the refresh holds until Renovate "
+                "builds it anew."
+            )
+        if now - found >= AGE:
             return ""
-        when = f"{date.astimezone(UTC):%Y-%m-%d %H:%M} UTC"
         if version.replaced:
             return (
                 f"{version.file}: the refresh replaces {version.name} "
                 f"{version.version}, which main has and which came out {when}, less "
                 "than a week ago, such as the fix of a vulnerability; the refresh "
-                "waits until it is a week old, so that it doesn't take the fix back."
+                "waits until it is a week old."
             )
         return f"{version}: released {when}, less than a week ago."
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        return [found for found in pool.map(judge, sorted(set(versions))) if found]
+    def taken_back(version: Added, came: datetime) -> bool:
+        """Whether the refresh replaces version, of main, only with versions of the
+        same package that came out before it: a refresh that moves it up, or that
+        brings a version that the check can't date, is judged by the age of what it
+        brings, and one that only takes out a version while another version of the
+        package stays, by the age of the one that it takes out."""
+        replacements = [
+            dates[other]
+            for other in unique
+            if not other.replaced
+            and (other.file, other.name) == (version.file, version.name)
+        ]
+        return bool(replacements) and all(
+            isinstance(other, datetime) and other < came for other in replacements
+        )
+
+    return [found for found in map(judge, unique) if found]
 
 
 def check(

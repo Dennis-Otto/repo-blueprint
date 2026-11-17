@@ -1,6 +1,6 @@
 # The weekly refresh of the lock files merges by itself, from versions a week old
 
-- Status: accepted
+- Status: accepted, amended by [0171](0171-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a young version of `main` stays in the refresh of pip-compile and a refresh that takes one back holds until Renovate builds it anew
 - Date: 2026-11-09
 
 ## Context
