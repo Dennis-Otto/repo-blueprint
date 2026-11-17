@@ -70,6 +70,9 @@ env:
 jobs:
   run:
     name: look at the end of a bot's run
+    # The eight workflows with a last job left the list of workflow_run, so their ends
+    # never reach this job; the names stay here as a guard against a workflow of a fork
+    # or a later list that takes one of them (decision 0173).
     if: >-
       github.event_name == 'workflow_run' &&
       !github.event.repository.fork &&

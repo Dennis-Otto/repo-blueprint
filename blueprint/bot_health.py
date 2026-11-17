@@ -847,7 +847,10 @@ def watch_stop(api: Api, repo: str, run_id: int) -> tuple[str, bool]:
     while run.status != "completed" and run.attempt == 1 and looks < LOOKS:
         # Looked up at the call, so that a test can replace it.
         github.sleep(PAUSE)
-        run = Run.of(api.get(path) or data)
+        data = api.get(path)
+        if data is None:
+            return f"GitHub doesn't know the run {run_id} any more.", True
+        run = Run.of(data)
         looks += 1
     if run.attempt > 1:
         return f"{run.name}: runs again already, nothing to do.", True

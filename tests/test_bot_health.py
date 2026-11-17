@@ -1348,6 +1348,28 @@ def test_the_bot_leaves_a_run_that_does_not_end_to_the_daily_look(
     assert writes(github) == []
 
 
+def test_the_bot_stops_waiting_when_the_run_is_gone(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A run that GitHub no longer knows while the bot waits is not waited for with
+    # its first, stale state.
+    github.runs[1] = run_of(1, name="Commands", event="issue_comment", status="queued")
+    waited: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waited.append(seconds)
+        del github.runs[1]
+
+    monkeypatch.setattr(blueprint.github, "sleep", wait)
+
+    assert watch_stop(api_of(github), REPO, 1) == (
+        "GitHub doesn't know the run 1 any more.",
+        True,
+    )
+    assert waited == [PAUSE]
+    assert writes(github) == []
+
+
 def test_the_bot_stops_waiting_when_someone_runs_the_run_again(
     github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
 ) -> None:
