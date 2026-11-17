@@ -9527,6 +9527,50 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     assert "@.github/agents.project.md" in claude
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_agents_and_contributors_push_once_and_leave_the_update_to_the_branch_bot(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Every push starts every check again, and the branch bot brings the pull
+    # requests with auto-merge up to date one after the other (decision 0028). The
+    # blueprint and every kind of project say so in the same words, to coding agents
+    # and to people, so that a change of the rule changes all of them.
+    heading = "## Commits and pull requests"
+    rules = section_of((ROOT / "AGENTS.md").read_text(encoding="utf-8"), heading)
+    workflow = section_of(
+        (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    steps = re.findall(r"^[578]\. .*$", workflow, re.MULTILINE)
+    assert len(steps) == 3
+    for rule in (
+        "Run `scripts/check.sh`, then push once.",
+        "push a second time before the first round of checks has answered only to fix",
+        "Turn on auto-merge",
+        "leave the update to the branch bot",
+        "is not in the bot's line",
+        "neither with *Update branch* on GitHub nor with a merge of `main`",
+        "yourself only in two cases",
+        "in the same push as your fix, with a signed merge commit",
+        "never by a rebase through GitHub",
+        "the label `merge-conflict`",
+        "why GitHub starts no run of the pull request at all",
+        "a required check fails and `main` holds its fix",
+    ):
+        assert rule.lower() in rules.lower(), rule
+        assert rule.lower() in "\n".join(steps).lower(), rule
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert section_of(agents, heading) == rules
+    contributing = section_of(
+        (project / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    assert re.findall(r"^[578]\. .*$", contributing, re.MULTILINE) == steps
+    # Every kind of project has the bot and the label that the rule names.
+    assert (project / ".github/workflows/update-branches.yml").is_file()
+    labels = (project / ".github/labels.toml").read_text(encoding="utf-8")
+    assert 'name = "merge-conflict"' in labels
+
+
 def test_copying_runs_no_code_of_the_blueprint() -> None:
     # Without tasks, migrations or Jinja extensions, Copier only renders the template
     # in its sandbox and needs no --trust; docs/security.md promises it.
