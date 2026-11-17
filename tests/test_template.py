@@ -23545,6 +23545,10 @@ def test_every_project_draws_its_diagrams_as_pictures(
         assert color in contributing, color
 
 
+# In the copy of the mutation tests, scripts/diagrams.sh starts the tool of the project,
+# which is the code with the mutants and finds no configuration of mutmut in the
+# process that the script starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
 def test_a_project_warns_of_a_diagram_changed_without_its_pictures(
     projects: dict[str, Path], tmp_path: Path
