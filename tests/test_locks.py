@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from shared import load_yaml
 
-from blueprint import locks
+from blueprint import lock_age, locks
 from blueprint.cli import main
 from blueprint.locks import Skipped, lock_files, why_renovate_skips, with_equal_signs
 
@@ -1233,6 +1233,24 @@ CUTOFF = "--exclude-newer=2026-11-02T00:00:00Z"
 DELTA = "delta @ https://example.org/delta-1.0-py3-none-any.whl"
 
 
+def long_ago(name: str, version: str) -> datetime | None:
+    """PyPI's answer for a version of main that came out long before the cutoff."""
+    return datetime(2026, 10, 1, tzinfo=UTC)
+
+
+@pytest.fixture
+def on_pypi(monkeypatch: pytest.MonkeyPatch) -> dict[str, datetime | None]:
+    """PyPI for the command, without the network: the answers that the test puts in by
+    package, long ago for the rest."""
+    answers: dict[str, datetime | None] = {}
+
+    def uploaded(name: str, version: str, opener: object = None) -> datetime | None:
+        return answers[name] if name in answers else long_ago(name, version)
+
+    monkeypatch.setattr(lock_age, "pypi_uploaded", uploaded)
+    return answers
+
+
 def committed(root: Path) -> Path:
     """The repository with its files in a commit, as main has them."""
     assert GIT
@@ -1292,7 +1310,7 @@ def test_the_refresh_compiles_what_renovate_moved_from_versions_a_week_old(
     refreshed(root, "requirements.txt", content)
     fake_uv.answers(lock("", "alpha==1.2", "beta==2.0", "gamma==3.1", DELTA))
 
-    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     # alpha 1.5 is younger than a week: uv took 1.2 instead, and kept the rest.
     assert found.differences == ("alpha==1.5",)
@@ -1316,6 +1334,81 @@ def test_the_refresh_compiles_what_renovate_moved_from_versions_a_week_old(
 
 
 @needs_git
+def test_a_young_version_of_main_stays_while_the_rest_keeps_to_the_week(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\nbeta\ngamma\nepsilon\nzeta\n",
+                "requirements.txt": lock(
+                    REQUIREMENTS_HEADER,
+                    "alpha==1.0",
+                    "beta==2.0",
+                    "gamma==3.0",
+                    "epsilon==4.0",
+                    "zeta==5.0",
+                ),
+            },
+        )
+    )
+    # main got alpha 1.0 a day after the cutoff, such as a release of Playwright,
+    # which comes without the week, and Renovate's refresh moved it to the newest
+    # patch; gamma's version of main is one that PyPI can't date; epsilon's came out
+    # at the cutoff itself, which uv's cutoff no longer lets through, and zeta's long
+    # before.
+    content = lock(
+        REQUIREMENTS_HEADER,
+        "alpha==1.2",
+        "beta==2.0",
+        "gamma==3.1",
+        "epsilon==4.1",
+        "zeta==5.1",
+    )
+    refreshed(root, "requirements.txt", content)
+    fake_uv.answers(
+        lock("", "alpha==1.0", "beta==2.0", "gamma==3.0", "epsilon==4.0", "zeta==5.0")
+    )
+    answers: dict[str, datetime | None] = {
+        "alpha": datetime(2026, 11, 3, 21, 9, tzinfo=UTC),
+        "gamma": None,
+        "epsilon": datetime(2026, 11, 2, tzinfo=UTC),
+    }
+    dated: list[str] = []
+
+    def uploaded(name: str, version: str) -> datetime | None:
+        dated.append(f"{name}=={version}")
+        return answers.get(name, long_ago(name, version))
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, uploaded)
+
+    # No version of alpha is both as new as main's and a week old: alpha keeps the
+    # version of main, the one version that is no younger than what main has,
+    # instead of failing the compile and leaving Renovate's newest versions of every
+    # package; the rest of the file still keeps to the week.
+    assert not found.failure
+    assert found.differences == (
+        "alpha==1.2",
+        "epsilon==4.1",
+        "gamma==3.1",
+        "zeta==5.1",
+    )
+    assert fake_uv.constraints == ["alpha==1.0\nepsilon==4.0\ngamma==3.0\nzeta>=5.0\n"]
+    assert asked(fake_uv)[-7:] == [
+        CUTOFF,
+        "--exclude-newer-package=alpha=2026-11-09T15:30:00Z",
+        "--exclude-newer-package=beta=2026-11-09T15:30:00Z",
+        "--exclude-newer-package=epsilon=2026-11-09T15:30:00Z",
+        "--exclude-newer-package=gamma=2026-11-09T15:30:00Z",
+        "--no-header",
+        "--quiet",
+    ]
+    # The refresh dates only what it moved: beta keeps its pin of main anyway.
+    assert sorted(dated) == ["alpha==1.0", "epsilon==4.0", "gamma==3.0", "zeta==5.0"]
+
+
+@needs_git
 def test_a_lock_file_that_the_refresh_adds_has_no_pins_of_main(
     tmp_path: Path, fake_uv: FakeUv
 ) -> None:
@@ -1324,7 +1417,7 @@ def test_a_lock_file_that_the_refresh_adds_has_no_pins_of_main(
     subprocess.run(["git", "add", "requirements.txt"], cwd=root, check=True)
     fake_uv.answers(lock("", "alpha==1.5"))
 
-    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     assert found.differences == ()
     assert asked(fake_uv)[-3:] == [CUTOFF, "--no-header", "--quiet"]
@@ -1355,7 +1448,7 @@ def test_the_refresh_bounds_no_package_whose_version_in_main_is_unclear(
     refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==2.5"))
     fake_uv.answers(lock("", "alpha==2.1"))
 
-    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     assert found.differences == ("alpha==2.5",)
     assert fake_uv.constraints == []
@@ -1394,7 +1487,7 @@ def test_the_refresh_leaves_a_file_that_it_cant_compile_as_renovate_wrote_it(
     )
     root = repository(tmp_path, {"requirements.in": "alpha\n", name: header + pins})
 
-    found = locks.refresh(root, name, "uv", NOW)
+    found = locks.refresh(root, name, "uv", NOW, long_ago)
 
     assert found.note == note
     assert fake_uv.commands == []
@@ -1408,7 +1501,7 @@ def test_the_refresh_writes_through_no_link(tmp_path: Path, fake_uv: FakeUv) -> 
     except OSError:
         pytest.skip("this machine makes no links without more rights")
 
-    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     assert found.note == "a link, which the refresh doesn't write through"
     assert fake_uv.commands == []
@@ -1427,7 +1520,7 @@ def test_an_answer_of_uv_without_pins_fails_the_refresh(
     )
     fake_uv.answers("--index-url https://example.org/simple\nalpha==1.0\n")
 
-    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+    found = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     assert found.failure == (
         "uv answered with a line that is no pin of a package:\n"
@@ -1487,8 +1580,8 @@ def test_each_run_of_the_refresh_on_one_day_writes_the_same_lock_file(
         "    #   -r requirements.in\n"
     )
 
-    first = locks.refresh(root, "requirements.txt", "uv", NOW)
-    second = locks.refresh(root, "requirements.txt", "uv", NOW)
+    first = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
+    second = locks.refresh(root, "requirements.txt", "uv", NOW, long_ago)
 
     assert fake_uv.commands[0] != fake_uv.commands[1]
     assert first.content == second.content
@@ -1496,6 +1589,7 @@ def test_each_run_of_the_refresh_on_one_day_writes_the_same_lock_file(
 
 
 @needs_git
+@pytest.mark.usefixtures("on_pypi")
 def test_renovate_takes_a_refresh_that_the_week_took_back_to_main(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
 ) -> None:
@@ -1542,6 +1636,7 @@ def moved_by_the_refresh(tmp_path: Path) -> Path:
 
 
 @needs_git
+@pytest.mark.usefixtures("on_pypi")
 def test_renovate_compiles_the_files_of_its_refresh_again_from_versions_a_week_old(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
 ) -> None:
@@ -1565,6 +1660,7 @@ def test_renovate_compiles_the_files_of_its_refresh_again_from_versions_a_week_o
 
 
 @needs_git
+@pytest.mark.usefixtures("on_pypi")
 def test_a_refresh_of_versions_a_week_old_stays_as_it_is(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
 ) -> None:
@@ -1613,6 +1709,44 @@ def test_a_refresh_without_uv_keeps_the_newest_versions_and_fails(
 
 
 @needs_git
+def test_a_refresh_keeps_a_young_version_of_main_and_passes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fake_uv: FakeUv,
+    on_pypi: dict[str, datetime | None],
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\nbeta\n",
+                "requirements.txt": lock(
+                    REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.0"
+                ),
+            },
+        )
+    )
+    refreshed(
+        root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.2", "beta==2.5")
+    )
+    # main's alpha 1.0 came out after the cutoff of the refresh's day, a week before.
+    on_pypi["alpha"] = datetime.now(UTC) - timedelta(days=3)
+    fake_uv.answers(lock("", "alpha==1.0", "beta==2.1"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert capsys.readouterr().out == (
+        "requirements.txt: compiled again from versions at least a week old, "
+        "without alpha==1.2, beta==2.5.\n"
+    )
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.1"
+    )
+    assert fake_uv.constraints == ["alpha==1.0\nbeta>=2.0\n"]
+
+
+@needs_git
+@pytest.mark.usefixtures("on_pypi")
 def test_a_refresh_that_uv_cant_compile_keeps_the_newest_versions_and_fails(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
 ) -> None:

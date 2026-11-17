@@ -432,10 +432,118 @@ def test_a_refresh_that_takes_back_a_young_version_of_main_waits(
     assert added == 1
     assert problems == [
         f"{name}: the refresh replaces {package} {version}, which main has and which "
-        "came out 2026-11-07 08:15 UTC, less than a week ago, such as the fix of a "
-        "vulnerability; the refresh waits until it is a week old, so that it doesn't "
-        "take the fix back."
+        "came out 2026-11-07 08:15 UTC, with a version released before it, and so "
+        "would take back what main got, such as the fix of a vulnerability; the "
+        "refresh holds until Renovate builds it anew."
     ]
+
+
+# A version of main that came out three weeks before the run of the check, long
+# after the version before it.
+WEEKS_AGO = "2026-10-20T10:00:00.000Z"
+KIT = "https://registry.npmjs.org/kit"
+TAKEN_BACK = (
+    "p.json: the refresh replaces kit 1.3.0, which main has and which came out "
+    "2026-10-20 10:00 UTC, with a version released before it, and so would take back "
+    "what main got, such as the fix of a vulnerability; the refresh holds until "
+    "Renovate builds it anew."
+)
+
+
+@pytest.mark.parametrize(
+    ("versions", "times", "problems"),
+    [
+        (
+            [
+                Added("p.json", "npm", "kit", "1.2.0"),
+                Added("p.json", "npm", "kit", "1.3.0", replaced=True),
+            ],
+            {"1.3.0": WEEKS_AGO, "1.2.0": OLD},
+            [TAKEN_BACK],
+        ),
+        (
+            [
+                Added("p.json", "npm", "kit", "2.5.1"),
+                Added("p.json", "npm", "kit", "3.0.0", replaced=True),
+                Added("p.json", "npm", "kit", "2.5.0", replaced=True),
+            ],
+            {"3.0.0": WEEKS_AGO, "2.5.1": OLD, "2.5.0": OLD},
+            [],
+        ),
+        (
+            [
+                Added("p.json", "npm", "kit", "1.3.0"),
+                Added("p.json", "npm", "kit", "1.2.0", replaced=True),
+            ],
+            {"1.3.0": WEEKS_AGO, "1.2.0": OLD},
+            [],
+        ),
+        (
+            [
+                Added("p.json", "npm", "kit", "1.4.0"),
+                Added("p.json", "npm", "kit", "1.3.0", replaced=True),
+            ],
+            {"1.3.0": WEEKS_AGO},
+            [
+                "p.json: kit 1.4.0: the check can't learn its release: the registry "
+                "of npm names no time of it."
+            ],
+        ),
+        (
+            [Added("p.json", "npm", "kit", "1.3.0", replaced=True)],
+            {"1.3.0": WEEKS_AGO},
+            [],
+        ),
+        (
+            [Added("p.json", "npm", "kit", "1.3.0", replaced=True)],
+            {"1.3.0": YOUNG},
+            [
+                "p.json: the refresh replaces kit 1.3.0, which main has and which came "
+                "out 2026-11-07 08:15 UTC, less than a week ago, such as the fix of a "
+                "vulnerability; the refresh waits until it is a week old."
+            ],
+        ),
+    ],
+    ids=[
+        "taken back after its week",
+        "line dropped beside an older backport",
+        "moved up",
+        "by a version that it can't date",
+        "taken out beside another, old",
+        "taken out beside another, young",
+    ],
+)
+def test_a_refresh_that_takes_back_a_version_of_main_holds_however_old_it_is(
+    versions: list[Added], times: dict[str, str], problems: list[str]
+) -> None:
+    # main got kit 1.3.0 three weeks ago, such as the fix of a vulnerability; a
+    # refresh that resolves its range back to 1.2.0 would take it back, now as in a
+    # week, so it holds until Renovate builds it anew. One that moves kit up, or
+    # only takes out a version that another of the same package stands beside, is
+    # judged by the age of what it brings, as before.
+    answers = Registries({KIT: {"time": times}})
+
+    assert lock_age.young(versions, NOW, answers) == problems
+
+
+def test_the_refresh_of_pip_compile_asks_pypi_when_a_version_of_main_came_out() -> None:
+    answers = Registries(
+        {
+            "https://pypi.org/pypi/alpha/1.0/json": pypi(YOUNG, OLD),
+            "https://pypi.org/pypi/beta/2.0/json": refused(404),
+            "https://pypi.org/pypi/gamma/3.0/json": {"urls": []},
+        }
+    )
+
+    # The last file counts, such as wheels that came hours after the sdist: uv's
+    # cutoff judges each file on its own.
+    assert lock_age.pypi_uploaded("alpha", "1.0", answers) == datetime(
+        2026, 11, 7, 8, 15, tzinfo=UTC
+    )
+    # A version that PyPI doesn't know, such as one of an index of its own.
+    assert lock_age.pypi_uploaded("beta", "2.0", answers) is None
+    # A version that has no file.
+    assert lock_age.pypi_uploaded("gamma", "3.0", answers) is None
 
 
 def test_the_check_passes_a_refresh_of_versions_a_week_old(
