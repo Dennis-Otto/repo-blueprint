@@ -10871,6 +10871,43 @@ def test_renovate_brings_every_image_without_a_collision(
     ]
 
 
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_brings_playwright_at_once_like_its_image(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The images of Playwright come at once, as mcr.microsoft.com gives no date, and
+    # hold the browsers of one release, which only its package of the same release
+    # starts. With the week for the package alone, Renovate grouped the image of
+    # 1.65.2 with the package of 1.65.0, and the update failed in five repositories
+    # (#977, decision 0168).
+    root = ROOT if kind == "blueprint" else projects[kind]
+    text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    rules = renovate_rules(text)["packageRules"]
+    playwright = [
+        rule
+        for rule in rules
+        if "playwright" in json.dumps(rule.get("matchPackageNames"))
+    ]
+    assert playwright == [
+        {
+            "matchDatasources": ["npm", "pypi"],
+            "matchPackageNames": ["playwright", "playwright-core", "@playwright/**"],
+            "minimumReleaseAge": None,
+        }
+    ]
+    assert "decision 0168" in text
+    # Right after the rule of the images, and no later rule of the blueprint gives the
+    # package a week again.
+    images = rules.index(
+        {
+            "matchDatasources": ["docker"],
+            "minimumReleaseAgeBehaviour": "timestamp-optional",
+        }
+    )
+    assert rules[images + 1] == playwright[0]
+    assert not [rule for rule in rules[images + 2 :] if "minimumReleaseAge" in rule]
+
+
 # It asks Git for the files of the repository, which the copy of the mutation tests
 # has none of.
 @pytest.mark.mutation_unsafe
@@ -11296,14 +11333,13 @@ def test_renovate_keeps_no_dependency_dashboard_and_the_whole_monday(
     # No issue stays open for Renovate, so that a repository can have none: what
     # waits for the maintainer is a pull request. Renovate closes the dashboard that
     # an earlier release kept open only by its exact title, which therefore stays.
+    # Since Renovate 44.232.0 both are one object, and its check of the configuration
+    # fails on the two settings of before (#962).
     assert {
         key: value
         for key, value in shared.items()
         if key.startswith("dependencyDashboard")
-    } == {
-        "dependencyDashboard": False,
-        "dependencyDashboardTitle": "Dependency dashboard",
-    }
+    } == {"dependencyDashboard": {"enabled": False, "title": "Dependency dashboard"}}
     assert not any(key.startswith("dependencyDashboard") for key in own)
     # A rule that asks for the approval of the dashboard would open it again.
     assert "DashboardApproval" not in json.dumps([shared, own])
