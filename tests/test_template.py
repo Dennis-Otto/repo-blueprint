@@ -6965,17 +6965,22 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
 
 
 def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
-    pins = [
+    # The version, its sha256 and the name of its package, which python3 pins.py
+    # writes from the address in .github/pins.toml; the upgrade test of a Nextcloud
+    # app reads all three from its ci.yml and builds no name itself (#994).
+    found = [
         dict(
             re.findall(
-                r"(KRANKERL_(?:VERSION|SHA256)): (\S+)",
+                r"(KRANKERL_(?:VERSION|SHA256|ASSET)): (\S+)",
                 (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
             )
         )
         for name in ("ci-php.yml", "build-release.yml")
     ]
-    assert len(pins[0]) == 2
-    assert pins[0] == pins[1]
+    assert len(found[0]) == 3
+    assert found[0] == found[1]
+    krankerl = pins.load_record(ROOT)["ChristophWurst/krankerl"]
+    assert found[0]["KRANKERL_ASSET"] == krankerl.asset(found[0]["KRANKERL_VERSION"])
 
 
 # The PHP that each major version of Nextcloud runs on, oldest and newest, as its
@@ -7383,9 +7388,8 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     tmp_path: Path, cache: str
 ) -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
-    version = dict(re.findall(r"(KRANKERL_(?:VERSION|SHA256)): (\S+)", workflow))[
-        "KRANKERL_VERSION"
-    ]
+    pin = dict(re.findall(r"(KRANKERL_(?:VERSION|ASSET)): (\S+)", workflow))
+    version, asset = pin["KRANKERL_VERSION"], pin["KRANKERL_ASSET"]
     # Restored before the install, under a key that changes with krankerl; GitHub
     # saves it only after a run that passed, which checked it.
     names = names_of(job_with(workflow, "Restore krankerl from the cache"))
@@ -7400,7 +7404,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     )
     package = b"the package of krankerl\n"
     temp = tmp_path / "temp"
-    deb = temp / f"krankerl/krankerl_{version}-1_amd64.deb"
+    deb = temp / f"krankerl/{asset}"
     if cache != "empty":
         deb.parent.mkdir(parents=True)
         deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
@@ -7427,6 +7431,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
         RUNNER_TEMP=temp.as_posix(),
         KRANKERL_VERSION=version,
         KRANKERL_SHA256=sha256,
+        KRANKERL_ASSET=asset,
     )
 
     downloads = [call for call in calls if call.startswith("download.sh ")]
@@ -7441,7 +7446,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     assert downloads == (
         [
             f"download.sh ChristophWurst/krankerl v{version}"
-            f" krankerl_{version}-1_amd64.deb {deb.as_posix()} {sha256}"
+            f" {asset} {deb.as_posix()} {sha256}"
         ]
         if cache == "empty"
         else []
