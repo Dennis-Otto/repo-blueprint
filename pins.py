@@ -15,7 +15,10 @@ version, it runs
                               download; tests/test_pins.py fails on them
 
 so that the update merges on its own like any other, and the blueprint bot brings it
-to every repository.
+to every repository. When the new release of a tool on GitHub has no asset of the
+name in the record, as when krankerl 0.14.1 added the revision -1 to the name of its
+package, the error that Renovate shows in the pull request names the assets that the
+release has instead.
 
 The record also keeps the version of the package of npm that an action runs, such as
 markdownlint-cli2 of DavidAnson/markdownlint-cli2-action, from the package.json of the
@@ -68,6 +71,13 @@ USES = re.compile(r"uses: (?P<dep>[\w.-]+/[\w.-]+)@(?P<commit>[0-9a-f]{40})\b")
 IMAGE_FILES = (".github/*.sh", ".github/workflows/*.yml", "scripts/*.sh")
 # The package.json of an action at a commit, from which pins.py reads its version.
 PACKAGE_JSON = "https://raw.githubusercontent.com/{dep}/{commit}/package.json"
+# The address of an asset of a release on GitHub, and the release of its tag, which
+# lists the names of its assets.
+RELEASE_ASSET = re.compile(
+    r"https://github\.com/(?P<repository>[^/]+/[^/]+)/releases/download/"
+    r"(?P<tag>[^/]+)/(?P<asset>[^/]+)"
+)
+RELEASE = "https://api.github.com/repos/{repository}/releases/tags/{tag}"
 HEADER = """\
 # The tools that the workflows, the scripts and the websites of .github download and
 # check by their sha256, each pinned below a line "# renovate:": the address of the
@@ -456,6 +466,30 @@ def bundled(url: str, package: str, read: Fetch) -> str:
     return version
 
 
+def renamed(dep: str, url: str, read: Fetch) -> list[str]:
+    """For an asset of a release on GitHub that could not be downloaded, the names of
+    the assets that the release has, when its own is not among them: a release may
+    name its files anew, as krankerl 0.14.1 named its package krankerl_0.14.1-1_amd64.deb
+    instead of krankerl_0.14.1_amd64.deb, and the address of the record then needs the
+    new name. Nothing for any other address, or when the release can't be read."""
+    asset = RELEASE_ASSET.fullmatch(url)
+    if not asset:
+        return []
+    try:
+        release = json.loads(read(RELEASE.format(**asset.groupdict())))
+        names = [str(entry["name"]) for entry in release["assets"]]
+    except (PinError, ValueError, KeyError, TypeError):
+        return []
+    if asset["asset"] in names:
+        return []
+    return [
+        f"The release {asset['tag']} of {asset['repository']} has no asset "
+        f"{asset['asset']}, only {', '.join(names) or 'none'}: give the url of {dep} "
+        f"in {RECORD} the new name, with {{version}} for the version, and the files "
+        "that download it the same name"
+    ]
+
+
 def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]:
     """Write the sha256 of each version that moved, and the version of the package of
     each action whose commit moved; what it wrote, a line each."""
@@ -471,7 +505,11 @@ def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]
     for dep, entry in record.items():
         version = pinned[dep][0]
         if version != entry.version:
-            sha256 = fetch(entry.url.replace("{version}", version))
+            url = entry.url.replace("{version}", version)
+            try:
+                sha256 = fetch(url)
+            except PinError as error:
+                raise PinError(error.problems + renamed(dep, url, read)) from error
             record[dep] = replace(entry, version=version, sha256=sha256)
             done.append(f"{dep} {version}: sha256 {sha256}")
     texts: dict[str, str] = {}
