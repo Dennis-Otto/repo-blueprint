@@ -3991,6 +3991,8 @@ def test_a_schedule_reads_as_words(expression: str, english: str, german: str) -
         ("build-release.yml", {}, "releases"),
         ("verify-release.yml", {}, "releases"),
         ("dependency-review.yml", {}, "security"),
+        # The quick checks of every pull request, which hold no word of a group.
+        ("quick-checks.yml", {"pull_request": None}, "checks"),
         ("dependabot-automerge.yml", {}, "bots"),
         ("blueprint-update.yml", {}, "bots"),
         ("docs-pictures.yml", {}, "bots"),
