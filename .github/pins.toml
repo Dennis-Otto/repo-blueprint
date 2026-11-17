@@ -21,9 +21,9 @@ version = "0.35.10"
 sha256 = "aa8ac8aeb3d7b96d4e66119908c1654c6bbf29472ef8bf1d1e84900fd01d6b31"
 
 [download."ChristophWurst/krankerl"]
-url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}_amd64.deb"
-version = "0.14.0"
-sha256 = "9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f"
+url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}-1_amd64.deb"
+version = "0.14.3"
+sha256 = "3ca43eebc0c4766ce31db67dde96312b6c8b3d981ffebe4aeecf4fe0481883ef"
 
 [download."lycheeverse/lychee"]
 url = "https://github.com/lycheeverse/lychee/releases/download/lychee-v{version}/lychee-x86_64-unknown-linux-gnu.tar.gz"
