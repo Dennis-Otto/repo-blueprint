@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
       - name: Validate the rules of the repository and of the bot
         env:
-          IMAGE: ghcr.io/renovatebot/renovate:44.247.2@sha256:5b777fc44b9736e4bd656ba7c54dc54fb76290b2701983c0bb06f16df0c54ad5
+          IMAGE: ghcr.io/renovatebot/renovate:44.249.1@sha256:3378d0a549251b1e25d4e7a1c3e03c171cd431c12ee72d70dfe933c5f632f715
         run: |
           # The validator names a wrong rule only in its log, so it logs JSON here and
           # each problem becomes an annotation with its file.
@@ -114,7 +114,7 @@ jobs:
           PYTHON
       - name: Read every file of the dependencies as Renovate does
         env:
-          IMAGE: ghcr.io/renovatebot/renovate:44.247.2@sha256:5b777fc44b9736e4bd656ba7c54dc54fb76290b2701983c0bb06f16df0c54ad5
+          IMAGE: ghcr.io/renovatebot/renovate:44.249.1@sha256:3378d0a549251b1e25d4e7a1c3e03c171cd431c12ee72d70dfe933c5f632f715
         run: |
           # The validator checks the rules, not the files they apply to. A lock file
           # whose header Renovate can't read only costs a warning in each of its runs,
@@ -509,7 +509,7 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           configurationFile: .github/renovate-global.json5
           # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate
-          renovate-version: 44.247.2@sha256:5b777fc44b9736e4bd656ba7c54dc54fb76290b2701983c0bb06f16df0c54ad5
+          renovate-version: 44.249.1@sha256:3378d0a549251b1e25d4e7a1c3e03c171cd431c12ee72d70dfe933c5f632f715
         env:
           LOG_LEVEL: info
           RENOVATE_USERNAME: ${{ steps.bot.outputs.username }}
