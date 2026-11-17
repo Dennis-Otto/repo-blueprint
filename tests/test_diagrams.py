@@ -1316,13 +1316,15 @@ ALONE = (
 )
 WITH_DOCKER = (
     "A warning: bash scripts/diagrams.sh draws the pictures of the 1 source(s) anew;"
-    " commit them before the push, or the check diagrams fails once and needs another"
-    " round of checks.\n"
+    " commit those that change before the push, or the check diagrams fails once and"
+    " needs another round of checks. A change that keeps the drawing, such as a %%"
+    " comment, changes no picture, and the check passes.\n"
 )
 WITHOUT_DOCKER = (
-    "A warning: without Docker, push as it is; the check diagrams fails once and draws"
-    " the pictures, which the diagram bot commits on a branch of this repository, and"
-    " which a pull request from a fork takes from the artifact diagrams of the check.\n"
+    "A warning: without Docker, push as it is; the check diagrams draws the pictures and"
+    " fails once if they change, and the diagram bot commits them on a branch of this"
+    " repository, or a pull request from a fork takes them from the artifact diagrams of"
+    " the check.\n"
 )
 
 

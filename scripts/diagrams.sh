@@ -246,9 +246,9 @@ check() {
       echo "$file: changed on this branch, but its pictures in $pictures/ are not"
     done
     if command -v docker >/dev/null 2>&1; then
-      echo "A warning: bash scripts/diagrams.sh draws the pictures of the ${#alone[@]} source(s) anew; commit them before the push, or the check diagrams fails once and needs another round of checks."
+      echo "A warning: bash scripts/diagrams.sh draws the pictures of the ${#alone[@]} source(s) anew; commit those that change before the push, or the check diagrams fails once and needs another round of checks. A change that keeps the drawing, such as a %% comment, changes no picture, and the check passes."
     else
-      echo "A warning: without Docker, push as it is; the check diagrams fails once and draws the pictures, which the diagram bot commits on a branch of this repository, and which a pull request from a fork takes from the artifact diagrams of the check."
+      echo "A warning: without Docker, push as it is; the check diagrams draws the pictures and fails once if they change, and the diagram bot commits them on a branch of this repository, or a pull request from a fork takes them from the artifact diagrams of the check."
     fi
   fi
   if ((${#problems[@]} > 0)); then
