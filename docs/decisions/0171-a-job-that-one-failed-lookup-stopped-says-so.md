@@ -14,7 +14,7 @@ Error resolving allowed domain error in response from dns.google unable to resol
 Reverted changes
 ```
 
-In block mode, the agent (`step-security/agent` v0.18.1, which Harden-Runner v2.22.4 installs) looks up every host that it allows before its firewall stands, and when a single lookup fails, it takes back all that it changed and ends (`agent.go`, lines 179 to 187). It asks `dns.google` and tries `cloudflare-dns.com` only when `dns.google` can't be reached at all, not when it answers with an error such as `SERVFAIL` (`dnsproxy.go`, lines 119 to 170). Since the agent also allows the hosts of GitHub's meta list, by name, a job looks up about 150 hosts instead of its handful, so a short phase of failed answers stops many jobs at once. The agent writes no status then, so the step waited half a minute for one that couldn't come.
+In block mode, the agent (`step-security/agent` v0.18.1, which Harden-Runner v2.22.4 installs) looks up every host that it allows before its firewall stands, and when a single lookup fails, it takes back all that it changed and ends (`agent.go`, lines 177 to 186). It asks `dns.google` and tries `cloudflare-dns.com` only when `dns.google` can't be reached at all, not when it answers with an error such as `SERVFAIL` (`dnsproxy.go`, lines 119 to 170). Since the agent also allows the hosts of GitHub's meta list, by name, a job looks up about 150 hosts instead of its handful, so a short phase of failed answers stops many jobs at once. The agent writes no status then, so the step waited half a minute for one that couldn't come.
 
 ## Options
 
