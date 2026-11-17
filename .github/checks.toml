@@ -1009,7 +1009,9 @@ writes = ["**"]
 problem = """A page has a `mermaid` block, which the GitHub app shows as code, a source
 that a page shows lacks one of its two pictures, a picture in `docs/images/diagrams/`
 has no source, or the `alt` of a picture isn't what its source says; the log names
-each one."""
+each one. A source that the branch changed without its two pictures is a warning in
+the same log, which fails nothing: with Docker, `bash scripts/diagrams.sh` draws them
+before the push, so that the check *diagrams* of Lint passes at once."""
 why = """Only a picture of its source shows a diagram to every reader, also in the
 GitHub app, and only a picture with its source can be drawn again."""
 fix = """Turn the blocks into sources and draw their pictures with Docker, then commit

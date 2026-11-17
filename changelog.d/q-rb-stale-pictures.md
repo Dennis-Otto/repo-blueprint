@@ -1,0 +1,3 @@
+### Features
+
+- `bash scripts/check.sh` warns when your branch changes the source of a diagram in `docs/diagrams/` but not its two pictures, which would fail the check *diagrams* once after the push and start a second round of checks. With Docker, it says to run `bash scripts/diagrams.sh` before the push; without Docker, that the diagram bot draws the pictures after the push, or that a pull request from a fork finds them in the artifact of the check. It compares the branch with its merge base with the default branch, only warns and fails nothing, and says nothing in a shallow clone or without the default branch.
