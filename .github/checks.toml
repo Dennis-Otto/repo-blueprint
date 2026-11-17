@@ -474,19 +474,24 @@ of a person."""
 title = "The age of what the refresh of the lock files brings"
 problem = """Renovate's weekly refresh of the lock files adds a version released less than
 a week ago, or one whose release PyPI or the registry of npm doesn't name, or it changes
-a file whose versions the check can't date; or it replaces a version that `main` got
-less than a week ago; the log names each one."""
+a file whose versions the check can't date; or it replaces a version that `main` has
+with an older one, or one that `main` got less than a week ago; the log names each
+one."""
 why = """The refresh merges by itself only from versions at least a week old, as every
 other update waits a week after its release: in that week a version published from a
 hijacked account is usually found and withdrawn before it reaches the repository.
-Renovate and `blueprint.py locks --refresh` keep the refresh to that age; a younger
-version comes when the project asks for one, such as the fix of a vulnerability in
-`package.json`, or when the compile of the refresh failed. npm's refresh resolves
-each range anew and can't keep a young version of `main` within the range, such as the
-fix of a vulnerability; it would take that fix back, so the check holds it too."""
-fix = """Nothing to do for a young version: run the check again once each version is a
-week old, or let Renovate build the refresh anew in its next weekly window, the next
-Monday. The fix of a vulnerability comes at once anyway, in a pull request of its own. A
+Renovate and `blueprint.py locks --refresh` keep the refresh to that age, and the
+command keeps a young version of `main` as it is; a younger version comes when the
+project asks for one, such as the fix of a vulnerability in `package.json`, or when
+the compile of the refresh failed. npm's refresh resolves each range anew and can't
+keep a young version of `main` within the range, such as the fix of a vulnerability;
+it would take that fix back, also once the fix is a week old, so the check holds it
+for as long as it does."""
+fix = """Nothing to do. For a young version that the refresh adds: run the check again
+once each version is a week old. A refresh that takes back a version of `main` holds
+however old that version is: Renovate builds it anew in its next weekly window, the
+next Monday, from the versions a week old by then, which keep the version of `main`.
+The fix of a vulnerability comes at once anyway, in a pull request of its own. A
 lock file whose versions the check can't date, such as a `yarn.lock`, gets a rule in
 `.github/renovate.json5` with `matchFileNames` for its name, `matchUpdateTypes:
 ["lockFileMaintenance"]`, `additionalBranchPrefix: "review-"` and `automerge: false`, so
