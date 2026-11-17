@@ -440,6 +440,19 @@ TESTED = {
     ("publish-store.yml", "store", "Submit the release for review"): "test_template.py",
     ("after-checks.yml", "rerun", "Run the failed jobs once more"): "test_template.py",
     ("after-checks.yml", "branches", "Start the branch bot"): "test_workflow_steps.py",
+    **{
+        (name, "bot-health", "Start the bot-health bot"): "test_workflow_steps.py"
+        for name in (
+            "area-labels.yml",
+            "commands.yml",
+            "dependabot-automerge.yml",
+            "diagrams.yml",
+            "newest-node.yml",
+            "newest-python.yml",
+            "next-runner.yml",
+            "welcome.yml",
+        )
+    },
     (
         "after-checks.yml",
         "stopped",
@@ -1046,6 +1059,72 @@ def test_a_branch_bot_that_github_never_starts_fails_with_what_follows(
         "::error title=The branch bot didn't start::GitHub didn't start Update "
         "branches after CI (python) failed; its next run, after a merge or on its "
         "schedule, moves the line on."
+    ) in done.stdout
+    assert done.summary == ""
+
+
+# The start of the bot-health bot after a failed job of a bot of events.
+
+START_THE_BOT_HEALTH_BOT = "workflow run bot-health.yml --field run=77"
+
+
+def start_the_bot_health_bot(tmp_path: Path, *answers: Answer) -> StepResult:
+    return run_step(
+        tmp_path,
+        "welcome.yml",
+        "bot-health",
+        "Start the bot-health bot",
+        answers=answers,
+        env={"RUN": "77"},
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+def test_a_bot_whose_job_failed_starts_the_bot_health_bot_with_its_run(
+    tmp_path: Path,
+) -> None:
+    done = start_the_bot_health_bot(tmp_path, exact(START_THE_BOT_HEALTH_BOT))
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT]
+    assert done.summary == (
+        "A job failed, so the bot-health bot looks whether Harden-Runner stopped it, "
+        "and runs the failed jobs once more then.\n"
+    )
+    assert done.stubbed == []
+
+
+def test_the_start_of_the_bot_health_bot_tries_again_when_github_fails(
+    tmp_path: Path,
+) -> None:
+    done = start_the_bot_health_bot(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 502", code=1, once=True),
+        exact(START_THE_BOT_HEALTH_BOT),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 2
+    assert done.stubbed == ["sleep 10"]
+
+
+def test_a_bot_health_bot_that_github_refuses_to_start_fails_with_what_follows(
+    tmp_path: Path,
+) -> None:
+    # As for a run that Dependabot started, whose token may only read: the run says
+    # so, and the nightly look runs it again when Harden-Runner stopped a job of it.
+    done = start_the_bot_health_bot(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 403", code=1),
+    )
+
+    assert done.returncode == 1
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 3
+    assert done.stubbed == ["sleep 10", "sleep 20"]
+    assert (
+        "::error title=The bot-health bot didn't start::GitHub didn't start Bot "
+        "health for this run; its nightly look runs the failed jobs once more if "
+        "Harden-Runner stopped one of them."
     ) in done.stdout
     assert done.summary == ""
 

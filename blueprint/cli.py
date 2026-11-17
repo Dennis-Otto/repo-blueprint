@@ -2259,8 +2259,9 @@ def add_bot_health_parsers(
     run_parser.add_argument("run_id", type=int, metavar="RUN", help="the id of the run")
     stopped_parser = health.add_parser(
         "stopped",
-        help="the end of a run of a bot of events or of a workflow that keeps an issue "
-        "of its own: run its failed jobs once more when Harden-Runner stopped one",
+        help="a run of a bot of events or of a workflow that keeps an issue of its "
+        "own whose last job started this bot: once it has ended, run its failed jobs "
+        "once more when Harden-Runner stopped one",
     )
     stopped_parser.add_argument(
         "run_id", type=int, metavar="RUN", help="the id of the run"
