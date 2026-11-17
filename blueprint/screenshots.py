@@ -1,5 +1,5 @@
-"""The pictures of a project that its own script renders, renewed by a bot only when
-their pixels change.
+"""The pictures of a project that its own script renders, renewed by a bot only when a
+change shows.
 
 A project turns the screenshot bot on with scripts/screenshots.sh, which renders its
 pictures in place, wherever the documentation, the stores or the social preview take
@@ -135,10 +135,13 @@ FRAME = 4
 MARGIN = 6
 NEAR = 16
 # A picture changed all over when the frames around its changes would cover more than
-# this share of it, or would be more than MOST_MARKS: then no frame points anywhere,
-# and the report and the table say so in words.
+# this share of it: then no frame points anywhere, and the report and the table say so
+# in words. More than MOST_MARKS frames become one around them all, which counts
+# alike. More than MOST_REGIONS groups of changes are all over without joining their
+# frames, which would take longer than the comparison itself.
 ALL_OVER = 0.2
 MOST_MARKS = 12
+MOST_REGIONS = 100
 # A comparison cuts both pictures to their changes, with room around them, and keeps
 # at least a part of each side of the picture, so that one sees where on the page the
 # changes are: both in pixels of the picture shown SHOWN pixels wide at its longer side.
@@ -807,21 +810,27 @@ def scaled(length: int, longest: int) -> int:
 def marks(most: Most) -> list[Box] | None:
     """The boxes of changes that the frames of a difference and a comparison mark, as
     regions groups them in a picture shown SHOWN pixels wide, those whose frames would
-    touch joined, or None when the picture changed all over: when the frames would be
-    more than MOST_MARKS or cover more than ALL_OVER of the picture."""
+    touch joined, and more than MOST_MARKS of them joined into one, or None when the
+    picture changed all over: when the frames would cover more than ALL_OVER of the
+    picture, or the changes fall into more than MOST_REGIONS groups."""
     width, height = most.size
     longest = max(most.size)
     boxes = regions(most.mask, scaled(NEAR, longest))
-    if len(boxes) > MOST_MARKS:
+    if len(boxes) > MOST_REGIONS:
         return None
     away = scaled(MARGIN, longest) + scaled(FRAME, longest)
     boxes = touching(boxes, 2 * away)
-    covered = sum(
-        (min(width, right + away) - max(0, left - away))
-        * (min(height, bottom + away) - max(0, top - away))
-        for left, top, right, bottom in boxes
-    )
-    return None if covered > ALL_OVER * width * height else boxes
+    if len(boxes) > MOST_MARKS:
+        boxes = [joined_box(boxes)]
+
+    def covered(boxes: Sequence[Box]) -> int:
+        return sum(
+            (min(width, right + away) - max(0, left - away))
+            * (min(height, bottom + away) - max(0, top - away))
+            for left, top, right, bottom in boxes
+        )
+
+    return None if covered(boxes) > ALL_OVER * width * height else boxes
 
 
 def touching(boxes: Sequence[Box], gap: int) -> list[Box]:
@@ -1189,7 +1198,8 @@ def keep(root: Path, folder: Path | None = None, files: Sequence[str] = ()) -> K
     picture of the difference of each changed picture that kept its size and frames.
     A picture whose pixels differ only below the threshold of sight looks the same
     too, and Kept names it under unseen, with what differs. The folder stays away
-    when nothing changed."""
+    when nothing changed that one sees, so report.json names the unseen pictures only
+    beside a change: without one, only the summary of the run names them."""
     status = git(
         root,
         "status",

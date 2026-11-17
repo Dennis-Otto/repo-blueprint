@@ -25,7 +25,9 @@ from blueprint.screenshots import (
     COMPARED_FILES,
     JOB_MINUTES,
     LARGEST,
+    MOST_MARKS,
     MOST_MINUTES,
+    MOST_REGIONS,
     RED,
     REPORT,
     SHOWN,
@@ -58,6 +60,7 @@ from blueprint.screenshots import (
     fitted_size,
     frames,
     is_picture,
+    joined_box,
     keep,
     kept,
     listing,
@@ -841,7 +844,8 @@ def test_the_shades_of_a_palette_and_the_edges_of_letters_are_no_change() -> Non
 
 def test_a_new_icon_is_a_change_with_a_frame_around_it_alone() -> None:
     # The same pull request brought a new icon of the button that shows and hides
-    # the navigation of Nextcloud, 18 by 14 pixels, in every picture: a real change.
+    # the navigation of Nextcloud in every picture: a real change. 210 pixels differ
+    # in 18 by 14, and 140 of them in 17 by 14 lie above the threshold of sight.
     before, after = real_pair("icon")
     most = most_changed(before, after)
     assert most is not None
@@ -956,6 +960,40 @@ def test_a_moved_button_another_word_and_another_color_are_changes(
     assert (changed_share(before, changed_page(change)) != 0) is seen
 
 
+@pytest.mark.parametrize(("shade", "seen"), [(170, False), (160, True)])
+def test_a_thin_line_that_changes_its_shade_little_is_no_change(
+    shade: int, seen: bool
+) -> None:
+    # A known blind spot of the threshold (decision 0168): a line one pixel wide
+    # beside white is an edge, and a shade of it within the edge is no change.
+    from PIL import ImageDraw
+
+    def bordered(gray: int) -> bytes:
+        page = Image.new("RGB", (200, 100), (255, 255, 255))
+        ImageDraw.Draw(page).rectangle((20, 20, 179, 79), outline=(gray,) * 3)
+        return saved(page)
+
+    assert (measured_of(bordered(200), bordered(shade)).pixels != 0) is seen
+
+
+@pytest.mark.parametrize("size", [12, 14, 16])
+def test_an_i_that_becomes_an_l_is_no_change(size: int) -> None:
+    # The other known blind spot: a stroke one pixel wide that grows by a pixel
+    # beside a stroke as dark, as an I that becomes an l in a small font.
+    from PIL import ImageDraw, ImageFont
+
+    def written(words: str) -> bytes:
+        page = Image.new("RGB", (120, 40), (255, 255, 255))
+        ImageDraw.Draw(page).text(
+            (10, 10), words, fill=(0, 0, 0), font=ImageFont.load_default(size=size)
+        )
+        return saved(page)
+
+    found = measured_of(written("I"), written("l"))
+    assert found.differing > 0
+    assert found.pixels == 0
+
+
 def test_a_single_pixel_counts_when_it_shows() -> None:
     blue = Image.new("RGB", (200, 100), BLUE[:3])
     dot = blue.copy()
@@ -999,13 +1037,46 @@ def test_a_picture_that_changed_in_a_few_places_gets_a_frame_around_each() -> No
     assert marks(most) == [(100, 100, 136, 110), (700, 700, 720, 710)]
 
 
+def test_many_small_changes_close_together_get_one_frame_around_them_all() -> None:
+    # A column of counters that each changed a little, too many frames to follow,
+    # in a small part of the picture: one frame points at them all.
+    spots = [(100, 50 + 50 * row, 108, 60 + 50 * row) for row in range(MOST_MARKS + 2)]
+    most = spots_changed(spots)
+    assert marks(most) == [joined_box(spots)]
+    drawn = page_of(drawing(most))
+    left, top, right, bottom = joined_box(spots)
+    changed = {
+        (x, y)
+        for spot in spots
+        for x in range(spot[0], spot[2])
+        for y in range(spot[1], spot[3])
+    }
+    # A frame besides the changed pixels, within its margin of them.
+    assert red_of(drawn) - changed
+    assert all(
+        left - 10 <= x < right + 10 and top - 10 <= y < bottom + 10
+        for x, y in red_of(drawn)
+    )
+
+
 @pytest.mark.parametrize(
     "spots",
     [
         # One large place, a quarter of the picture.
         [(0, 0, 500, 500)],
-        # More places than a person follows.
-        [(80 * x, 80 * y, 80 * x + 4, 80 * y + 4) for x in range(4) for y in range(4)],
+        # More places than a person follows, over the whole picture: the one frame
+        # around them all would cover more than a fifth of it.
+        [
+            (250 * x, 250 * y, 250 * x + 4, 250 * y + 4)
+            for x in range(4)
+            for y in range(4)
+        ],
+        # So many places that their frames aren't even joined.
+        [
+            (90 * x, 90 * y, 90 * x + 4, 90 * y + 4)
+            for x in range(MOST_REGIONS // 10 + 1)
+            for y in range(11)
+        ],
     ],
 )
 def test_a_picture_that_changed_all_over_gets_no_frame(
