@@ -192,7 +192,7 @@ def test_the_command_writes_the_verdict_for_the_step(
     assert capsys.readouterr().out.startswith(said)
 
 
-# The daily release of decision 0178, where the variable RELEASE_MERGE is daily.
+# The daily release of decision 0179, where the variable RELEASE_MERGE is daily.
 MORNING = datetime(2026, 11, 18, 2, 31, tzinfo=UTC)
 DARK_MODE = commit("feat: a dark mode (#5)", PERSON)
 

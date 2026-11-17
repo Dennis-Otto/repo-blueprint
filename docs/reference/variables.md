@@ -123,11 +123,11 @@ What the workflows say of it:
 `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security. The settings bot sets it to `off` on such a repository and back to `on` once GitHub offers the review; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
 
 - **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
-- **Read by:** [`dependency-review.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependency-review.yml) (Dependency review, every repository)
+- **Read by:** [`quick-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/quick-checks.yml) (Quick checks, every repository)
 
 What the workflows say of it:
 
-- `dependency-review.yml`: A private repository without GitHub Code Security has no dependency review: there the settings bot sets the variable `DEPENDENCY_REVIEW` to off, and the check leaves the vulnerabilities of the lock files to OSV-Scanner.
+- `quick-checks.yml`: A private repository without GitHub Code Security has no dependency review: there the settings bot sets the variable `DEPENDENCY_REVIEW` to off, and the check leaves the vulnerabilities of the lock files to OSV-Scanner.
 
 ### `ISSUE_ASSISTANT_AI`
 
@@ -187,9 +187,9 @@ Who merges the release pull request. `maintainer`, the default of a new reposito
 
 What the workflows say of it:
 
-- `release.yml`: A release that only updates dependencies merges itself once its checks pass, once a day, or at once with a fix of a vulnerability; where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release does, at most one a day, and at once when the workflow is started by hand (decision 0178).
+- `release.yml`: A release that only updates dependencies merges itself once its checks pass, once a day, or at once with a fix of a vulnerability; where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release does, at most one a day, and at once when the workflow is started by hand (decision 0179).
 - `release.yml`: It is also the daily run that merges a release of dependency updates, or every release where `RELEASE_MERGE` is daily, and the one that closes the Dependabot alerts of advisories published since the last push.
-- `release.yml`: Where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release merges in the daily run, at most one a day, and at once in a run started by hand or with the fix of a vulnerability; the pull request says so in a comment (decision 0178).
+- `release.yml`: Where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release merges in the daily run, at most one a day, and at once in a run started by hand or with the fix of a vulnerability; the pull request says so in a comment (decision 0179).
 - `release.yml`: With `RELEASE_MERGE` daily, by the event of the run and the day of the last release.
 
 ### `REVIEWS_OF_MAIN`

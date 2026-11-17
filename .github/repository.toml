@@ -181,7 +181,7 @@ RELEASE_AUTOMATION_CLIENT_ID = "Iv23liP9PIEHOV74AiIA"
 RELEASE_AUTOMATION_APP_ID = "4739928"
 # The release bot merges every release once a day, at 02:25 UTC, so that each release
 # of a day doesn't cost every repository an update pull request, and at once when the
-# workflow Release is started by hand (decision 0178). A new repository starts with
+# workflow Release is started by hand (decision 0179). A new repository starts with
 # "maintainer": its maintainer merges the release pull request.
 RELEASE_MERGE = "daily"
 
