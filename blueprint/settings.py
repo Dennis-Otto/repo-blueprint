@@ -1436,7 +1436,7 @@ def check_code_owners(
         for rule in ruleset["rules"]
     ):
         return []
-    if any(api.get(f"repos/{repo}/contents/{name}") is not None for name in CODEOWNERS):
+    if any(api.exists(f"repos/{repo}/contents/{name}") for name in CODEOWNERS):
         return []
     return [
         Drift(
@@ -1450,6 +1450,17 @@ def check_code_owners(
             ),
         )
     ]
+
+
+def rulesets_and_code_owners(
+    api: Api, repo: str, wanted: list[dict[str, Json]], private: bool
+) -> list[Drift]:
+    """The rulesets, and the code owners where GitHub offers rulesets at all: without
+    them no review of a code owner can be asked for."""
+    drift = check_rulesets(api, repo, wanted, private)
+    if any(item.setting == "rulesets" for item in drift):
+        return drift
+    return drift + check_code_owners(api, repo, wanted)
 
 
 def apply_rulesets(
@@ -1936,8 +1947,7 @@ def check(
         + check_policies(
             api, repo, settings.actions.get(TARGET, []), settings.triggers, private
         )
-        + check_rulesets(api, repo, settings.rulesets, private)
-        + check_code_owners(api, repo, settings.rulesets)
+        + rulesets_and_code_owners(api, repo, settings.rulesets, private)
         + check_classic_protection(api, repo, private)
         + check_variables(api, repo, settings.variables)
         + check_environments(api, repo, settings.environments)
@@ -2226,9 +2236,9 @@ def hint(part: str, error: GitHubError) -> str:
         return (
             "; GitHub takes an app as the bypass actor of a ruleset only where the app"
             " is installed: install the release app of RELEASE_AUTOMATION_APP_ID on"
-            " the repository, or, for a repository without it, set"
-            ' RELEASE_AUTOMATION_APP_ID = "" under [variables] in'
-            " .github/repository.project.toml"
+            " the repository, or, for a repository without it, set RELEASE_APP,"
+            ' RELEASE_AUTOMATION_CLIENT_ID and RELEASE_AUTOMATION_APP_ID to ""'
+            " under [variables] in .github/repository.project.toml"
         )
     if error.status in (403, 404):
         names = PERMISSIONS[part]

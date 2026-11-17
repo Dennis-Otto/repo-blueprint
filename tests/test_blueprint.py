@@ -1711,6 +1711,25 @@ def test_rulesets_that_a_private_repository_cannot_read_are_a_notice(
     assert f'answered "{RULESETS_REFUSAL}"' in out
 
 
+def test_without_rulesets_on_its_plan_a_repository_needs_no_code_owners(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # No ruleset can ask for the review of a code owner there.
+    with_reviews(root, "code_owner_review = true")
+    (root / ".github/CODEOWNERS").write_text("* @demo/maintainers\n", encoding="utf-8")
+    github.repo["private"] = True
+    listing = f"repos/{REPO}/rulesets?includes_parents=false&per_page=100"
+    github.fail[("GET", listing)] = (403, RULESETS_REFUSAL)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    run(github, root, "settings", "check")
+
+    assert "code owners of main" not in capsys.readouterr().out
+    assert not [path for _, path in github.calls if "/contents/" in path]
+
+
 def test_a_refusal_of_the_rulesets_that_is_not_the_plan_still_fails(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -3389,7 +3408,8 @@ def test_the_reviews_of_main_come_and_go_with_the_settings(
 ACTOR_HINT = (
     "GitHub takes an app as the bypass actor of a ruleset only where the app is"
     " installed: install the release app of RELEASE_AUTOMATION_APP_ID on the"
-    ' repository, or, for a repository without it, set RELEASE_AUTOMATION_APP_ID = ""'
+    " repository, or, for a repository without it, set RELEASE_APP,"
+    ' RELEASE_AUTOMATION_CLIENT_ID and RELEASE_AUTOMATION_APP_ID to ""'
     " under [variables] in .github/repository.project.toml"
 )
 # The settings of the live run with reviews and without the App ID of the release
