@@ -1,6 +1,6 @@
 # Refresh every lock file once a week, and let the refresh wait for the maintainer
 
-- Status: superseded in part by [0137](0137-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md), with which the refresh of npm and pip-compile keeps to versions a week old and merges by itself, by [0150](0150-a-major-update-merges-by-itself-once-every-check-passes.md), with which a major update does too, and by [0173](0173-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer does too; the picture shows the rules of today
+- Status: superseded in part by [0137](0137-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md), with which the refresh of npm and pip-compile keeps to versions a week old and merges by itself, by [0150](0150-a-major-update-merges-by-itself-once-every-check-passes.md), with which a major update does too, and by [0174](0174-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer does too; the picture shows the rules of today
 - Date: 2026-10-13
 
 ## Context

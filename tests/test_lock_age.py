@@ -672,7 +672,7 @@ def test_a_composer_lock_in_another_refresh_holds_it(
     branch: str,
 ) -> None:
     # Only the refresh of Composer, on a branch of its own, brings versions that
-    # nothing dates (decision 0173): in npm's refresh, such as one that a project
+    # nothing dates (decision 0174): in npm's refresh, such as one that a project
     # groups with Composer, composer.lock holds it, as before.
     root = refresh(
         tmp_path,
@@ -720,7 +720,7 @@ def test_a_refresh_of_composer_passes_and_names_what_nothing_dates(
         "has no cooldown, and whoever publishes a version sets its time in "
         "composer.lock. So the refresh of Composer brings versions of any age, also "
         "one published minutes before, and merges by itself once every check passes, "
-        "as decision 0173 of the blueprint accepts."
+        "as decision 0174 of the blueprint accepts."
     )
     assert capsys.readouterr().out.splitlines() == [
         "composer.lock: psr/clock 1.0.0: nothing dates it.",

@@ -15,7 +15,7 @@ main that the refresh replaces only with versions released before it, such as th
 of a vulnerability that npm's refresh resolves back, holds it for as long as it does,
 however old that version is.
 
-The refresh of Composer merges by itself with versions of any age (decision 0173):
+The refresh of Composer merges by itself with versions of any age (decision 0174):
 Composer has no cooldown, and the time of a version in composer.lock comes from
 whoever published it, so nothing dates it. The check reads the versions that it adds
 to composer.lock and names them as versions that nothing dates, and lets them pass,

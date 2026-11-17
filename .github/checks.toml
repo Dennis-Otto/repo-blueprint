@@ -488,7 +488,7 @@ keep a young version of `main` within the range, such as the fix of a vulnerabil
 it would take that fix back, also once the fix is a week old, so the check holds it
 for as long as it does. The refresh of Composer passes with versions of any age:
 whoever publishes a version sets its time in `composer.lock`, so nothing dates it, and
-the summary of the check names each one (decision 0173)."""
+the summary of the check names each one (decision 0174)."""
 fix = """Nothing to do. For a young version that the refresh adds: run the check again
 once each version is a week old. A refresh that takes back a version of `main` holds
 however old that version is: Renovate builds it anew in its next weekly window, the

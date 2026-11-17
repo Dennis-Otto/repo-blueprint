@@ -1,6 +1,6 @@
 # The weekly refresh of the lock files merges by itself, from versions a week old
 
-- Status: accepted, amended by [0172](0172-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a young version of `main` stays in the refresh of pip-compile and a refresh that takes one back holds until Renovate builds it anew, and by [0173](0173-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself with versions of any age
+- Status: accepted, amended by [0172](0172-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a young version of `main` stays in the refresh of pip-compile and a refresh that takes one back holds until Renovate builds it anew, and by [0174](0174-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself with versions of any age
 - Date: 2026-11-09
 
 ## Context

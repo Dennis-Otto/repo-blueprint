@@ -1,6 +1,6 @@
 # A major update merges by itself once every check passes
 
-- Status: accepted, amended by [0173](0173-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself too
+- Status: accepted, amended by [0174](0174-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself too
 - Date: 2026-11-13
 
 ## Context

@@ -1378,7 +1378,7 @@ def locks_age_command(base: str, root: Path) -> int:
             "refresh adds: Composer has no cooldown, and whoever publishes a version "
             "sets its time in composer.lock. So the refresh of Composer brings "
             "versions of any age, also one published minutes before, and merges by "
-            "itself once every check passes, as decision 0173 of the blueprint "
+            "itself once every check passes, as decision 0174 of the blueprint "
             "accepts."
         )
         print("\n".join([*undated, note]))

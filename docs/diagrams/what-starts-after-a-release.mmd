@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What starts after a release
+    accDescr: A run of the release bot starts after every merge into main, every day and by hand. Only a run that published a release, or finished a draft that an earlier run left, starts the bots that follow a release; every other run only keeps the release pull request current and starts neither. Once the whole run passed, the verification included, its last job starts Issue lifecycle, which closes the issues that the release fixes with its link, except after a prerelease, and Screenshots, which renders the pictures of the new version, except after a beta and where the repository has no scripts/screenshots.sh. Should GitHub not start one, the morning sweep of Issue lifecycle and the weekly run of Screenshots catch up.
+
+    run["`A run of *Release*: the push of a merge,<br>the daily run or one by hand`"]
+    published{"Did it publish a release<br>or finish a draft?"}
+    nothing["`It only keeps the release<br>pull request current<br>and starts no bot`"]
+    passed{"Did the whole run pass,<br>the verification included?"}
+    again["`No bot yet: the second try<br>of the bot-health bot<br>runs the failed jobs again`"]
+    start["`Its last job starts<br>the bots by hand`"]
+    lifecycle["`*Issue lifecycle* closes the<br>issues that the release fixes,<br>with its link; not after a prerelease`"]
+    screenshots["`*Screenshots* renders the pictures<br>of the new version; not after a beta<br>or without scripts/screenshots.sh`"]
+    net["`Should GitHub not start one:<br>the morning sweep and the<br>weekly run catch up`"]
+
+    run --> published
+    published -- "no" --> nothing
+    published -- "yes" --> passed
+    passed -- "no" --> again
+    passed -- "yes" --> start
+    start --> lifecycle
+    start --> screenshots
+    start -. "a call that fails" .-> net
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class run,start,again bot
+    class lifecycle,screenshots done
