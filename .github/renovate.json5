@@ -72,10 +72,13 @@
     },
     {
       // The tools of the accessibility check of the websites, which every repository
-      // gets from here.
+      // gets from here. Its playwright-core drives the Chrome of the runner, beside no
+      // image of Playwright, so it keeps the week that the shared rules take from the
+      // packages of Playwright (decision 0168).
       matchFileNames: [".github/a11y/**"],
       enabled: true,
       groupName: "the tools of the accessibility check",
+      minimumReleaseAge: "7 days",
     },
     {
       // The Mermaid that every website draws its diagrams with, within the major

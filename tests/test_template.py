@@ -10906,6 +10906,15 @@ def test_renovate_brings_playwright_at_once_like_its_image(
     )
     assert rules[images + 1] == playwright[0]
     assert not [rule for rule in rules[images + 2 :] if "minimumReleaseAge" in rule]
+    # The accessibility check of the blueprint runs its playwright-core with the
+    # Chrome of the runner, beside no image, so its group keeps the week.
+    own = renovate_rules((ROOT / ".github/renovate.json5").read_text(encoding="utf-8"))
+    [a11y] = [
+        rule
+        for rule in own["packageRules"]
+        if rule.get("matchFileNames") == [".github/a11y/**"]
+    ]
+    assert a11y["minimumReleaseAge"] == "7 days"
 
 
 # It asks Git for the files of the repository, which the copy of the mutation tests
