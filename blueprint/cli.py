@@ -2343,7 +2343,7 @@ def add_screenshots_parsers(
     screenshots_parser = commands.add_parser(
         "screenshots",
         help="the pictures that scripts/screenshots.sh renders, renewed by the "
-        "screenshot bot only when their pixels change",
+        "screenshot bot only when a change shows",
     )
     screenshots_actions = screenshots_parser.add_subparsers(
         dest="action", required=True

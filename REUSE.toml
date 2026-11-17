@@ -15,3 +15,11 @@ path = ["template/REUSE.toml.jinja", "template/LICENSE.jinja", "template/LICENSE
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Dennis Otto and contributors"
 SPDX-License-Identifier = "MIT OR MIT-0 OR BSD-3-Clause OR Apache-2.0 OR GPL-3.0-or-later OR AGPL-3.0-or-later"
+
+# Parts of the pictures of Paperless Sync, the real pairs of the tests of the
+# threshold of sight of blueprint/screenshots.py, under the license of Paperless Sync.
+[[annotations]]
+path = "tests/data/sight/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 Dennis Otto", "Contributors to Paperless Sync"]
+SPDX-License-Identifier = "AGPL-3.0-or-later"
