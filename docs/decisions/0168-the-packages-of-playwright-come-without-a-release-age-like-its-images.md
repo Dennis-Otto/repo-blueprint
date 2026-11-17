@@ -23,3 +23,16 @@ Option 4. The rules of Renovate that every repository shares give the packages `
 ## Consequences
 
 An update of Playwright brings the image and the package of the same release in one pull request and merges once its checks pass. When the image of a new release comes a few hours after its package, the group splits for one run of Renovate and heals in the next. A project that runs Playwright from npm and from PyPI at once, such as player-switch-for-autodarts, still meets a release that Microsoft publishes only for Python, as 1.65.2: its own test decides which version it follows. The packages of Playwright no longer wait the week, also in a repository without its image; every other package still does. In a project of npm, the weekly refresh of the lock files of [0137](0137-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md) resolves a range such as `^1.65.0` from the versions a week old and so can take a Playwright younger than the week back to the one before; its check dependency-review then holds the refresh until that Playwright is a week old. Nothing breaks, and that wait of up to a week is accepted.
+
+## Amendment of 2026-11-17: the images of Playwright have no release age either
+
+Renovate gives npm the `minimumReleaseAge` of the first update of a branch as `--before`, and the first of a group is often the image, which kept its week, only without a date to hold it. In the group of paperless-sync, image and `playwright-core` of 1.65.1, npm found no `playwright-core@1.65.1` older than a week, installed it again without `--before`, and Renovate warned in every run that `--before` could not be enforced, which reached the issue *Renovate logs problems* ([#998](https://github.com/Dennis-Otto/repo-blueprint/issues/998)).
+
+The rule right after that of the packages gives the images `mcr.microsoft.com/playwright` and `mcr.microsoft.com/playwright/**` `minimumReleaseAge: null` as well, so that a group of Playwright has no update with a week and npm gets no `--before`, whichever comes first:
+
+- **The image:** it came at once already, as it has no date, so nothing about when it comes changes.
+- **The lock file of the update:** it is what npm wrote after the warning before. An exact version of `playwright-core` or `@playwright/test` changes only the packages of Playwright, which depend on each other by exact versions.
+- **Other packages in such a group:** a group of a project that puts other packages of npm beside the image of Playwright installs them without `--before` as well, though their own update still waits its week.
+- **The warning:** it stays a warning. Where a branch still gives npm the week, such as the weekly refresh of the lock files, it means that the refresh brings versions younger than that, which the check dependency-review holds.
+
+A test of the template keeps every package and image of Playwright without the week, every other one with it, and no remap of that warning.
