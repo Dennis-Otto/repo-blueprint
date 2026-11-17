@@ -8,7 +8,7 @@ import fnmatch
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -407,10 +407,62 @@ def runs_the_tool(function: ast.FunctionDef) -> bool:
     )
 
 
-def unmarked_copies(source: str, code: Sequence[str]) -> list[str]:
-    """The tests of a module that copy the code or run the tool of a project,
-    themselves or through a helper or a fixture of the module, without the marker
-    mutation_unsafe."""
+# The scripts of a project start its tool as well: scripts/diagrams.sh hands each source
+# to .github/blueprint.py, and so does a step of scripts/check.sh. A test that ran
+# scripts/diagrams.sh in a project of the fixture projects came without the marker
+# (#1013) and broke the Mutation workflow once more, so a test that runs such a script
+# of a project with bash asks for the marker too.
+INCLUDE = re.compile(r'\[%-?\s*include\s+"([^"]+)"')
+
+
+def scripts_that_start_the_tool(root: Path) -> frozenset[str]:
+    """The scripts of a project that name its tool, as "scripts/diagrams.sh", with the
+    files of the blueprint that the template includes in them."""
+    found = set()
+    for path in (root / "template" / "scripts").iterdir():
+        text = path.read_text(encoding="utf-8")
+        for include in INCLUDE.findall(text):
+            text += (root / include).read_text(encoding="utf-8")
+        if TOOL in text:
+            name = re.sub(r"\[%.*?%\]", "", path.name).removesuffix(".jinja")
+            found.add(f"scripts/{name}")
+    return frozenset(found)
+
+
+def runs_a_script_of_the_tool(
+    function: ast.FunctionDef, scripts: Collection[str]
+) -> bool:
+    """Whether the function takes the fixture projects and runs one of the scripts with
+    bash, as in_bash("scripts/diagrams.sh", "--check") or [BASH, "scripts/check.sh"].
+
+    A test that only reads such a script, or runs another one, runs no mutant."""
+    names = {node.id for node in ast.walk(function) if isinstance(node, ast.Name)}
+    if "projects" not in names | {argument.arg for argument in function.args.args}:
+        return False
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "in_bash":
+            arguments = node.args
+        elif isinstance(node, ast.List) and node.elts:
+            if ast.unparse(node.elts[0]) != "BASH":
+                continue
+            arguments = node.elts[1:]
+        else:
+            continue
+        if any(
+            isinstance(inner, ast.Constant) and inner.value in scripts
+            for argument in arguments
+            for inner in ast.walk(argument)
+        ):
+            return True
+    return False
+
+
+def unmarked_copies(
+    source: str, code: Sequence[str], scripts: Collection[str]
+) -> list[str]:
+    """The tests of a module that copy the code, run the tool of a project or run one of
+    its scripts that start the tool, themselves or through a helper or a fixture of the
+    module, without the marker mutation_unsafe."""
     tree = ast.parse(source)
     functions = {
         node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -434,7 +486,9 @@ def unmarked_copies(source: str, code: Sequence[str]) -> list[str]:
     copying = {
         name
         for name, function in functions.items()
-        if copies_code(function, code) or runs_the_tool(function)
+        if copies_code(function, code)
+        or runs_the_tool(function)
+        or runs_a_script_of_the_tool(function, scripts)
     }
     while grown := {
         name for name in functions if name not in copying and uses[name] & copying
@@ -456,11 +510,14 @@ def test_a_test_that_runs_a_copy_of_the_code_stays_out_of_the_mutation_tests() -
     code = default_paths(root)
     assert "pins.py" in code
     assert "blueprint" in code
+    scripts = scripts_that_start_the_tool(root)
+    assert {"scripts/check.sh", "scripts/diagrams.sh"} <= scripts
+    assert "scripts/markdownlint.sh" not in scripts
 
     unmarked = {
         f"{path.relative_to(root).as_posix()}::{name}": "needs @" + UNSAFE
         for path in sorted((root / "tests").glob("test_*.py"))
-        for name in unmarked_copies(path.read_text(encoding="utf-8"), code)
+        for name in unmarked_copies(path.read_text(encoding="utf-8"), code, scripts)
     }
 
     assert not unmarked, unmarked
@@ -591,16 +648,57 @@ def test_that_lists_the_tool_of_a_project(project):
     assert project in [sys.executable]
     assert project in [".github/blueprint.py", sys.executable]
     assert project in []
+
+
+def test_that_runs_a_script_of_a_project(projects, tmp_path):
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    subprocess.run(in_bash("scripts/draw.sh", "--check"), cwd=project)
+
+
+def test_that_runs_it_by_its_path(projects):
+    subprocess.run([BASH, (projects["generic"] / "scripts/draw.sh").as_posix()])
+
+
+def draw(projects, kind):
+    return subprocess.run([BASH, "scripts/draw.sh"], cwd=projects[kind])
+
+
+def test_through_a_helper_of_the_projects(projects):
+    draw(projects, "generic")
+
+
+@runs_the_tool
+def test_marked_that_runs_a_script_of_a_project(projects):
+    subprocess.run(in_bash("scripts/draw.sh"), cwd=projects["generic"])
+
+
+def test_that_runs_another_script_of_a_project(projects):
+    subprocess.run(in_bash("scripts/lint.sh"), cwd=projects["generic"])
+    subprocess.run([BASH, "scripts/lint.sh"], cwd=projects["generic"])
+    subprocess.run([sys.executable, "scripts/draw.sh"], cwd=projects["generic"])
+    assert projects in [[]]
+
+
+def test_that_reads_a_script_of_a_project(projects):
+    assert (projects["generic"] / "scripts/draw.sh").read_text()
+
+
+def test_that_runs_a_script_without_a_project(tmp_path):
+    subprocess.run(in_bash("scripts/draw.sh"), cwd=tmp_path)
 """
     code = ["tool.py", "package"]
+    scripts = {"scripts/draw.sh"}
 
-    assert unmarked_copies(source, code) == [
+    assert unmarked_copies(source, code, scripts) == [
+        "test_that_runs_a_script_of_a_project",
+        "test_that_runs_it_by_its_path",
         "test_that_runs_the_step_of_the_tool",
         "test_that_runs_the_steps_of_the_tool",
         "test_that_starts_it_by_its_path",
         "test_that_starts_the_tool_of_a_project",
         "test_through_a_fixture",
         "test_through_a_helper",
+        "test_through_a_helper_of_the_projects",
         "test_through_the_steps_with_the_tool",
         "test_with_a_package",
         "test_with_its_bytes",
@@ -608,7 +706,30 @@ def test_that_lists_the_tool_of_a_project(project):
     ]
     # The marker of every test of the module.
     everywhere = "pytestmark = [pytest.mark.mutation_unsafe]\n"
-    assert unmarked_copies(everywhere + source, code) == []
+    assert unmarked_copies(everywhere + source, code, scripts) == []
+
+
+def test_the_scripts_of_a_project_that_start_its_tool(tmp_path: Path) -> None:
+    root = files(
+        tmp_path,
+        {
+            "template/scripts/check.sh.jinja": 'tool=.github/blueprint.py\n"$tool"\n',
+            "template/scripts/draw.sh.jinja": '[% include "scripts/draw.sh" -%]\n',
+            "scripts/draw.sh": "python3 .github/blueprint.py diagrams extract\n",
+            "template/scripts/[% if sample_code %]shots.sh[% endif %].jinja": (
+                "python3 .github/blueprint.py pages\n"
+            ),
+            "template/scripts/lint.sh.jinja": '[% include "scripts/lint.sh" -%]\n',
+            "scripts/lint.sh": "markdownlint-cli2 '**/*.md'\n",
+            "template/scripts/deploy.sh": "wrangler deploy  # not blueprint.py\n",
+        },
+    )
+
+    assert scripts_that_start_the_tool(root) == {
+        "scripts/check.sh",
+        "scripts/draw.sh",
+        "scripts/shots.sh",
+    }
 
 
 def test_the_modules_of_the_plan(tmp_path: Path) -> None:
