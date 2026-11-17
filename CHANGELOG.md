@@ -7,6 +7,14 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.4...v1.20.5) (2026-11-17)
+
+
+### Bug fixes
+
+* **deps:** update mcr.microsoft.com/playwright/python docker tag to v1.65.2 ([#977](https://github.com/Dennis-Otto/repo-blueprint/issues/977)) ([5998a22](https://github.com/Dennis-Otto/repo-blueprint/commit/5998a2264669f91b5d9d227e9410d2cf9a946136))
+* krankerl's pin names its package, which the downloads take instead of building it ([#995](https://github.com/Dennis-Otto/repo-blueprint/issues/995)) ([aa9c5f9](https://github.com/Dennis-Otto/repo-blueprint/commit/aa9c5f9d0559f68cfa8ce099b0b1e0696f0d0758))
+
 ## [1.20.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.3...v1.20.4) (2026-11-17)
 
 ### Bug fixes
