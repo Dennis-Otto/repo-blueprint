@@ -16,7 +16,9 @@ A dev container for VS Code and GitHub Codespaces with the tools of the checks a
 
 ## Coding agents
 
-The rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor: the commands of the checks and tests of its kind, the titles of pull requests and the versions they make, the changelog, the sign-off and the signature, and which files belong to the project and which to the blueprint, a list that a test of the blueprint keeps equal to the files an update never overwrites; the notes of the project join them from a file of its own.
+The rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor: the commands of the checks and tests of its kind, the titles of pull requests and the versions they make, the changelog, the sign-off and the signature, when to push and who brings a pull request up to date with `main`, and which files belong to the project and which to the blueprint, a list that a test of the blueprint keeps equal to the files an update never overwrites; the notes of the project join them from a file of its own.
+
+An agent runs `scripts/check.sh` and then pushes once, since every push starts every check again and cancels the runs that are still going. It turns on auto-merge and leaves the update to the branch bot, which brings one pull request after the other up to date, so that each runs its checks once, on the head that merges. It merges `main` into its branch only for a conflict, or for a required check that fails and whose fix `main` holds, in the same push as its fix. A test of the blueprint keeps these rules the same in its own `AGENTS.md` and in that of every kind of project, and `CONTRIBUTING.md` says them in the same words.
 
 **How:** `AGENTS.md`, `CLAUDE.md`, `.github/agents.project.md`.
 

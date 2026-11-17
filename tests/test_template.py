@@ -9527,6 +9527,50 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     assert "@.github/agents.project.md" in claude
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_agents_and_contributors_push_once_and_leave_the_update_to_the_branch_bot(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Every push starts every check again, and the branch bot brings the pull
+    # requests with auto-merge up to date one after the other (decision 0028). The
+    # blueprint and every kind of project say so in the same words, to coding agents
+    # and to people, so that a change of the rule changes all of them.
+    heading = "## Commits and pull requests"
+    rules = section_of((ROOT / "AGENTS.md").read_text(encoding="utf-8"), heading)
+    workflow = section_of(
+        (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    steps = re.findall(r"^[578]\. .*$", workflow, re.MULTILINE)
+    assert len(steps) == 3
+    for rule in (
+        "Run `scripts/check.sh`, then push once.",
+        "push a second time before the first round of checks has answered only to fix",
+        "Turn on auto-merge",
+        "leave the update to the branch bot",
+        "is not in the bot's line",
+        "neither with *Update branch* on GitHub nor with a merge of `main`",
+        "yourself only in two cases",
+        "in the same push as your fix, with a signed merge commit",
+        "never by a rebase through GitHub",
+        "the label `merge-conflict`",
+        "why GitHub starts no run of the pull request at all",
+        "a required check fails and `main` holds its fix",
+    ):
+        assert rule.lower() in rules.lower(), rule
+        assert rule.lower() in "\n".join(steps).lower(), rule
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert section_of(agents, heading) == rules
+    contributing = section_of(
+        (project / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    assert re.findall(r"^[578]\. .*$", contributing, re.MULTILINE) == steps
+    # Every kind of project has the bot and the label that the rule names.
+    assert (project / ".github/workflows/update-branches.yml").is_file()
+    labels = (project / ".github/labels.toml").read_text(encoding="utf-8")
+    assert 'name = "merge-conflict"' in labels
+
+
 def test_copying_runs_no_code_of_the_blueprint() -> None:
     # Without tasks, migrations or Jinja extensions, Copier only renders the template
     # in its sandbox and needs no --trust; docs/security.md promises it.
@@ -11241,13 +11285,20 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     project = shutil.copytree(projects[kind], tmp_path / kind)
     # Home Assistant pins packages such as Pillow for the tests of every integration,
     # so a new one accepts what the blueprint accepts in stacks/home-assistant/, in the
-    # root, where its requirements-test.txt is.
+    # root, where its requirements-test.txt is; a new Cloudflare Worker accepts what
+    # the blueprint accepts in stacks/worker/, beside its package-lock.json.
     accepted = project / "osv-scanner.toml"
-    blueprint = (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text("utf-8")
-    assert accepted.is_file() == (kind == "home-assistant")
+    stacks = {
+        "home-assistant": ("home-assistant", "requirements-test.txt"),
+        "cloudflare-worker": ("worker", "package-lock.json"),
+    }
+    assert accepted.is_file() == (kind in stacks)
+    blueprint = ""
     if accepted.is_file():
+        stack, lock = stacks[kind]
+        blueprint = (ROOT / f"stacks/{stack}/osv-scanner.toml").read_text("utf-8")
         assert accepted.read_text(encoding="utf-8") == blueprint
-        assert (project / "requirements-test.txt").is_file()
+        assert (project / lock).is_file()
     # The rules of the blueprint extend those of the project's osv-scanner.toml.
     rules = renovate_rules(
         (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
@@ -11276,6 +11327,48 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# The advisory of picomatch that no version fixes (repo-blueprint#1018), in the lock
+# files of the tools that bring picomatch.
+PICOMATCH = "GHSA-fc5q-39xc-vjpf"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_tools_of_the_prose_accept_only_the_advisory_of_picomatch(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The acceptance beside the lock file of the spelling hint is the blueprint's own,
+    # in every kind of project, where OSV-Scanner reads it.
+    project = projects[kind]
+    accepted = ".github/prose/osv-scanner.toml"
+    blueprint = (ROOT / accepted).read_text(encoding="utf-8")
+    assert (project / accepted).read_text(encoding="utf-8") == blueprint
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert accepted in owned.splitlines()
+
+
+@pytest.mark.parametrize(
+    "config", [".github/prose/osv-scanner.toml", "stacks/worker/osv-scanner.toml"]
+)
+def test_an_advisory_without_a_fix_is_accepted_alone_and_ends(config: str) -> None:
+    # One advisory, by its id, with its reason and an end, after which OSV-Scanner
+    # reports it again; no version with every advisory, which would write a rule of
+    # Renovate that holds back the update that fixes it.
+    data = tomllib.loads((ROOT / config).read_text(encoding="utf-8"))
+    assert set(data) == {"IgnoredVulns"}
+    [entry] = data["IgnoredVulns"]
+    assert entry["id"] == PICOMATCH
+    assert set(entry) == {"id", "ignoreUntil", "reason"}
+    assert entry["ignoreUntil"] - datetime.date(2026, 11, 17) <= datetime.timedelta(
+        days=31
+    )
+    assert "picomatch" in entry["reason"]
+    # The lock file beside it has the package that the advisory names.
+    lock = json.loads((ROOT / config).with_name("package-lock.json").read_text("utf-8"))
+    assert "node_modules/picomatch" in lock["packages"]
+    preset = (ROOT / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
+    assert "picomatch" not in preset
 
 
 def renovate_rules(text: str) -> dict[str, Any]:
@@ -23452,6 +23545,10 @@ def test_every_project_draws_its_diagrams_as_pictures(
         assert color in contributing, color
 
 
+# In the copy of the mutation tests, scripts/diagrams.sh starts the tool of the project,
+# which is the code with the mutants and finds no configuration of mutmut in the
+# process that the script starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
 def test_a_project_warns_of_a_diagram_changed_without_its_pictures(
     projects: dict[str, Path], tmp_path: Path

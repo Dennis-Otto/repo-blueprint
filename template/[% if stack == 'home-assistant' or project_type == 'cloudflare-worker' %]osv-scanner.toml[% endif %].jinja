@@ -1,0 +1,4 @@
+[#- The advisories that OSV-Scanner accepts in the lock file of the root: those of the
+    test tools of Home Assistant, or those of the tools of a Cloudflare Worker. A file
+    of the project after its first copy, which an update leaves alone. -#]
+[% if project_type == 'cloudflare-worker' %][% include "stacks/worker/osv-scanner.toml" %][% else %][% include "stacks/home-assistant/osv-scanner.toml" %][% endif -%]

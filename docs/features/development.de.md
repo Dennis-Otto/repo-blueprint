@@ -16,7 +16,9 @@ Ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prü
 
 ## Coding-Agents
 
-Die Regeln des Repositorys für Claude Code, Codex, GitHub Copilot und Cursor: die Befehle der Prüfungen und Tests seiner Art, die Titel von Pull Requests und die Versionen, die sie ergeben, das Changelog, das Sign-off und die Signatur, und welche Dateien dem Projekt gehören und welche dem Blueprint, eine Liste, die ein Test des Blueprints gleich den Dateien hält, die ein Update nie überschreibt; die Notizen des Projekts kommen aus einer eigenen Datei dazu.
+Die Regeln des Repositorys für Claude Code, Codex, GitHub Copilot und Cursor: die Befehle der Prüfungen und Tests seiner Art, die Titel von Pull Requests und die Versionen, die sie ergeben, das Changelog, das Sign-off und die Signatur, wann gepusht wird und wer einen Pull Request auf den Stand von `main` bringt, und welche Dateien dem Projekt gehören und welche dem Blueprint, eine Liste, die ein Test des Blueprints gleich den Dateien hält, die ein Update nie überschreibt; die Notizen des Projekts kommen aus einer eigenen Datei dazu.
+
+Ein Agent führt `scripts/check.sh` aus und pusht dann einmal, denn jeder Push startet jede Prüfung von Neuem und bricht die Läufe ab, die noch laufen. Er schaltet Auto-Merge an und überlässt die Aktualisierung dem Branch-Bot, der einen Pull Request nach dem anderen auf den Stand bringt, sodass jeder seine Prüfungen einmal ausführt, auf dem Head, der gemergt wird. `main` merget er nur bei einem Konflikt in seinen Branch, oder bei einer vorgeschriebenen Prüfung, die scheitert und deren Korrektur `main` enthält, im selben Push wie seine Korrektur. Ein Test des Blueprints hält diese Regeln in seiner eigenen `AGENTS.md` und in der jeder Art von Projekt gleich, und `CONTRIBUTING.md` sagt sie mit denselben Worten.
 
 **Womit:** `AGENTS.md`, `CLAUDE.md`, `.github/agents.project.md`.
 
