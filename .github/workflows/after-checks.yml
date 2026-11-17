@@ -680,9 +680,19 @@ jobs:
             # of blueprint/outage.py), as in Dennis-Otto/repo-blueprint#970; and a job
             # that only sums up the jobs that it needs, as variants does, which failed
             # because one of them did: that one has its own row, or failed in no test.
-            if grep -qF -e "as in an outage of GitHub or of the network of the runner" \
-              -e "this job only sums up the jobs that it needs" <<<"$errors"; then
-              continue
+            # Only when nothing else failed in the job, though: a step that runs after
+            # one that failed, as in the job Lint, can fail in a test of its own, which
+            # shows as another error or as one more exit of a step than these errors.
+            said="$(grep -cF -e "as in an outage of GitHub or of the network of the runner" \
+              -e "this job only sums up the jobs that it needs" <<<"$errors" || true)"
+            if ((said > 0)); then
+              exits="$(grep -cE '^Process completed with exit code [0-9]+\.?$' <<<"$errors" || true)"
+              others="$(grep -vF -e "as in an outage of GitHub or of the network of the runner" \
+                -e "this job only sums up the jobs that it needs" <<<"$errors" |
+                grep -cvE '^(Process completed with exit code [0-9]+\.?)?$' || true)"
+              if ((others == 0 && exits <= said)); then
+                continue
+              fi
             fi
             # A log that GitHub doesn't give, such as that of a job that never started,
             # leaves the row without its tests, and a warning of the run says why; so

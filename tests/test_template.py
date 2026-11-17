@@ -20763,6 +20763,60 @@ def test_the_flaky_test_bot_reports_no_check_that_github_kept_failing(
 
 
 @WITH_JQ
+@pytest.mark.parametrize(
+    "others",
+    [
+        # Another step failed with an error of its own,
+        ("the Markdown lint found a long line", EXITED),
+        # or with no error but its exit.
+        (EXITED,),
+    ],
+)
+def test_the_flaky_test_bot_reports_a_job_that_failed_besides_github(
+    tmp_path: Path, others: tuple[str, ...]
+) -> None:
+    # In the job Lint, the steps after the checkout run even after one failed: when
+    # GitHub kept failing the check of the allowed actions and another step failed as
+    # well, that step may be flaky, and the job keeps its row.
+    unavailable = check_unavailable(
+        GitHubError(502, "Bad Gateway"), "read the allowed actions"
+    )
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        14,
+                        "Lint",
+                        "failure",
+                        (
+                            "Check that the allowed actions of the project let every"
+                            " action start",
+                            "failure",
+                        ),
+                        ("Lint the Markdown", "failure"),
+                    )
+                ]
+            },
+            "repos/o/r/check-runs/14/annotations": annotations_of_a_job(
+                unavailable, EXITED, *others
+            ),
+            "repos/o/r/actions/jobs/14/logs": "",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "Lint" in summary
+    assert any(call.startswith("issue create") for call in calls)
+
+
+@WITH_JQ
 def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     tmp_path: Path,
 ) -> None:
