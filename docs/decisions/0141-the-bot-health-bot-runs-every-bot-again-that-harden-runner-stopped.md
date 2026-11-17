@@ -1,6 +1,6 @@
 # The bot-health bot runs every bot again that Harden-Runner stopped
 
-- Status: accepted, follows up [0134](0134-a-job-stops-when-harden-runner-doesnt-block.md)
+- Status: accepted, follows up [0134](0134-a-job-stops-when-harden-runner-doesnt-block.md), amended by [0176](0176-the-bots-of-events-start-the-bot-health-bot-after-a-failure.md), with which the bots of events and the workflows with an issue of their own start the bot-health bot by a last job after a failure, instead of their end
 - Date: 2026-11-10
 
 ## Context

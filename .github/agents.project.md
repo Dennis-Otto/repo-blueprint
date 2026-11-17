@@ -29,4 +29,4 @@ These notes add to `AGENTS.md` what a coding agent needs to know about how the b
 
 ## Releases
 
-- The blueprint releases at most once a day ([decision 0176](../docs/decisions/0176-the-blueprint-releases-at-most-once-a-day.md)): the release bot merges the release pull request in its daily run at 02:25 UTC, so never merge it or turn on its auto-merge yourself. A fix that can't wait for the night, such as one for the repositories that a release broke, goes at once with `gh workflow run release.yml`, which merges it once its checks pass.
+- The blueprint releases at most once a day ([decision 0178](../docs/decisions/0178-the-blueprint-releases-at-most-once-a-day.md)): the release bot merges the release pull request in its daily run at 02:25 UTC, so never merge it or turn on its auto-merge yourself. A fix that can't wait for the night, such as one for the repositories that a release broke, goes at once with `gh workflow run release.yml`, which merges it once its checks pass.
