@@ -124,13 +124,6 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
     ]
 
 
-# The address of an asset of a release on GitHub, which gh downloads by its parts.
-RELEASE_ASSET = re.compile(
-    r"https://github\.com/(?P<repository>[^/]+/[^/]+)/releases/download/"
-    r"(?P<tag>[^/]+)/(?P<asset>[^/]+)"
-)
-
-
 def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
     # pins.py downloads from the address of .github/pins.toml, so the workflows and
     # scripts must download the same file, with their variable for {version}: an
@@ -148,7 +141,8 @@ def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
         plain = re.sub(r"\$\{(\w+)\}", r"$\1", text.replace("\\\n", " "))
         plain = re.sub(r" {2,}", " ", plain)
         url = record[pin.dep].url.replace("{version}", f"${pin.name}")
-        asset = RELEASE_ASSET.fullmatch(url)
+        # An asset of a release on GitHub, which gh downloads by its parts.
+        asset = pins.RELEASE_ASSET.fullmatch(url)
         if not asset:
             assert f'"{url}"' in plain, (pin.path, url)
             continue
@@ -457,6 +451,71 @@ def test_a_download_that_fails_writes_nothing(
     )
     assert (root / ".github/sign.sh").read_text() == SCRIPT
     assert (root / ".github/pins.toml").read_text() == RECORD
+
+
+RENAMED = f"""\
+[download."owner/tool"]
+url = "https://github.com/owner/tool/releases/download/v{{version}}/tool_{{version}}_linux"
+version = "1.0.0"
+sha256 = "{OLD}"
+"""
+
+
+def test_an_asset_that_the_release_names_anew_is_named_by_the_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # krankerl 0.14.1 named its package krankerl_0.14.1-1_amd64.deb, and Renovate's
+    # update stopped at a 404 that said nothing more; the error now names the assets
+    # that the release has.
+    root = repository(tmp_path, record=RENAMED)
+    asset = "https://github.com/owner/tool/releases/download/v1.1.0/tool_1.1.0_linux"
+
+    def fetch(url: str) -> str:
+        raise pins.PinError([f"{url} could not be downloaded: HTTP Error 404"])
+
+    read = Reads('{"assets": [{"name": "tool"}, {"name": "tool_1.1.0-1_linux"}]}')
+
+    assert pins.main([], root=root, fetch=fetch, read=read) == 2
+
+    assert read.urls == ["https://api.github.com/repos/owner/tool/releases/tags/v1.1.0"]
+    assert capsys.readouterr().err == (
+        f"pins.py: {asset} could not be downloaded: HTTP Error 404\n"
+        "pins.py: The release v1.1.0 of owner/tool has no asset tool_1.1.0_linux, "
+        "only tool, tool_1.1.0-1_linux: give the url of owner/tool in "
+        ".github/pins.toml the new name, with {version} for the version, and the "
+        "files that download it the same name\n"
+    )
+    assert (root / ".github/sign.sh").read_text() == SCRIPT
+    assert (root / ".github/pins.toml").read_text() == RENAMED
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        # The asset is there: the error passed, and is all there is to say.
+        ('{"assets": [{"name": "tool_1.1.0_linux"}]}', ""),
+        # A release without assets.
+        ('{"assets": []}', "has no asset tool_1.1.0_linux, only none:"),
+        # An answer that is no release, or none at all.
+        ('{"message": "Not Found"}', ""),
+        ('{"assets": ["tool"]}', ""),
+        ("not json", ""),
+        (None, ""),
+    ],
+)
+def test_the_assets_of_the_release_are_named_only_when_its_own_is_missing(
+    answer: str | None, expected: str
+) -> None:
+    url = "https://github.com/owner/tool/releases/download/v1.1.0/tool_1.1.0_linux"
+
+    def read(address: str) -> str:
+        if answer is None:
+            raise pins.PinError([f"{address} could not be downloaded: no route"])
+        return answer
+
+    found = pins.renamed("owner/tool", url, read)
+
+    assert [expected in line for line in found] == ([True] if expected else [])
 
 
 # ----------------------------------------------------- the package that an action runs
