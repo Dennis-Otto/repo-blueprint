@@ -1861,6 +1861,80 @@ def test_the_job_stops_when_the_agent_of_harden_runner_stopped(tmp_path: Path) -
     assert f"{DOESNT_BLOCK}has an agent that stopped, so" in result.stdout
 
 
+AGENT_LOG = "home/agent/agent.log"
+# The lines of the agent's log when one lookup of a host that it allows failed, as in
+# the stops of 17 November 2026 (step-security/agent v0.18.1, agent.go 179 to 187).
+REVERTED = "[2026-11-17 09:12:01] Reverted changes\n"
+FAILED_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    "dns.google unable to resolve domain productionresultssa121.blob.core.windows.net."
+    ", status 2"
+)
+UNREACHABLE_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    'dns.google error in response from dns.google Get "https://cloudflare-dns.com/'
+    'dns-query?name=fulcio.sigstore.dev.&type=A": dial tcp 1.1.1.1:443: i/o timeout'
+)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("lookup", "host"),
+    [
+        (FAILED_LOOKUP, "productionresultssa121.blob.core.windows.net"),
+        (UNREACHABLE_LOOKUP, "fulcio.sigstore.dev"),
+    ],
+)
+def test_the_job_stops_at_once_when_one_lookup_took_the_agent_away(
+    tmp_path: Path, lookup: str, host: str
+) -> None:
+    # The agent looks up every host that it allows before its firewall stands, and takes
+    # itself away when one lookup fails (#1006): it writes no status, so the job needn't
+    # wait half a minute for one, and the annotation names the host instead of an
+    # agent that didn't start. The words that the bots look for stay.
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}\n{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        f"lookup of {host}, a host that it allows, failed, which is no outage, so this "
+        f"job {STOPPED}. That is no problem of the change: run the job again."
+    ) in result.stdout
+    assert f"The log of the agent: {lookup}\n" in result.stdout
+    assert "didn't start" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_failed_lookup_without_a_host_in_the_log_still_names_the_cause(
+    tmp_path: Path,
+) -> None:
+    lookup = "[2026-11-17 09:12:01] Error resolving allowed domain unexpected EOF\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        "lookup of a host that it allows failed, which is no outage, so"
+    ) in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_an_agent_that_took_its_changes_back_for_another_cause_keeps_its_words(
+    tmp_path: Path,
+) -> None:
+    # It took them back, as for a DNS server that it couldn't set, and writes no status:
+    # the job stops at once, in the words of an agent that didn't start.
+    log = "[2026-11-17 09:12:01] Error setting DNS server exit status 1\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{log}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert f"{DOESNT_BLOCK}has an agent that didn't start, so" in result.stdout
+    assert "The log of the agent" not in result.stdout
+
+
 def test_a_check_whose_job_blocks_explains_a_harden_runner_that_doesnt() -> None:
     # The PR coach shows the explanation of the check that failed, which would only
     # speak of what the check looks at: one whose job blocks also says what the step
