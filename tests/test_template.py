@@ -7380,6 +7380,10 @@ def test_the_secret_scan_and_the_dependency_review_share_one_workflow(
     answers = (folder / ".bestpractices.json").read_text(encoding="utf-8")
     assert "secret-scan.yml" not in answers
     assert "/.github/workflows/quick-checks.yml" in answers
+    # The rules of the dependency review point at the job that reads them.
+    rules = (folder / ".github/dependency-review.yml").read_text(encoding="utf-8")
+    assert "workflows/dependency-review.yml" not in rules
+    assert ".github/workflows/quick-checks.yml" in rules
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])

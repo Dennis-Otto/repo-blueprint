@@ -32,11 +32,11 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Base commit for the dependency comparison, empty for none"
+        description: "Base commit for the dependency comparison, which needs both commits; empty for none"
         required: false
         type: string
       head_ref:
-        description: "Candidate commit for the dependency comparison, empty for none"
+        description: "Candidate commit for the dependency comparison, which needs both commits; empty for none"
         required: false
         type: string
 
