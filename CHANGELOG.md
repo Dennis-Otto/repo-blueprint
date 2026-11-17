@@ -7,6 +7,25 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.3...v1.20.4) (2026-11-17)
+
+
+### Bug fixes
+
+* a check that GitHub keeps failing says so once, outside the flaky tests ([#988](https://github.com/Dennis-Otto/repo-blueprint/issues/988)) ([9e4c248](https://github.com/Dennis-Otto/repo-blueprint/commit/9e4c24867db15666c9290c88ac532f97f10887e9))
+* **deps:** install krankerl 0.14.3 under the new name of its package ([#986](https://github.com/Dennis-Otto/repo-blueprint/issues/986)) ([ce4d180](https://github.com/Dennis-Otto/repo-blueprint/commit/ce4d180c860c9a9b76a480e879c84ed3cffb2c29))
+* **deps:** let the updates of Playwright and of Renovate merge again ([#989](https://github.com/Dennis-Otto/repo-blueprint/issues/989)) ([1c0dca6](https://github.com/Dennis-Otto/repo-blueprint/commit/1c0dca65e778bc3f775f590133639e85ce500186))
+* **deps:** lock file maintenance ([#979](https://github.com/Dennis-Otto/repo-blueprint/issues/979)) ([4afc0e9](https://github.com/Dennis-Otto/repo-blueprint/commit/4afc0e92187bb995540d528e76282fbb6f0dbd2a))
+* **deps:** lock file maintenance ([#980](https://github.com/Dennis-Otto/repo-blueprint/issues/980)) ([2d1e9b2](https://github.com/Dennis-Otto/repo-blueprint/commit/2d1e9b27d32c8d19c7435ba0d226df7f784d1290))
+* **deps:** refresh pip-compile outputs ([#981](https://github.com/Dennis-Otto/repo-blueprint/issues/981)) ([f6eb380](https://github.com/Dennis-Otto/repo-blueprint/commit/f6eb3804fa8928fbc6475cb442ba95d356f8c8ec))
+* **deps:** update dependency anchore/syft to v1.57.1 ([#974](https://github.com/Dennis-Otto/repo-blueprint/issues/974)) ([5153b31](https://github.com/Dennis-Otto/repo-blueprint/commit/5153b3139d44f8abf50b9ac3d287a4946d685ac0))
+* **deps:** update dependency vimeo/psalm to v7.2.0 ([#976](https://github.com/Dennis-Otto/repo-blueprint/issues/976)) ([905276f](https://github.com/Dennis-Otto/repo-blueprint/commit/905276f5ac905206c9d5559a465660ce98922dd2))
+* **deps:** update the actions ([#978](https://github.com/Dennis-Otto/repo-blueprint/issues/978)) ([c72f7f1](https://github.com/Dennis-Otto/repo-blueprint/commit/c72f7f115835a257f258dfbef745985f9102d998))
+* **deps:** update the images ([#962](https://github.com/Dennis-Otto/repo-blueprint/issues/962)) ([bd5af95](https://github.com/Dennis-Otto/repo-blueprint/commit/bd5af95e9363494c3c9de99a15ba487717f28269))
+* **deps:** update the issue assistant to v1.13.2 ([#984](https://github.com/Dennis-Otto/repo-blueprint/issues/984)) ([c7bb75d](https://github.com/Dennis-Otto/repo-blueprint/commit/c7bb75db9173887e927987cf8d8e48974d24e9e2))
+* **deps:** update the tools of the cloudflare workers ([#975](https://github.com/Dennis-Otto/repo-blueprint/issues/975)) ([fde3234](https://github.com/Dennis-Otto/repo-blueprint/commit/fde3234d65e259342168f3d955112838258c6d24))
+* **screenshots:** count only a change that one sees, and frame only what changed ([#987](https://github.com/Dennis-Otto/repo-blueprint/issues/987)) ([5836389](https://github.com/Dennis-Otto/repo-blueprint/commit/58363894a51ce3ff0c5528f788c5cfb75f4a016b))
+
 ## [1.20.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.2...v1.20.3) (2026-11-16)
 
 ### Bug fixes
