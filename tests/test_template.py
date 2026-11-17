@@ -11241,13 +11241,20 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     project = shutil.copytree(projects[kind], tmp_path / kind)
     # Home Assistant pins packages such as Pillow for the tests of every integration,
     # so a new one accepts what the blueprint accepts in stacks/home-assistant/, in the
-    # root, where its requirements-test.txt is.
+    # root, where its requirements-test.txt is; a new Cloudflare Worker accepts what
+    # the blueprint accepts in stacks/worker/, beside its package-lock.json.
     accepted = project / "osv-scanner.toml"
-    blueprint = (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text("utf-8")
-    assert accepted.is_file() == (kind == "home-assistant")
+    stacks = {
+        "home-assistant": ("home-assistant", "requirements-test.txt"),
+        "cloudflare-worker": ("worker", "package-lock.json"),
+    }
+    assert accepted.is_file() == (kind in stacks)
+    blueprint = ""
     if accepted.is_file():
+        stack, lock = stacks[kind]
+        blueprint = (ROOT / f"stacks/{stack}/osv-scanner.toml").read_text("utf-8")
         assert accepted.read_text(encoding="utf-8") == blueprint
-        assert (project / "requirements-test.txt").is_file()
+        assert (project / lock).is_file()
     # The rules of the blueprint extend those of the project's osv-scanner.toml.
     rules = renovate_rules(
         (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
@@ -11276,6 +11283,48 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# The advisory of picomatch that no version fixes (repo-blueprint#1018), in the lock
+# files of the tools that bring picomatch.
+PICOMATCH = "GHSA-fc5q-39xc-vjpf"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_tools_of_the_prose_accept_only_the_advisory_of_picomatch(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The acceptance beside the lock file of the spelling hint is the blueprint's own,
+    # in every kind of project, where OSV-Scanner reads it.
+    project = projects[kind]
+    accepted = ".github/prose/osv-scanner.toml"
+    blueprint = (ROOT / accepted).read_text(encoding="utf-8")
+    assert (project / accepted).read_text(encoding="utf-8") == blueprint
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert accepted in owned.splitlines()
+
+
+@pytest.mark.parametrize(
+    "config", [".github/prose/osv-scanner.toml", "stacks/worker/osv-scanner.toml"]
+)
+def test_an_advisory_without_a_fix_is_accepted_alone_and_ends(config: str) -> None:
+    # One advisory, by its id, with its reason and an end, after which OSV-Scanner
+    # reports it again; no version with every advisory, which would write a rule of
+    # Renovate that holds back the update that fixes it.
+    data = tomllib.loads((ROOT / config).read_text(encoding="utf-8"))
+    assert set(data) == {"IgnoredVulns"}
+    [entry] = data["IgnoredVulns"]
+    assert entry["id"] == PICOMATCH
+    assert set(entry) == {"id", "ignoreUntil", "reason"}
+    assert entry["ignoreUntil"] - datetime.date(2026, 11, 17) <= datetime.timedelta(
+        days=31
+    )
+    assert "picomatch" in entry["reason"]
+    # The lock file beside it has the package that the advisory names.
+    lock = json.loads((ROOT / config).with_name("package-lock.json").read_text("utf-8"))
+    assert "node_modules/picomatch" in lock["packages"]
+    preset = (ROOT / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
+    assert "picomatch" not in preset
 
 
 def renovate_rules(text: str) -> dict[str, Any]:

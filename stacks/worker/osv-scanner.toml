@@ -1,0 +1,23 @@
+# The advisory that OSV-Scanner accepts in package-lock.json beside this file, the
+# tools of a Cloudflare Worker: OSV-Scanner reads the osv-scanner.toml in the folder of
+# each lock file, and a new Worker gets this file in its root, beside its lock file.
+#
+# An entry of [[IgnoredVulns]] accepts one advisory, by its id, until ignoreUntil, after
+# which OSV-Scanner reports it again and a person looks again; every other advisory
+# still fails the scan. It writes no rule of Renovate, so the update that fixes it
+# comes as any other: delete the entry with it. The job of the Release workflow closes
+# the Dependabot alert with the reason, and the weekly run of OSV-Scanner on main warns
+# two weeks before the date.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+[[IgnoredVulns]]
+# CVE-2026-112366: picomatch, a denial of service by a crafted extglob such as +(*).
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17
+reason = """No version of picomatch fixes the advisory: it names every version up to
+4.0.7, the newest, on 2026-11-17. picomatch comes here with Vitest and Vite, the tools
+of the tests, which match the globs of vitest.config.ts against the files of the
+project, on the machine of a developer and in the job of a pull request, which runs
+the code of that pull request anyway. The Worker that wrangler bundles and deploys
+imports none of it, so nothing of it reaches a user. The refresh of the lock files
+brings a fixed version."""
