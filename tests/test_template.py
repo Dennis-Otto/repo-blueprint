@@ -64,7 +64,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, ownership, screenshots
+from blueprint import bootstrap, diagrams, ownership, screenshots
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -1859,6 +1859,80 @@ def test_the_job_stops_when_the_agent_of_harden_runner_stopped(tmp_path: Path) -
     assert result.returncode == 1
     assert calls == ["systemctl is-active --quiet agent"]
     assert f"{DOESNT_BLOCK}has an agent that stopped, so" in result.stdout
+
+
+AGENT_LOG = "home/agent/agent.log"
+# The lines of the agent's log when one lookup of a host that it allows failed, as in
+# the stops of 17 November 2026 (step-security/agent v0.18.1, agent.go 179 to 187).
+REVERTED = "[2026-11-17 09:12:01] Reverted changes\n"
+FAILED_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    "dns.google unable to resolve domain productionresultssa121.blob.core.windows.net."
+    ", status 2"
+)
+UNREACHABLE_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    'dns.google error in response from dns.google Get "https://cloudflare-dns.com/'
+    'dns-query?name=fulcio.sigstore.dev.&type=A": dial tcp 1.1.1.1:443: i/o timeout'
+)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("lookup", "host"),
+    [
+        (FAILED_LOOKUP, "productionresultssa121.blob.core.windows.net"),
+        (UNREACHABLE_LOOKUP, "fulcio.sigstore.dev"),
+    ],
+)
+def test_the_job_stops_at_once_when_one_lookup_took_the_agent_away(
+    tmp_path: Path, lookup: str, host: str
+) -> None:
+    # The agent looks up every host that it allows before its firewall stands, and takes
+    # itself away when one lookup fails (#1006): it writes no status, so the job needn't
+    # wait half a minute for one, and the annotation names the host instead of an
+    # agent that didn't start. The words that the bots look for stay.
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}\n{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        f"lookup of {host}, a host that it allows, failed, which is no outage, so this "
+        f"job {STOPPED}. That is no problem of the change: run the job again."
+    ) in result.stdout
+    assert f"The log of the agent: {lookup}\n" in result.stdout
+    assert "didn't start" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_failed_lookup_without_a_host_in_the_log_still_names_the_cause(
+    tmp_path: Path,
+) -> None:
+    lookup = "[2026-11-17 09:12:01] Error resolving allowed domain unexpected EOF\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        "lookup of a host that it allows failed, which is no outage, so"
+    ) in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_an_agent_that_took_its_changes_back_for_another_cause_keeps_its_words(
+    tmp_path: Path,
+) -> None:
+    # It took them back, as for a DNS server that it couldn't set, and writes no status:
+    # the job stops at once, in the words of an agent that didn't start.
+    log = "[2026-11-17 09:12:01] Error setting DNS server exit status 1\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{log}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert f"{DOESNT_BLOCK}has an agent that didn't start, so" in result.stdout
+    assert "The log of the agent" not in result.stdout
 
 
 def test_a_check_whose_job_blocks_explains_a_harden_runner_that_doesnt() -> None:
@@ -23299,6 +23373,72 @@ def test_every_project_draws_its_diagrams_as_pictures(
     # The colors of the blueprint's diagrams, the same in every repository.
     for color in ("`#526cfe`", "`#f59e0b`", "`#16a34a`"):
         assert color in contributing, color
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+def test_a_project_warns_of_a_diagram_changed_without_its_pictures(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The check of scripts/check.sh names a source that the branch changed without its
+    # pictures, so that its author draws them before the push, and fails nothing.
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    source = (
+        "flowchart TB\n    accTitle: How a change ships\n"
+        "    accDescr: A pull request merges.\n\n    pr --> main\n"
+    )
+    files = {
+        "docs/diagrams/steps.mmd": source,
+        "docs/images/diagrams/steps.svg": "<svg>\n",
+        "docs/images/diagrams/steps.dark.svg": "<svg dark>\n",
+        "docs/steps.md": "# Steps\n\n"
+        + diagrams.picture("steps", Path("docs/steps.md"), diagrams.alt_text(source)),
+    }
+    for name, text in files.items():
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).write_text(text, encoding="utf-8", newline="\n")
+    git = ["git", "-c", "user.name=T", "-c", "user.email=t@example.com"]
+    for arguments in (
+        ["init", "--quiet", "--initial-branch", "main"],
+        ["config", "core.autocrlf", "false"],
+        ["add", "--all"],
+        ["commit", "--quiet", "--no-gpg-sign", "-m", "Main"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["switch", "--quiet", "-c", "feature"],
+    ):
+        subprocess.run([*git, *arguments], cwd=project, check=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    environment = {**os.environ, "STUBS": stubs.as_posix(), "PYTHONIOENCODING": "utf-8"}
+
+    def check() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            in_bash("scripts/diagrams.sh", "--check"),
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    (project / "docs/diagrams/steps.mmd").write_text(
+        source.replace("--> main", "--> release"), encoding="utf-8", newline="\n"
+    )
+    alone = check()
+    for picture in ("steps.svg", "steps.dark.svg"):
+        (project / "docs/images/diagrams" / picture).write_text(
+            "<svg anew>\n", encoding="utf-8", newline="\n"
+        )
+    drawn = check()
+
+    assert alone.returncode == 0, alone.stdout + alone.stderr
+    assert alone.stdout.startswith(
+        "docs/diagrams/steps.mmd: changed on this branch, but its pictures in"
+        " docs/images/diagrams/ are not\nA warning: "
+    )
+    assert drawn.returncode == 0, drawn.stdout + drawn.stderr
+    assert (
+        drawn.stdout == "Each of the 1 diagram(s) in docs/diagrams/ has its pictures.\n"
+    )
 
 
 def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:

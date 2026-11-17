@@ -5,12 +5,12 @@ config:
 ---
 flowchart TB
     accTitle: A job behind Harden-Runner
-    accDescr: Harden-Runner blocks every host that the job doesn't name. A job that keeps sudo first takes GitHub's DNS experiment out of the way, so that Harden-Runner sees its lookups. When Harden-Runner has no agent that blocks, as when an outage of GitHub kept it from downloading the agent, the job stops with an error that names it, and a bot or you run it again. Otherwise the job asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.
+    accDescr: Harden-Runner blocks every host that the job doesn't name. A job that keeps sudo first takes GitHub's DNS experiment out of the way, so that Harden-Runner sees its lookups. When Harden-Runner has no agent that blocks, as when an outage of GitHub kept it from downloading the agent or one failed lookup made the agent take itself away, the job stops with an error that names the cause, and a bot or you run it again. Otherwise the job asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.
 
     block["Harden-Runner blocks every host<br>that the job doesn't name"]
     dns["With sudo: take GitHub's DNS<br>experiment out of the way"]
     agent{"Does Harden-Runner<br>have an agent that blocks?"}
-    stop["The job stops with an error<br>that names the outage"]
+    stop["The job stops with an error<br>that names the cause"]
     rerun["A bot or you<br>run the job again"]
     warm["The job asks each of its hosts,<br>every 3 s, for 2 minutes at most"]
     steps["The steps of the job"]
@@ -23,7 +23,7 @@ flowchart TB
     block --> dns
     dns --> agent
     agent -- "yes" --> warm
-    agent -- "no, as in an outage of GitHub" --> stop
+    agent -- "no, as in an outage of GitHub<br>or one failed lookup" --> stop
     stop --> rerun
     warm --> steps
     steps --> docker
