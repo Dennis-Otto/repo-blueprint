@@ -310,7 +310,7 @@ jobs:
     name: start the bot-health bot after a failure
     # A job of this run failed at its first attempt: the bot-health bot runs the failed
     # jobs once more when Harden-Runner stopped one of them, as nothing else would run
-    # them again (decisions 0141 and 0175). It doesn't follow the end of this workflow,
+    # them again (decisions 0141 and 0176). It doesn't follow the end of this workflow,
     # so that a run that passed or skipped starts no run of it. At the second attempt,
     # which runs this job again after the failed ones, it starts nothing: each run gets
     # one second try. Not in a fork, whose bot-health bot looks at nothing.

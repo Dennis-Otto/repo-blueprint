@@ -1,7 +1,9 @@
 name: Release
 
-# The release bot. release-please keeps a pull request for the next release, up to
-# date with main. Its version follows from the Conventional Commit titles merged
+# The release bot. release-please keeps a pull request for the next release, rebuilt
+# on main with every merge that changes its notes, and once more when auto-merge is
+# turned on for it or in the daily run, for the merges that change nothing that it
+# releases, such as docs and chore (decision 0175). Its version follows from the Conventional Commit titles merged
 # since the last release (fix: a patch, feat: a minor, ! or BREAKING CHANGE: a major
 # version) and is decided anew with every merge. What the pull requests wrote in the
 # fragments of changelog.d/ and under "## Unreleased" of CHANGELOG.md becomes the
@@ -241,20 +243,33 @@ jobs:
           # main. A marker after the footer of the description makes it rebuild the pull
           # request on main; the notes above stay as they are, since release-please reads
           # them from a merged release pull request to create the release.
+          # Such a merge changes nothing that the pull request releases, so the marker
+          # waits until the pull request is about to merge: when auto-merge is on for it,
+          # or in the daily run and a run started by hand, which the branch bot starts
+          # once auto-merge is turned on. A merge that changes the notes, a feat, fix or
+          # perf, still rebuilds it at once, by release-please itself (decision 0175).
           set -euo pipefail
           gh pr list --state open --label "autorelease: pending" --json number,headRefName \
             --jq '.[] | "\(.number) \(.headRefName)"' |
             while read -r number branch; do
-              # The list can lag behind a merge: only a pull request still open is rebuilt.
-              if [[ "$(gh pr view "$number" --json state --jq .state)" != OPEN ]]; then
+              # The list can lag behind a merge: only a pull request still open is rebuilt,
+              # and whether auto-merge is on comes from the same look.
+              view="$(gh pr view "$number" --json state,autoMergeRequest \
+                --jq '"\(.state) \(.autoMergeRequest != null)"')"
+              if [[ "${view% *}" != OPEN ]]; then
                 continue
               fi
               behind="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/compare/main...$branch" --jq .behind_by)"
-              if [[ "$behind" != 0 ]]; then
-                echo "#$number is $behind commit(s) behind main; release-please rebuilds it."
-                body="$(gh pr view "$number" --json body --jq .body)"
-                gh pr edit "$number" --body "$(printf '%s\n\n%s\n' "$body" "<!-- The release bot rebuilds this pull request on the current main. -->")"
+              if [[ "$behind" == 0 ]]; then
+                continue
               fi
+              if [[ "${view#* }" != true && "$GITHUB_EVENT_NAME" == push ]]; then
+                echo "#$number is $behind commit(s) behind main. release-please rebuilds it now if this merge changes its notes; otherwise once auto-merge is on for it, or in the daily run."
+                continue
+              fi
+              echo "#$number is $behind commit(s) behind main; release-please rebuilds it."
+              body="$(gh pr view "$number" --json body --jq .body)"
+              gh pr edit "$number" --body "$(printf '%s\n\n%s\n' "$body" "<!-- The release bot rebuilds this pull request on the current main. -->")"
             done
       # A merged release pull request: its tag comes first, signed, and release-please
       # creates the release on it. Every run looks, not only the push of the merge, so

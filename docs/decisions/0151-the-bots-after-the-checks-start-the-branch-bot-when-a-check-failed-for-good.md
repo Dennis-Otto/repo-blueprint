@@ -1,6 +1,6 @@
 # The bots after the checks start the branch bot when a check failed for good
 
-- Status: accepted, amended by [0175](0175-the-bots-of-events-start-the-bot-health-bot-after-a-failure.md), with which the bots of events start the bot-health bot themselves, so that its list takes the filter `branches:` after all
+- Status: accepted, amended by [0176](0176-the-bots-of-events-start-the-bot-health-bot-after-a-failure.md), with which the bots of events start the bot-health bot themselves, so that its list takes the filter `branches:` after all
 - Date: 2026-11-13
 
 ## Context

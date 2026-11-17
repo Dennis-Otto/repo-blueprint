@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.parse
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -216,6 +217,8 @@ class FakeGitHub:
         self.dispatched: list[Any] = []
         # The workflows of other bots that the bot started, with what it sent.
         self.started: list[tuple[str, Any]] = []
+        # The runs of the release bot, each with the time that GitHub created it.
+        self.release_runs: list[dict[str, Any]] = []
         # How often GitHub still shows the old head after it took an update.
         self.looks_until_moved: dict[int, int] = {}
         # The token of the job may read the runs, and so may a person. The token of the
@@ -298,6 +301,16 @@ class FakeGitHub:
         )
         if method == "GET" and found:
             runs = self.runs.get(found[1], [])
+            return 200, {"total_count": len(runs), "workflow_runs": runs}
+        found = re.fullmatch(
+            rf"{own}/actions/workflows/release\.yml/runs\?created=([^&]+)&per_page=100",
+            path,
+        )
+        if method == "GET" and found:
+            since = urllib.parse.unquote(found[1])
+            assert since.startswith(">="), since
+            since = since.removeprefix(">=")
+            runs = [run for run in self.release_runs if run["created_at"] >= since]
             return 200, {"total_count": len(runs), "workflow_runs": runs}
         found = re.fullmatch(rf"{own}/actions/runs/(\d+)/approve", path)
         if method == "POST" and found:
@@ -611,7 +624,7 @@ def test_only_pull_requests_that_wait_for_auto_merge_count() -> None:
     github = FakeGitHub(
         pull(1, enabled=None),
         pull(2, cross=True, enabled=None),
-        pull(3, branch="release-please--branches--main--components--demo"),
+        pull(3, branch="release-please--branches--main", enabled=None),
         pull(4, enabled=LATEST),
     )
     github.behind = {1: 1, 2: 1, 3: 1, 4: 1}
@@ -793,6 +806,153 @@ def test_a_fork_whose_branch_has_the_name_of_a_bot_waits_for_a_person() -> None:
     assert github.started == []
     assert github.added == [1]
     assert "waits for a person" in notes(summary)[1]
+
+
+# --------------------------------------------------------------- the release pull request
+
+RELEASE = "release-please--branches--main"
+
+
+def a_release_run(created: str, status: str = "in_progress") -> dict[str, Any]:
+    """A run of the release bot as GitHub lists it."""
+    return {"id": 99, "created_at": created, "status": status, "event": "push"}
+
+
+def test_turning_auto_merge_on_for_a_release_behind_main_starts_the_release_bot() -> (
+    None
+):
+    # A docs or chore merge left the release pull request behind main, and its notes as
+    # they were: turning auto-merge on is when it has to be rebuilt (decision 0175).
+    github = FakeGitHub(
+        pull(3, branch=RELEASE, enabled=LATER, author="app/demo-release"),
+        pull(4, enabled=EARLY),
+    )
+    github.behind = {3: 2, 4: 1}
+    # The run of the push before auto-merge may have passed its marker already.
+    github.release_runs = [a_release_run(EARLY)]
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.started == [("release.yml", {"ref": "main"})]
+    # The bot never updates the branch of the release pull request, and the line goes
+    # on without it.
+    assert [number for number, _ in github.updated] == [4]
+    assert github.added == []
+    assert notes(summary)[3] == (
+        "2 commits behind `main`: the bot started `release.yml`, which builds it anew "
+        "on `main`, and its checks run then."
+    )
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        pytest.param([a_release_run(LATEST)], id="the run of a later merge runs"),
+        pytest.param([a_release_run(LATER, "queued")], id="a later run is queued"),
+    ],
+)
+def test_a_run_of_the_release_bot_since_auto_merge_rebuilds_it_alone(
+    runs: list[dict[str, Any]],
+) -> None:
+    # Once auto-merge is on, every run of the release bot rebuilds its pull request, as
+    # the one of a merge into main that started the branch bot too.
+    github = FakeGitHub(pull(3, branch=RELEASE, enabled=LATER))
+    github.behind = {3: 1}
+    github.release_runs = runs
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.started == []
+    assert github.updated == []
+    assert notes(summary)[3] == (
+        "1 commit behind `main`: the run of `release.yml` that started since auto-merge "
+        "was turned on builds it anew on `main`."
+    )
+
+
+def test_a_run_of_the_release_bot_that_ended_leaves_the_start_to_the_bot() -> None:
+    # A run that ended and left it behind main failed, or a merge came after it.
+    github = FakeGitHub(pull(3, branch=RELEASE, enabled=LATER))
+    github.behind = {3: 1}
+    github.release_runs = [a_release_run(LATEST, "completed")]
+
+    with_job(github)
+
+    assert github.started == [("release.yml", {"ref": "main"})]
+
+
+def test_a_dependency_release_that_the_release_bot_set_to_merge_is_up_to_date() -> None:
+    # Decision 0087: the daily run, or the push of a fix of a vulnerability, rebuilds the
+    # release of dependency updates before it turns auto-merge on as the release app,
+    # which starts the branch bot: that release merges once its checks pass, without a
+    # second run of the release bot.
+    github = FakeGitHub(
+        pull(3, branch=RELEASE, enabled=LATER, author="app/demo-release")
+    )
+    github.behind = {3: 0}
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.started == []
+    assert github.updated == []
+    assert notes(summary)[3] == (
+        "up to date with `main`, and the release bot keeps it so: auto-merge merges it "
+        "once its checks pass."
+    )
+    # Nothing about the runs of the release bot needs asking.
+    assert not any("/actions/" in path for _, path in github.calls)
+
+
+def test_a_release_that_conflicts_is_rebuilt_and_gets_no_label() -> None:
+    github = FakeGitHub(pull(3, branch=RELEASE, mergeable="CONFLICTING"))
+    github.behind = {3: 4}
+
+    summary, _ = with_job(github)
+
+    assert github.started == [("release.yml", {"ref": "main"})]
+    assert github.added == []
+    assert github.comments == {}
+    assert "the bot started `release.yml`" in notes(summary)[3]
+
+
+def test_a_person_starts_the_release_bot_for_a_release_behind_main() -> None:
+    github = FakeGitHub(pull(3, branch=RELEASE))
+    github.behind = {3: 1}
+
+    summary, warnings = bot(github)
+
+    assert warnings == []
+    assert github.started == []
+    assert github.updated == []
+    assert notes(summary)[3] == (
+        "1 commit behind `main`: start `release.yml` on `main`, which builds it anew on "
+        "it."
+    )
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_a_refused_request_about_the_release_is_a_warning(method: str) -> None:
+    github = FakeGitHub(pull(3, branch=RELEASE, enabled=LATER), pull(4, enabled=LATEST))
+    github.behind = {3: 1, 4: 1}
+    path = (
+        f"repos/{REPO}/actions/workflows/release.yml/runs"
+        f"?created=%3E%3D{urllib.parse.quote(LATER)}&per_page=100"
+        if method == "GET"
+        else f"repos/{REPO}/actions/workflows/release.yml/dispatches"
+    )
+    github.fail[(method, path)] = 403
+
+    summary, warnings = with_job(github)
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("::warning::The branch bot couldn't handle #3: ")
+    assert "GitHub refused a request" in notes(summary)[3]
+    assert github.started == []
+    # The next one of the line moves on all the same.
+    assert [number for number, _ in github.updated] == [4]
 
 
 def test_the_label_goes_once_github_finds_no_conflict() -> None:
@@ -1412,6 +1572,7 @@ def test_the_name_of_a_forks_branch_makes_it_no_bot_of_this_repository() -> None
     summary, _ = with_job(github)
 
     assert [number for number, _ in github.updated] == [7]
+    assert github.started == []
     # A conflict of a fork is one for its author, whatever its branch is called.
     assert github.added == [8]
     assert "it has the label" in notes(summary)[8]

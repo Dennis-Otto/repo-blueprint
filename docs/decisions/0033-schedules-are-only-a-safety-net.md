@@ -1,6 +1,6 @@
 # Bots start from events, and their schedules are only a safety net
 
-- Status: accepted, amended by [0128](0128-the-sync-bot-looks-for-a-release-of-the-issue-assistant-every-hour.md), with which the sync bot of the issue assistant looks on an hourly schedule, since no event of another repository can start it
+- Status: accepted, amended by [0128](0128-the-sync-bot-looks-for-a-release-of-the-issue-assistant-every-hour.md), with which the sync bot of the issue assistant looks on an hourly schedule, since no event of another repository can start it, and by [0175](0175-the-release-pull-request-is-rebuilt-once-before-it-merges.md), with which the release pull request stays current with every merge that changes its notes, and is rebuilt for any other once auto-merge is on for it
 - Date: 2026-10-18
 
 ## Context

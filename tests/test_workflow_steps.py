@@ -1319,11 +1319,30 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
 
 
 @pytest.mark.parametrize(
-    ("state", "behind", "rebuilt"),
-    [("OPEN", "3", True), ("OPEN", "0", False), ("MERGED", None, False)],
+    ("state", "behind", "merging", "event", "rebuilt"),
+    [
+        # Auto-merge on: every run rebuilds it, so that it can merge.
+        ("OPEN", "3", True, "push", True),
+        # A merge that changes nothing that it releases leaves it behind main; one that
+        # changes its notes has it rebuilt by release-please itself (decision 0175).
+        ("OPEN", "3", False, "push", False),
+        # The daily run, which merges a release of dependency updates (decision 0087),
+        # and a run by hand, such as the one that the branch bot starts once auto-merge
+        # is turned on.
+        ("OPEN", "3", False, "schedule", True),
+        ("OPEN", "3", False, "workflow_dispatch", True),
+        ("OPEN", "0", True, "push", False),
+        ("OPEN", "0", False, "schedule", False),
+        ("MERGED", None, True, "schedule", False),
+    ],
 )
-def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
-    tmp_path: Path, state: str, behind: str | None, rebuilt: bool
+def test_the_release_pull_request_is_rebuilt_when_it_is_behind_main_and_about_to_merge(
+    tmp_path: Path,
+    state: str,
+    behind: str | None,
+    merging: bool,
+    event: str,
+    rebuilt: bool,
 ) -> None:
     branch = "release-please--branches--main"
     done = run_step(
@@ -1336,14 +1355,19 @@ def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
                 r"pr list --state open --label autorelease: pending .*",
                 f"21 {branch}\n",
             ),
-            exact("pr view 21 --json state --jq .state", f"{state}\n"),
+            # Its state and whether auto-merge is on, in one look.
+            exact(
+                "pr view 21 --json state,autoMergeRequest"
+                r' --jq "\(.state) \(.autoMergeRequest != null)"',
+                f"{state} {str(merging).lower()}\n",
+            ),
             exact(
                 f"api repos/o/r/compare/main...{branch} --jq .behind_by", f"{behind}\n"
             ),
             exact("pr view 21 --json body --jq .body", "The notes\n"),
             Answer(r"pr edit 21 --body .*"),
         ],
-        env={"GH_TOKEN": "app-token"},
+        env={"GH_TOKEN": "app-token", "GITHUB_EVENT_NAME": event},
     )
 
     assert done.returncode == 0, done.stderr
@@ -1357,6 +1381,32 @@ def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
         if rebuilt
         else []
     )
+    # One that waits says why, so that the log of the run explains it.
+    waits = behind == "3" and not rebuilt
+    assert ("once auto-merge is on for it, or in the daily run" in done.stdout) == waits
+
+
+def test_a_failed_look_at_the_release_pull_request_fails_the_run(
+    tmp_path: Path,
+) -> None:
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        "Have the release pull request rebuilt on the current main",
+        answers=[
+            Answer(
+                r"pr list --state open --label autorelease: pending .*",
+                "21 release-please--branches--main\n",
+            ),
+            Answer(r"pr view 21 --json state,autoMergeRequest .*", code=1),
+        ],
+        env={"GH_TOKEN": "app-token", "GITHUB_EVENT_NAME": "push"},
+    )
+
+    assert done.returncode != 0
+    assert done.called("api repos/o/r/compare") == []
+    assert done.called("pr edit") == []
 
 
 OVERRIDES = "Give release-please the title of each merged pull request"

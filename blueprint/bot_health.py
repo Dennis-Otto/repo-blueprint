@@ -14,7 +14,7 @@ try nor an issue, unless Harden-Runner stopped a job of their first attempt: the
 their failed jobs run once more (decision 0141). Their last job starts this bot with
 the run when a job of theirs failed at the first attempt, and the other watched
 workflows start it for their runs of main and of the tags of releases alone, so that
-no run of a pull request starts it (decision 0175).
+no run of a pull request starts it (decision 0176).
 Once a day it looks at the latest run of every workflow, those of the project too,
 in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or
 switched off. A failure of Lint, which main runs only each week, counts only at the
@@ -23,7 +23,7 @@ couldn't start, as in its outage of 9 November 2026, is no failure of the bot: i
 starts nothing, and the daily look runs it again once (decision 0136). Nothing
 follows the end of this bot itself, so the daily look also runs the failed jobs of
 its own runs once more that Harden-Runner stopped (decision 0141), and those of a bot
-of events whose last job didn't start this bot (decision 0175). The same look
+of events whose last job didn't start this bot (decision 0176). The same look
 keeps one issue open while the social preview that GitHub shows is not the committed
 .github/social-preview.png, which only a person can upload; its label is manual-step,
 not bot-failure, since nothing fails there. It also ticks the box for a rebase of a
@@ -121,7 +121,7 @@ EVENT_BOTS = frozenset({"Area labels", "Commands", "Dependabot maintenance", "We
 # The workflows whose last job starts this bot by hand with its run, while that run
 # still ends, when a job of their first attempt failed: their end starts no run of the
 # bot, so that a run that passed or skipped, of which nearly every one is, starts
-# nothing (decision 0175). The bot waits for the end of the run up to LOOKS times PAUSE
+# nothing (decision 0176). The bot waits for the end of the run up to LOOKS times PAUSE
 # seconds, which covers the steps that end the last job, and leaves a run that takes
 # longer to the daily look.
 LAST_JOB = EVENT_BOTS | OWN_ISSUE
@@ -1322,7 +1322,7 @@ def published_release(
     published by hand or with a token, of the days back to STOPPED_SINCE. Its end
     starts this bot by the tag of the release, which the filter v* of the branches of
     bot-health.yml takes; should GitHub ever not match the tag, this look gives the run
-    its second try or its issue instead, a day late (decision 0175). A run whose end
+    its second try or its issue instead, a day late (decision 0176). A run whose end
     the bot looked at already is looked at the same way again: its issue has the run,
     and a pass closes nothing more."""
     listed = api.get(
@@ -1374,7 +1374,7 @@ def stopped_bots(
     one ran again: their last job starts this bot, but nothing else gives them their
     second try when Harden-Runner stopped that job too, when it stopped the run of
     this bot, or when GitHub refused the start, as it may for a run that Dependabot
-    started, whose token may only read (decision 0175). Of every branch, as theirs run
+    started, whose token may only read (decision 0176). Of every branch, as theirs run
     for pull requests too, but not of the event pull_request: none of them runs on it,
     so such a run is a fork's workflow that only took the name of one of them."""
     since = (now - STOPPED_SINCE).strftime("%Y-%m-%dT%H:%M:%SZ")
