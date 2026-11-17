@@ -1,6 +1,6 @@
 # Write the changelog in the pull requests, and let the release bot assemble it
 
-- Status: accepted
+- Status: accepted, amended by [0175](0175-the-release-pull-request-is-rebuilt-once-before-it-merges.md), with which a merge that changes nothing that the release pull request releases rebuilds it only once auto-merge is on for it, or in the daily run and a run by hand
 - Date: 2026-10-07
 
 ## Context
