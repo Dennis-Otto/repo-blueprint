@@ -39,9 +39,10 @@ from blueprint.checklist import (
     social_preview,
     social_preview_uploaded,
 )
-from blueprint.github import Api, GitHubError, Response, current_repo
+from blueprint.github import Api, GitHubError, Response, current_repo, error_details
 from blueprint.outage import CHECK_UNAVAILABLE
 from blueprint.settings import (
+    ACTIONS_APP,
     BATCH,
     MAIN_ONLY,
     ConfigError,
@@ -349,6 +350,29 @@ def ruleset_problems(body: Any) -> list[str]:
     return problems
 
 
+# What GitHub answered on 17 November 2026 to the settings of a repository that hadn't
+# installed the release app (repo-blueprint#1030): a ruleset with the app as its
+# bypass actor, and a variable with an empty value.
+ACTOR_REFUSED = {
+    "message": "Validation Failed",
+    "errors": [
+        "Actor Dennis Otto Release Automation integration must be part of the ruleset"
+        " source or owner organization"
+    ],
+    "documentation_url": (
+        "https://docs.github.com/rest/repos/rules#create-a-repository-ruleset"
+    ),
+    "status": "422",
+}
+EMPTY_REFUSED = {
+    "message": "Variable value cannot be empty.",
+    "documentation_url": (
+        "https://docs.github.com/rest/actions/variables#update-a-repository-variable"
+    ),
+    "status": "422",
+}
+
+
 class FakeGitHub:
     """The parts of GitHub's API that blueprint.py uses, kept in memory."""
 
@@ -399,6 +423,11 @@ class FakeGitHub:
         self.file_queries: list[dict[str, str]] = []
         self.fork_approval = "first_time_contributors"
         self.rulesets: dict[int, dict[str, Any]] = {}
+        # The apps installed on the repository, by their IDs, which alone GitHub
+        # takes as the bypass actor of a ruleset; None takes every app.
+        self.installed: set[int] | None = None
+        # The files of the default branch of the repository itself.
+        self.files: set[str] = set()
         # The rulesets of the organization above, by their ids, which the list names
         # unless it asks without its parents, and which the repository can't change.
         self.parent_rulesets: dict[int, dict[str, Any]] = {}
@@ -547,12 +576,18 @@ class FakeGitHub:
             (r"/issues", self.issue_list),
             (r"/pulls", self.pull_list),
             (r"/actions/workflows", self.workflow_list),
+            (r"/contents/(.+)", self.file),
         ):
             match = re.fullmatch(pattern, path)
             if match:
                 result: tuple[int, Any] = handler(method, body, *match.groups())
                 return result
         raise AssertionError(f"unexpected request {method} {path}")
+
+    def file(self, method: str, body: Any, path: str) -> tuple[int, Any]:
+        if path in self.files:
+            return 200, {"type": "file", "path": path}
+        return 404, {"message": "Not Found"}
 
     def issue_list(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.issues
@@ -683,6 +718,14 @@ class FakeGitHub:
         problems = ruleset_problems(body)
         if problems:
             return 422, {"message": "Invalid request.", "errors": problems}
+        if any(
+            actor["actor_type"] == "Integration"
+            and self.installed is not None
+            and actor["actor_id"] not in self.installed
+            for actor in body["bypass_actors"]
+        ):
+            # As GitHub answered for an app that the repository hasn't installed.
+            return 422, ACTOR_REFUSED
         if method == "POST":
             self.rulesets[self.next_id] = body
             self.next_id += 1
@@ -732,6 +775,11 @@ class FakeGitHub:
             if name in self.variables:
                 return 200, {"name": name, "value": self.variables[name]}
             return 404, {"message": "Not Found"}
+        if method == "DELETE":
+            del self.variables[str(name)]
+            return 204, None
+        if not body["value"]:
+            return 422, EMPTY_REFUSED
         self.variables[body["name"]] = body["value"]
         return 201, None
 
@@ -948,8 +996,15 @@ def test_a_refused_part_does_not_stop_the_others(
     assert github.pages is not None
     assert github.labels["release"]["color"] == "5319e7"
     err = capsys.readouterr().err
-    assert "the variables could not be applied: GitHub answered 403" in err
-    assert "the permission Variables (read and write)" in err
+    assert "GitHub refused some of the variables, and took the others:" in err
+    assert (
+        "  variable RELEASE_AUTOMATION_CLIENT_ID: refused: GitHub answered 403:"
+        " simulated failure; the token may lack the permission Variables (read and"
+        " write)\n"
+    ) in err
+    # The variables after the refused one are set all the same.
+    assert "  variable REVIEWS_OF_MAIN: set\n" in err
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
 
 
 def test_a_refused_part_without_a_permission_hint(
@@ -1044,8 +1099,12 @@ def test_a_write_that_github_answers_with_404_is_refused_with_the_hint(
     assert run(github, root, "settings", "apply") == 2
 
     err = capsys.readouterr().err
-    assert "the variables could not be applied: GitHub answered 404" in err
-    assert "the permission Variables (read and write)" in err
+    assert (
+        "  variable PUBLISH_TO: refused: GitHub answered 404: simulated failure; the"
+        " token may lack the permission Variables (read and write)"
+    ) in err
+    # The variable that GitHub had already is set all the same.
+    assert "  variable RELEASE_AUTOMATION_CLIENT_ID: set" in err
 
 
 @pytest.mark.parametrize(
@@ -1217,7 +1276,7 @@ def test_the_order_of_the_rules_and_the_checks_is_no_difference() -> None:
     have = json.loads(json.dumps(main_ruleset(["a", "b"])))
     have["rules"].reverse()
 
-    assert ruleset_differences(want, have) == []
+    assert ruleset_differences(want, have) == {}
 
 
 @pytest.mark.parametrize("source", [{}, {"integration_id": 99999}])
@@ -1236,7 +1295,7 @@ def test_a_required_check_of_another_source_is_a_difference(
     )
     checks[1] = {"context": checks[1]["context"], **source}
 
-    assert ruleset_differences(want, have) == [
+    assert list(ruleset_differences(want, have)) == [
         "required_status_checks.required_status_checks"
     ]
 
@@ -1396,14 +1455,18 @@ def test_a_new_alert_of_code_scanning_stops_the_merge() -> None:
 def test_the_order_of_the_tools_of_code_scanning_is_no_difference() -> None:
     want = main_ruleset(["a"], [CODEQL, ZIZMOR])
     have = json.loads(json.dumps(main_ruleset(["a"], [ZIZMOR, CODEQL])))
-    assert ruleset_differences(want, have) == []
+    assert ruleset_differences(want, have) == {}
 
     have["rules"][-1]["parameters"]["code_scanning_tools"][0]["alerts_threshold"] = (
         "errors"
     )
-    assert ruleset_differences(want, have) == ["code_scanning.code_scanning_tools"]
+    assert list(ruleset_differences(want, have)) == [
+        "code_scanning.code_scanning_tools"
+    ]
     have["rules"].pop()
-    assert ruleset_differences(want, have) == ["rule code_scanning is missing"]
+    assert ruleset_differences(want, have) == {
+        "rule code_scanning": ("present", "missing")
+    }
 
 
 def test_a_tool_of_the_project_replaces_that_of_the_blueprint(root: Path) -> None:
@@ -3099,13 +3162,17 @@ def test_ruleset_differences_name_each_part() -> None:
     del have["rules"][0]
     have["rules"].append({"type": "update"})
 
-    assert ruleset_differences(want, have) == [
-        "enforcement",
-        "rule deletion is missing",
-        "pull_request.required_approving_review_count",
-        "required_status_checks.required_status_checks",
-        "rule update is extra",
-    ]
+    # Each key, with what the configuration wants and what GitHub has.
+    assert ruleset_differences(want, have) == {
+        "enforcement": ("active", "evaluate"),
+        "rule deletion": ("present", "missing"),
+        "pull_request.required_approving_review_count": (0, 1),
+        "required_status_checks.required_status_checks": (
+            [{"context": name, "integration_id": ACTIONS_APP} for name in ["a", "b"]],
+            [{"context": "a"}],
+        ),
+        "rule update": ("absent", "present"),
+    }
 
 
 def test_a_ruleset_without_its_bypass_list_matches() -> None:
@@ -3114,10 +3181,12 @@ def test_a_ruleset_without_its_bypass_list_matches() -> None:
     want = main_ruleset(["a"])
     have = json.loads(json.dumps(want))
     del have["bypass_actors"]
-    assert ruleset_differences(want, have) == []
+    assert ruleset_differences(want, have) == {}
 
     have["bypass_actors"] = [{"actor_type": "OrganizationAdmin"}]
-    assert ruleset_differences(want, have) == ["bypass_actors"]
+    assert ruleset_differences(want, have) == {
+        "bypass_actors": ([], [{"actor_type": "OrganizationAdmin"}])
+    }
 
 
 def test_the_tag_ruleset_leaves_major_tags_free() -> None:
@@ -3312,6 +3381,324 @@ def test_the_reviews_of_main_come_and_go_with_the_settings(
     assert github.variables["REVIEWS_OF_MAIN"] == "off"
 
 
+# ---------------------------------------------------------------- refusals (#1030)
+# A live run of the settings against a repository that hadn't installed the release
+# app, on 17 November 2026: GitHub refused the app as the bypass actor of a ruleset,
+# and a variable with an empty value (ACTOR_REFUSED and EMPTY_REFUSED).
+
+ACTOR_HINT = (
+    "GitHub takes an app as the bypass actor of a ruleset only where the app is"
+    " installed: install the release app of RELEASE_AUTOMATION_APP_ID on the"
+    ' repository, or, for a repository without it, set RELEASE_AUTOMATION_APP_ID = ""'
+    " under [variables] in .github/repository.project.toml"
+)
+# The settings of the live run with reviews and without the App ID of the release
+# app, which GitHub refuses as a bypass actor there.
+WITHOUT_APP_ID = (
+    '[branch]\nrequired_approvals = 1\n\n[variables]\nRELEASE_AUTOMATION_APP_ID = ""\n'
+)
+
+
+def ruleset_names(github: FakeGitHub) -> list[str]:
+    return [ruleset["name"] for ruleset in github.rulesets.values()]
+
+
+def test_github_says_why_it_refused_a_request() -> None:
+    errors: list[Any] = [
+        "Variable value cannot be empty.",
+        {"code": "custom", "message": "Name is reserved"},
+        {"resource": "Label", "code": "already_exists", "field": "name"},
+        {"code": "invalid"},
+        7,
+    ]
+
+    assert error_details({"message": "Validation Failed", "errors": errors}) == [
+        "Variable value cannot be empty.",
+        "Name is reserved",
+        "name already_exists",
+        "invalid",
+    ]
+    assert error_details({"message": "Not Found"}) == []
+    assert error_details("Bad Gateway") == []
+    assert str(GitHubError(422, "Validation Failed", (), ["a", "b"])) == (
+        "GitHub answered 422: Validation Failed (a; b)"
+    )
+
+
+def test_a_refused_ruleset_says_why(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_app_id(root)
+    github.installed = set()
+
+    assert run(github, root, "settings", "apply") == 2
+
+    err = capsys.readouterr().err
+    assert (
+        "blueprint.py: GitHub refused some of the rulesets, and took the others:\n"
+        in err
+    )
+    assert "  ruleset Protect main: created\n" in err
+    assert "  ruleset Release tags: created\n" in err
+    assert (
+        "  ruleset Release tag creation: refused: GitHub answered 422: Validation"
+        " Failed (Actor Dennis Otto Release Automation integration must be part of"
+        f" the ruleset source or owner organization); {ACTOR_HINT}\n"
+    ) in err
+    assert ruleset_names(github) == ["Protect main", "Release tags"]
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
+
+    # Again: the refusal stays, and the variable that GitHub has already stays.
+    assert run(github, root, "settings", "apply") == 2
+    assert ruleset_names(github) == ["Protect main", "Release tags"]
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
+
+
+def test_a_refused_ruleset_keeps_no_unwanted_one(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.installed = set()
+    (root / ".github/repository.project.toml").write_text(
+        WITHOUT_APP_ID, encoding="utf-8"
+    )
+    with_app_id(root)
+    run(github, root, "settings", "apply")
+    assert "Reviews of main" in ruleset_names(github)
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+
+    # Back to no reviews, with the App ID, which GitHub refuses again.
+    (root / ".github/repository.project.toml").unlink()
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 2
+
+    assert ruleset_names(github) == ["Protect main", "Release tags"]
+    err = capsys.readouterr().err
+    assert "  ruleset Reviews of main: deleted\n" in err
+    assert "  ruleset Release tag creation: refused: GitHub answered 422" in err
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
+
+
+def test_the_variable_of_the_reviews_says_what_github_has(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    with_app_id(root)
+    github.installed = set()
+
+    assert run(github, root, "settings", "apply") == 2
+
+    # GitHub refused Reviews of main, so the bots after the checks don't start the
+    # branch bot for reviews that main doesn't require.
+    assert "Reviews of main" not in ruleset_names(github)
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
+    assert (
+        'variable REVIEWS_OF_MAIN: GitHub has "off", the configuration wants "on"'
+    ) in capsys.readouterr().out
+
+
+def test_the_variable_of_the_reviews_stays_on_while_their_ruleset_does(
+    github: FakeGitHub, root: Path
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    run(github, root, "settings", "apply")
+    (number,) = [
+        key
+        for key, ruleset in github.rulesets.items()
+        if ruleset["name"] == "Reviews of main"
+    ]
+    github.fail[("DELETE", f"repos/{REPO}/rulesets/{number}")] = 422
+
+    with_reviews(root, "required_approvals = 0")
+
+    assert run(github, root, "settings", "apply") == 2
+    assert "Reviews of main" in ruleset_names(github)
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+
+
+def test_the_variable_of_the_reviews_stays_while_the_rulesets_are_unknown(
+    github: FakeGitHub, root: Path, waits: list[float]
+) -> None:
+    github.variables["REVIEWS_OF_MAIN"] = "on"
+    limit = (403, "API rate limit exceeded for user ID 1.")
+    github.fail[("POST", f"repos/{REPO}/rulesets")] = limit
+
+    assert run(github, root, "settings", "apply") == 2
+
+    # The rate limit ended the rulesets: what GitHub has is unknown, so the
+    # variable stays as it was, and the next run sets both.
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+    assert github.variables["PUBLISH_TO"] == "pypi"
+
+
+def test_a_private_repository_without_rulesets_wants_no_reviews_of_the_bots(
+    github: FakeGitHub, root: Path
+) -> None:
+    github.repo["private"] = True
+    listing = f"repos/{REPO}/rulesets?includes_parents=false&per_page=100"
+    github.fail[("GET", listing)] = (403, RULESETS_REFUSAL)
+    with_reviews(root, "required_approvals = 1")
+
+    run(github, root, "settings", "apply")
+
+    assert github.variables["REVIEWS_OF_MAIN"] == "off"
+
+
+def test_a_variable_of_the_reviews_set_by_the_project_stays(
+    github: FakeGitHub, root: Path
+) -> None:
+    (root / ".github/repository.project.toml").write_text(
+        '[variables]\nREVIEWS_OF_MAIN = "on"\n', encoding="utf-8"
+    )
+    with_app_id(root)
+    github.installed = set()
+
+    assert run(github, root, "settings", "apply") == 2
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+
+
+def test_github_refusing_every_variable_alike_is_said_once(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.fail[("POST", f"repos/{REPO}/actions/variables")] = 403
+    variable = f"repos/{REPO}/actions/variables/RELEASE_AUTOMATION_CLIENT_ID"
+    github.fail[("PATCH", variable)] = 403
+
+    assert run(github, root, "settings", "apply") == 2
+
+    err = capsys.readouterr().err
+    assert (
+        "blueprint.py: the variables could not be applied: GitHub answered 403:"
+        " simulated failure; the token may lack the permission Variables (read and"
+        " write)\n"
+    ) in err
+    assert "took the others" not in err
+
+
+def test_a_repository_without_the_release_app_says_so(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.installed = set()
+    with_app_id(root)
+    run(github, root, "settings", "apply")
+    assert github.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
+    # An empty value says that the repository has no such variable.
+    (root / ".github/repository.project.toml").write_text(
+        '[branch]\nrequired_approvals = 1\n\n[variables]\nRELEASE_APP = ""\n'
+        'RELEASE_AUTOMATION_CLIENT_ID = ""\nRELEASE_AUTOMATION_APP_ID = ""\n',
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 0
+    assert run(github, root, "settings", "check") == 0
+
+    # GitHub never got an empty value, which it refuses, and no app to let past.
+    assert "RELEASE_AUTOMATION_APP_ID" not in github.variables
+    assert "RELEASE_AUTOMATION_CLIENT_ID" not in github.variables
+    assert "RELEASE_APP" not in github.variables
+    (reviews,) = [
+        ruleset
+        for ruleset in github.rulesets.values()
+        if ruleset["name"] == "Reviews of main"
+    ]
+    assert reviews["bypass_actors"] == []
+    assert "Release tag creation" not in ruleset_names(github)
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
+    # Nor does the environment release ask for the private key of an app.
+    assert github.environments["release"]["secrets"] == []
+    assert "differ" not in capsys.readouterr().out
+
+
+def test_without_its_app_id_the_variable_goes_and_is_never_sent_empty(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.variables["RELEASE_AUTOMATION_APP_ID"] = "4739928"
+    (root / ".github/repository.project.toml").write_text(
+        WITHOUT_APP_ID, encoding="utf-8"
+    )
+    with_app_id(root)
+
+    assert run(github, root, "settings", "check") == 1
+    assert (
+        'variable RELEASE_AUTOMATION_APP_ID: GitHub has "4739928", the configuration'
+        " wants null"
+    ) in capsys.readouterr().out
+
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+
+    assert "RELEASE_AUTOMATION_APP_ID" not in github.variables
+    assert run(github, root, "settings", "check") == 0
+
+
+def test_check_names_code_owners_that_github_lacks(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_reviews(root, "code_owner_review = true")
+    (root / ".github/CODEOWNERS").write_text("* @demo/maintainers\n", encoding="utf-8")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    # The checkout has the code owners, but the default branch on GitHub doesn't.
+    assert run(github, root, "settings", "check") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        'code owners of main: GitHub has "missing", the configuration wants "present"\n'
+        "      merge .github/CODEOWNERS into main through a pull request: GitHub reads"
+        " the code owners of its default branch, and without them the review of a"
+        " code owner binds nobody"
+    ) in out
+    assert ("GET", f"repos/{REPO}/contents/docs/CODEOWNERS") in github.calls
+
+    github.files.add("CODEOWNERS")
+    assert run(github, root, "settings", "check") == 0
+
+
+def test_without_reviews_of_code_owners_github_needs_no_file_of_them(
+    github: FakeGitHub, root: Path
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+
+    assert run(github, root, "settings", "check") == 0
+    assert not [path for _, path in github.calls if "/contents/" in path]
+
+
+def test_a_drifted_ruleset_names_the_key_and_both_values(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    # Two approvals, set by hand on GitHub.
+    (reviews,) = [
+        ruleset
+        for ruleset in github.rulesets.values()
+        if ruleset["name"] == "Reviews of main"
+    ]
+    reviews["rules"][0]["parameters"]["required_approving_review_count"] = 2
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "check") == 1
+
+    assert (
+        "  ruleset Reviews of main: GitHub has"
+        ' {"pull_request.required_approving_review_count": 2}, the configuration'
+        ' wants {"pull_request.required_approving_review_count": 1}\n'
+    ) in capsys.readouterr().out
+    assert run(github, root, "settings", "apply") == 0
+    (reviews,) = [
+        ruleset
+        for ruleset in github.rulesets.values()
+        if ruleset["name"] == "Reviews of main"
+    ]
+    assert reviews["rules"][0]["parameters"]["required_approving_review_count"] == 1
+
+
 @pytest.mark.parametrize(
     ("own", "accepted"),
     [
@@ -3374,7 +3761,11 @@ def test_apply_lets_only_the_release_app_create_release_tags(
     capsys.readouterr()
     assert run(github, root, "settings", "check") == 1
     out = capsys.readouterr().out
-    assert 'ruleset Release tag creation: GitHub has "bypass_actors"' in out
+    # The key that differs, with what GitHub has and what the file wants.
+    assert (
+        'ruleset Release tag creation: GitHub has {"bypass_actors": [{"actor_id": 1,'
+    ) in out
+    assert 'the configuration wants {"bypass_actors": [{"actor_id": 4739928,' in out
     assert run(github, root, "settings", "apply") == 0
     assert creation_rulesets(github) == [tag_creation_ruleset(4739928)]
 
