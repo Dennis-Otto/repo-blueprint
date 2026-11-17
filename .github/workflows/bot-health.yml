@@ -34,7 +34,7 @@ name: Bot health
 # Harden-Runner stopped a job of their first attempt: then their failed jobs run once
 # more, as nothing else would run them again (decision 0141). Their end starts nothing
 # here: a last job of theirs starts this bot by hand with the run, and only when a job
-# failed at their first attempt (decision 0173). Nothing follows the end of Bot health
+# failed at their first attempt (decision 0174). Nothing follows the end of Bot health
 # itself, so the nightly look runs the failed jobs of its own runs of the last two
 # days once more that Harden-Runner stopped at their first attempt, and those of the
 # bots of events and of the workflows with an issue of their own whose last job
@@ -49,7 +49,7 @@ on:
     workflows: [Blueprint update, Chrome Web Store, Clean-up, Findings, Fuzzing, Issue lifecycle, Labels, Links, Mutation, OSV-Scanner, OpenSSF Scorecard, Property tests, Release, Release verification, SBOM, Screenshots, Settings, Update branches, Upstream, Workflow security, Dashboard, Docs pictures, Issue assistant sync, Renovate, Rollout, Weekly report]
     # The runs of main, and of the tag of a release that someone published by hand,
     # which starts Release verification: GitHub makes no run of this bot for the end
-    # of a run of a pull request, of which the jobs would skip every one (decision 0173).
+    # of a run of a pull request, of which the jobs would skip every one (decision 0174).
     branches: [main, "v*"]
     types: [completed]
   schedule:
@@ -72,7 +72,7 @@ jobs:
     name: look at the end of a bot's run
     # The eight workflows with a last job left the list of workflow_run, so their ends
     # never reach this job; the names stay here as a guard against a workflow of a fork
-    # or a later list that takes one of them (decision 0173).
+    # or a later list that takes one of them (decision 0174).
     if: >-
       github.event_name == 'workflow_run' &&
       !github.event.repository.fork &&
@@ -225,7 +225,7 @@ jobs:
     # the job run leaves alone: also a run of a pull request or of a fork, which runs
     # the workflow of its base again, at its first attempt only (decision 0141). Their
     # last job starts this bot by hand with the run while that run still ends, and only
-    # when a job of their first attempt failed (decision 0173): the bot waits for the
+    # when a job of their first attempt failed (decision 0174): the bot waits for the
     # end of the run. It acts only on a run of one of them, and not on one of the event
     # pull_request: none of them runs on it, so such a run is a workflow of a fork's
     # own, which only took the name of one of them.

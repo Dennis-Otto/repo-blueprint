@@ -604,6 +604,11 @@ TESTED = {
         "Point the major tag at the release, as users of v1 and the like expect",
     ): "test_workflow_steps.py",
     (
+        "release.yml",
+        "followers",
+        "Start the bots that follow a release",
+    ): "test_workflow_steps.py",
+    (
         "rollout.yml",
         "rollout",
         "Start the blueprint bot of the repository",
@@ -3200,6 +3205,128 @@ def test_the_update_leg_updates_a_locked_package_that_an_advisory_names(
     else:
         assert done.stubbed == [audit]
         assert "No advisory names a locked package." in done.stdout
+
+
+# The bots that follow a release: only a run that published one starts them (#1000).
+
+FOLLOWERS = "Start the bots that follow a release"
+LIFECYCLE = (
+    "api --method POST repos/o/r/actions/workflows/issue-lifecycle.yml/dispatches"
+    " -f ref=main -f inputs[dry_run]=false"
+)
+SCREENSHOTS = (
+    "api --method POST repos/o/r/actions/workflows/screenshot-bot.yml/dispatches"
+    " -f ref=main"
+)
+SCRIPT = "api --silent repos/o/r/contents/scripts/screenshots.sh?ref=main"
+
+
+def start_the_followers(
+    tmp_path: Path, *answers: Answer, version: str = "1.3.0", beta: str = "false"
+) -> StepResult:
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "followers",
+        FOLLOWERS,
+        answers=answers,
+        env={
+            "GH_TOKEN": "job-token",
+            "GH_REPO": "o/r",
+            "TAG": f"v{version}",
+            "VERSION": version,
+            "BETA": beta,
+        },
+        stubs={"sleep": recording("sleep")},
+    )
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+def test_a_release_starts_the_sweep_of_the_issues_and_the_screenshots(
+    tmp_path: Path,
+) -> None:
+    done = start_the_followers(
+        tmp_path, exact(LIFECYCLE), exact(SCRIPT), exact(SCREENSHOTS)
+    )
+
+    # The sweep writes, not a dry run, and both run on main.
+    assert done.commands == [LIFECYCLE, SCRIPT, SCREENSHOTS]
+    assert "Issue lifecycle started after v1.3.0." in done.summary
+    assert "Screenshots started after v1.3.0." in done.summary
+    assert done.stubbed == []
+
+
+def test_a_beta_starts_neither_bot(tmp_path: Path) -> None:
+    # The issue assistant closes an issue only with a final release, and a picture
+    # shows the version of a release, not that of a beta.
+    done = start_the_followers(tmp_path, version="1.3.0-beta.2", beta="true")
+
+    assert done.commands == []
+    assert "v1.3.0-beta.2 is a prerelease, which closes no issue" in done.summary
+    assert "v1.3.0-beta.2 is a beta of the next release" in done.summary
+
+
+def test_a_prerelease_of_the_release_pull_request_renders_the_pictures_alone(
+    tmp_path: Path,
+) -> None:
+    # Such as one that Release-As: 2.0.0-rc.1 made: no issue closes with it.
+    done = start_the_followers(
+        tmp_path, exact(SCRIPT), exact(SCREENSHOTS), version="2.0.0-rc.1"
+    )
+
+    assert done.commands == [SCRIPT, SCREENSHOTS]
+    assert "v2.0.0-rc.1 is a prerelease, which closes no issue" in done.summary
+
+
+@pytest.mark.parametrize(
+    ("error", "renders"),
+    [
+        # Without the script, the run of the screenshot bot would only end after
+        # its first job.
+        ("gh: Not Found (HTTP 404)", False),
+        # When GitHub can't tell, the bot starts and decides itself.
+        ("gh: Server Error (HTTP 502)", True),
+    ],
+)
+def test_the_screenshots_start_only_where_the_script_may_be(
+    tmp_path: Path, error: str, renders: bool
+) -> None:
+    done = start_the_followers(
+        tmp_path,
+        exact(LIFECYCLE),
+        exact(SCRIPT, code=1, err=error),
+        exact(SCREENSHOTS),
+    )
+
+    assert done.commands == [LIFECYCLE, SCRIPT, *([SCREENSHOTS] if renders else [])]
+    assert (
+        "The repository has no `scripts/screenshots.sh`" in done.summary
+    ) is not renders
+
+
+def test_a_bot_that_github_does_not_start_is_a_warning(tmp_path: Path) -> None:
+    # Three tries each; the release stays green, and the morning sweep and the
+    # weekly run of the screenshots catch up.
+    done = start_the_followers(
+        tmp_path,
+        exact(LIFECYCLE, code=1, err="gh: Server Error (HTTP 502)"),
+        exact(SCRIPT),
+        exact(SCREENSHOTS, code=1, err="gh: Server Error (HTTP 502)"),
+    )
+
+    assert done.commands == [LIFECYCLE] * 3 + [SCRIPT] + [SCREENSHOTS] * 3
+    assert done.stubbed == ["sleep 10", "sleep 20"] * 2
+    assert (
+        "::warning title=Issue lifecycle didn't start::GitHub didn't start Issue"
+        " lifecycle after v1.3.0; its morning sweep closes the issues that the"
+        " release fixes."
+    ) in done.stdout
+    assert (
+        "::warning title=Screenshots didn't start::GitHub didn't start Screenshots"
+        " after v1.3.0; its weekly run renders the pictures."
+    ) in done.stdout
+    assert "started after" not in done.summary
 
 
 # The screenshot bot: the plan starts a run by hand, which names its commit and shards.

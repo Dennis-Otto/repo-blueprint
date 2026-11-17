@@ -10834,7 +10834,7 @@ def test_dependabot_merges_as_the_release_app(
     job = job_in(text, "auto-merge")
     assert job["environment"] == {"name": "release", "deployment": False}
     # Besides it, only the last job, which starts the bot-health bot after a failure
-    # without the environment (decision 0173).
+    # without the environment (decision 0174).
     jobs = parse(text)["jobs"]
     assert set(jobs) == {"auto-merge", "bot-health"}
     assert "environment" not in jobs["bot-health"]
@@ -17173,7 +17173,7 @@ def test_the_bot_for_cancelled_checks_ends_with_a_notice_when_github_keeps_faili
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out. Next
-# runner, which keeps an issue of its own, starts the bot itself (decision 0173).
+# runner, which keeps an issue of its own, starts the bot itself (decision 0174).
 BLUEPRINT_BOTS = {
     "Dashboard",
     "Docs pictures",
@@ -17226,7 +17226,7 @@ def test_the_bot_health_bot_watches_every_bot(
             assert name in watched | {"Bot health"} | LAST_JOB, name
     # Not the bots of events and the workflows that keep an issue of their own, such
     # as Diagrams, whose last job starts the bot when a job of theirs failed at the
-    # first attempt (decisions 0141 and 0173).
+    # first attempt (decisions 0141 and 0174).
     assert not watched & LAST_JOB
     # Not the checks of pull requests, each of whose runs would start a run of the
     # bot that skips: the daily look covers their runs on the default branch, and
@@ -17274,7 +17274,7 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     assert set(triggers(text)) == {"workflow_run", "schedule", "workflow_dispatch"}
     # GitHub makes no run for the end of a run of a pull request, nor of a fork's
     # branch of another name: the runs of main, and of the tag of a release published
-    # by hand, which is vX.Y.Z (decision 0173).
+    # by hand, which is vX.Y.Z (decision 0174).
     on = parse(text)["on"]
     assert on["workflow_run"]["branches"] == ["main", "v*"]
     assert on["workflow_run"]["types"] == ["completed"]
@@ -17375,7 +17375,7 @@ def test_the_bots_that_bot_health_runs_again_start_it_after_a_failure(
 ) -> None:
     # The bots of events and the workflows with an issue of their own start the
     # bot-health bot themselves, and only when a job of their first attempt failed,
-    # so that their end starts no run of it (decision 0173).
+    # so that their end starts no run of it (decision 0174).
     root = ROOT if project == "blueprint" else projects[project]
     named = names_of_workflows(root)
     watched = watched_by_bot_health(root)
@@ -24409,30 +24409,102 @@ def assert_main_has_the_rendered_commit(
     assert 'compare/$SHA...main" --jq .behind_by)" == 0 ]]' in step["run"]
 
 
+def test_only_a_run_of_release_that_published_a_release_starts_its_followers() -> None:
+    # Issue lifecycle and Screenshots followed the end of every run of Release, though
+    # only a run that publishes a release gives them work: 263 of 288 runs in a week
+    # published nothing (#1000). Release now starts them itself, by hand, in a last
+    # job, the way After the checks starts Update branches only when it has work.
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    parsed = parse(release)
+    followers = job_in(parsed, "followers")
+    assert followers["name"] == "start the bots after the release"
+    # Once the whole run passed, the verification and the Dependabot alerts included,
+    # as the end of a successful run did, and only when it published a release, also
+    # one that it took up from a draft.
+    assert set(followers["needs"]) == set(parsed["jobs"]) - {"assets", "followers"}
+    assert condition_of(followers) == (
+        "!cancelled() && needs.release-please.outputs.created == 'true' && "
+        "needs.verify.result == 'success' && "
+        "!contains(needs.*.result, 'failure') && "
+        "!contains(needs.*.result, 'cancelled')"
+    )
+    outputs = job_in(parsed, "release-please")["outputs"]
+    assert "steps.resume.outputs.tag != ''" in outputs["created"]
+    assert outputs["beta"] == "${{ steps.beta.outputs.tag != '' }}"
+    # The token of the job starts a workflow by hand, as no other event of it does;
+    # no secret, no environment, and only GitHub's API.
+    assert followers["permissions"] == {"actions": "write", "contents": "read"}
+    assert "secrets." not in values_of(followers)
+    assert "environment" not in followers
+    blocking = followers["steps"][0]["with"]
+    assert blocking["egress-policy"] == "block"
+    assert blocking["allowed-endpoints"].split() == ["api.github.com:443"]
+    started = workflow_steps.step_in(followers, "Start the bots that follow a release")
+    script = started["run"]
+    assert 'actions/workflows/$workflow/dispatches" -f ref=main' in script
+    assert "start issue-lifecycle.yml " in script
+    assert "-f 'inputs[dry_run]=false'" in script
+    assert "start screenshot-bot.yml " in script
+    assert "contents/scripts/screenshots.sh?ref=main" in script
+    # A bot that GitHub doesn't start warns: its safety net catches up, and the
+    # release stays green, so no bot runs it again for that.
+    assert "::warning title=$name didn't start::" in script
+    assert "exit 1" not in script
+    # The bots that follow: Screenshots by hand alone, its plan for main and its
+    # week. Issue lifecycle keeps the trigger of the issue assistant's template,
+    # which its check compares, until a key of its config.toml lets the blueprint
+    # leave it out; till then a release sweeps twice, one sweep after the other.
+    flows = workflows(ROOT)
+    assert "workflow_run" not in parse(flows["screenshot-bot.yml"])["on"]
+    lifecycle = parse(flows["issue-lifecycle.yml"])["on"]
+    assert lifecycle["workflow_run"]["workflows"] == ["Release"]
+    assert lifecycle["workflow_dispatch"]["inputs"]["dry_run"]["type"] == "boolean"
+    assert {"schedule", "workflow_dispatch"} <= set(lifecycle)
+    assert "Issue lifecycle" in watched_after_the_checks(flows["bot-health.yml"])
+    # After the checks still follows Release, to run a failed release once more,
+    # and the bot-health bot still watches it and gives it its second try.
+    for watcher in ("after-checks.yml", "bot-health.yml"):
+        assert "Release" in watched_after_the_checks(flows[watcher]), watcher
+    assert "Screenshots" in watched_after_the_checks(flows["bot-health.yml"])
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_kind_starts_the_followers_of_a_release_alike(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The sweep of the issues and the screenshots of every kind follow only a run of
+    # Release that published a release, as in the blueprint.
+    project = projects[kind]
+    rendered = workflows(project)
+    own = parse((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    assert job_in(rendered["release.yml"], "followers") == job_in(own, "followers")
+    assert "workflow_run" not in parse(rendered["screenshot-bot.yml"])["on"]
+    assert (project / "scripts/screenshots.sh").is_file()
+
+
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
     )
     parsed = parse(workflow)
-    # After a change of main, a release and every week; never for a pull request.
+    # After a change of main and every week; never for a pull request. After a
+    # release, the release bot starts a run by hand, so that no run of Release that
+    # published nothing starts one (#1000).
     assert parsed["on"]["push"] == {"branches": ["main"]}
-    assert {"workflow_run", "schedule"} <= set(parsed["on"])
+    assert set(parsed["on"]) == {"push", "schedule", "workflow_dispatch"}
+    assert "workflow_run" not in workflow
     assert "pull_request" not in workflow
     assert parsed["permissions"] == {}
     assert parsed["env"]["BRANCH"] == "bot/screenshots"
     assert parsed["env"]["HEADLINE"] == "docs: update the screenshots"
     plan = job_in(parsed, "plan")
     assert " screenshots due --since " in scripts_of(plan)
-    assert (
-        "startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')"
-        in condition_of(plan)
-    )
-    # Only the push run of a release, not its daily or manual runs on the same commit.
-    assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
     # A due plan starts a run by hand, which renders; a push that is not due never
     # replaces a waiting render of one that is, since only the runs by hand wait in
     # one group, and the newest of those that wait replaces an older one.
-    assert "github.event_name != 'workflow_dispatch'" in condition_of(plan)
+    assert condition_of(plan) == (
+        "!github.event.repository.fork && github.event_name != 'workflow_dispatch'"
+    )
     assert (
         'gh api --header "$API_VERSION_HEADER" --method POST '
         '"repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main'

@@ -35,6 +35,18 @@ Each release describes what it ships in its SBOMs, as SPDX and as CycloneDX: the
 
 The verification after a release names every problem that it finds in an annotation and in the summary of its run, and the bot-health bot reports the failed run in an issue. That holds for what ends the verification early too, such as a draft, which is no published release yet, or a download of gitsign with another checksum.
 
+Only a run of the release bot that published a release starts the bots that follow one ([decision 0173](../decisions/0173-only-a-run-that-published-a-release-starts-its-followers.md)). A release that the release bot makes public with the token of its job starts no workflow by `release: published`, and most runs of *Release* publish nothing: they only keep the release pull request current. So the last job of a run, *start the bots after the release*, starts them by hand once the run published a release, also one that it finished from a draft, and once the whole run passed, the verification included:
+
+- **Issue lifecycle** closes the issues that the release fixes, with its link. A prerelease closes none, so it starts no sweep.
+- **Screenshots** renders the pictures of the new version, but not after a beta, and not where the repository has no `scripts/screenshots.sh`.
+- **A call that GitHub fails** three times is a warning, and the release stays green: the morning sweep of *Issue lifecycle* and the weekly run of *Screenshots* catch up.
+- **Twice for now:** until a release of the issue assistant lets the blueprint leave it out, *Issue lifecycle* also keeps its own start after every run of *Release*, so a release sweeps the issues twice, one sweep after the other, which does no harm.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-starts-after-a-release.dark.svg">
+  <img src="../images/diagrams/what-starts-after-a-release.svg" alt="What starts after a release: A run of the release bot starts after every merge into main, every day and by hand. Only a run that published a release, or finished a draft that an earlier run left, starts the bots that follow a release; every other run only keeps the release pull request current and starts neither. Once the whole run passed, the verification included, its last job starts Issue lifecycle, which closes the issues that the release fixes with its link, except after a prerelease, and Screenshots, which renders the pictures of the new version, except after a beta and where the repository has no scripts/screenshots.sh. Should GitHub not start one, the morning sweep of Issue lifecycle and the weekly run of Screenshots catch up.">
+</picture>
+
 A project that ships something that no registry builds, such as the zip of a browser extension, builds it with a `scripts/release-assets.sh` of its own. The build of the release runs `bash scripts/release-assets.sh FOLDER VERSION` at the commit of the release, in a job of its own that may write nothing and holds no secret, with Node.js and `npm ci --ignore-scripts` first where the project has a `package.json`. It attests each file that the script writes with the rest of the release and attaches it to the draft before the release is published; its SBOMs describe those zips and tarballs where no registry delivers the project, and the verification of the release fails for an asset without its signed provenance (decision 0084 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)):
 
 <picture>

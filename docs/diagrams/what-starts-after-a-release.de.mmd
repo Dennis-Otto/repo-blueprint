@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was nach einem Release startet
+    accDescr: Ein Lauf des Release-Bots startet nach jedem Merge in main, jeden Tag und von Hand. Nur ein Lauf, der ein Release veröffentlicht oder einen Entwurf fertiggestellt hat, den ein früherer Lauf hinterließ, startet die Bots, die einem Release folgen; jeder andere Lauf hält nur den Release-Pull-Request aktuell und startet keinen. Sobald der ganze Lauf bestanden hat, die Prüfung eingeschlossen, startet sein letzter Job Issue lifecycle, das die Issues, die das Release behebt, mit seinem Link schließt, außer nach einem Prerelease, und Screenshots, das die Bilder der neuen Version rendert, außer nach einer Beta und wo das Repository kein scripts/screenshots.sh hat. Startet GitHub einen davon nicht, holen der morgendliche Durchlauf von Issue lifecycle und der wöchentliche Lauf von Screenshots es nach.
+
+    run["`Ein Lauf von *Release*: der Push eines<br>Merges, der tägliche Lauf<br>oder einer von Hand`"]
+    published{"Hat er ein Release veröffentlicht<br>oder einen Entwurf fertiggestellt?"}
+    nothing["`Er hält nur den Release-<br>Pull-Request aktuell<br>und startet keinen Bot`"]
+    passed{"Hat der ganze Lauf bestanden,<br>die Prüfung eingeschlossen?"}
+    again["`Noch kein Bot: Der zweite<br>Versuch des Bot-Health-Bots<br>führt die Jobs erneut aus`"]
+    start["`Sein letzter Job startet<br>die Bots von Hand`"]
+    lifecycle["`*Issue lifecycle* schließt die<br>Issues, die das Release behebt, mit<br>seinem Link; nicht nach einem Prerelease`"]
+    screenshots["`*Screenshots* rendert die Bilder<br>der neuen Version; nicht nach einer Beta<br>oder ohne scripts/screenshots.sh`"]
+    net["`Startet GitHub einen nicht:<br>Der morgendliche Durchlauf und<br>der wöchentliche Lauf holen es nach`"]
+
+    run --> published
+    published -- "nein" --> nothing
+    published -- "ja" --> passed
+    passed -- "nein" --> again
+    passed -- "ja" --> start
+    start --> lifecycle
+    start --> screenshots
+    start -. "ein Aufruf, der scheitert" .-> net
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class run,start,again bot
+    class lifecycle,screenshots done
