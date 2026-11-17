@@ -2697,6 +2697,7 @@ def test_the_inputs_that_start_a_workflow_as_its_schedule_does() -> None:
         "findings.yml",
         "issue-lifecycle.yml",
         "properties.yml",
+        "quick-checks.yml",
         "release.yml",
         "sync-issue-assistant.yml",
     ],
@@ -2711,6 +2712,21 @@ def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
     dry = name in ("findings.yml", "issue-lifecycle.yml", "sync-issue-assistant.yml")
     assert inputs == ({"dry_run": "false"} if dry else {})
     assert missed_time(text, NOW)[0] is not None
+
+
+def test_no_workflow_with_a_schedule_needs_an_input_that_the_look_leaves_out() -> None:
+    # The daily look starts a workflow whose schedule GitHub missed with the inputs of
+    # dispatch_inputs only, and GitHub refuses a start without a required input. So
+    # Quick checks, which compares two commits when a person names them, has none.
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        workflow = workflow_steps.parse(path.read_text(encoding="utf-8"))
+        events = workflow["on"]
+        if not isinstance(events, dict) or "schedule" not in events:
+            continue
+        inputs = (events.get("workflow_dispatch") or {}).get("inputs") or {}
+        filled = dispatch_inputs(path.read_text(encoding="utf-8")) or {}
+        needed = {name for name, value in inputs.items() if value.get("required")}
+        assert needed <= set(filled), path.name
 
 
 # ---------------------------------------------------------------- social preview

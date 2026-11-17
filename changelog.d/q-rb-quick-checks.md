@@ -1,0 +1,3 @@
+### Features
+
+- The secret scan and the dependency review run as the two jobs of one workflow, *Quick checks* (`.github/workflows/quick-checks.yml`), so that each push to a pull request starts one workflow run and one run of *After the checks* fewer. The required checks keep their names, `gitleaks` and `dependency-review`, so no ruleset changes, and each still runs once for every commit. The weekly scan of the whole history stays; started by hand, the workflow scans the whole history, and compares the dependencies of two commits when you give both. The update removes `secret-scan.yml` and `dependency-review.yml`; a workflow or a link of your own that names either file or the old workflow names *Secret scan* and *Dependency review* should name *Quick checks* instead.

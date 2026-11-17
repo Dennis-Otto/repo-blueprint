@@ -82,6 +82,7 @@ from blueprint.bot_health import (
     TYPE,
     Cron,
     after_pull_requests,
+    dispatch_inputs,
     own_issue,
     preview_report,
 )
@@ -7291,7 +7292,7 @@ def test_the_secret_scan_runs_gitleaks_of_its_release_through_the_api(
     assert "gitleaks/gitleaks-action" not in (
         folder / ".github/repository.toml"
     ).read_text(encoding="utf-8")
-    workflow = (workflows / "secret-scan.yml").read_text(encoding="utf-8")
+    workflow = (workflows / "quick-checks.yml").read_text(encoding="utf-8")
     assert parse(workflow)["permissions"] == {"contents": "read"}
     job = job_in(workflow, "gitleaks")
     assert job["name"] == "gitleaks"
@@ -7318,6 +7319,67 @@ def test_the_secret_scan_runs_gitleaks_of_its_release_through_the_api(
         "fi\n"
     )
     assert names[3:] == ["Explain the failure"]
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_secret_scan_and_the_dependency_review_share_one_workflow(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Two workflows of one job each started two runs, and two runs of After the checks,
+    # for every push to a pull request (decision 0173). One workflow, Quick checks,
+    # runs both jobs under the names that the rulesets require.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    flows = workflows(folder)
+    assert "secret-scan.yml" not in flows
+    assert "dependency-review.yml" not in flows
+    workflow = flows["quick-checks.yml"]
+    found = parse(workflow)
+    assert found["name"] == "Quick checks"
+    assert found["permissions"] == {"contents": "read"}
+    assert check_names(workflow) == {"gitleaks", "dependency-review"}
+    required = tomllib.loads(
+        (folder / ".github/repository.toml").read_text(encoding="utf-8")
+    )["branch"]["required_checks"]
+    assert {"gitleaks", "dependency-review"} <= set(required)
+    # A run for each commit of a pull request, which no run for another commit cancels,
+    # unlike the runs of Lint, which share a group for each pull request.
+    group = found["concurrency"]["group"]
+    assert group.startswith("quick-checks-${{ github.event.pull_request.number")
+    assert group.endswith("-${{ github.event.pull_request.head.sha }}")
+    assert "head.sha" not in parse(flows["lint.yml"])["concurrency"]["group"]
+    # Each pull request, the weekly scan of the whole history in the slot of the
+    # project, and a start by hand, whose inputs Bot health leaves out when it starts a
+    # schedule that GitHub missed.
+    events = triggers(workflow)
+    assert set(events) == {"pull_request", "schedule", "workflow_dispatch"}
+    assert re.fullmatch(r'    - cron: "\d+ 4 \* \* \d"', events["schedule"][0])
+    inputs = found["on"]["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"base_ref", "head_ref"}
+    assert all(value["required"] is False for value in inputs.values())
+    assert dispatch_inputs(workflow) == {}
+    # gitleaks runs on every event; dependency-review only where it has two commits
+    # to compare: a pull request, or a start by hand with both.
+    assert "if" not in job_in(found, "gitleaks")
+    assert condition_of(job_in(found, "dependency-review")) == (
+        "github.event_name == 'pull_request' || (github.event_name == "
+        "'workflow_dispatch' && inputs.base_ref != '' && inputs.head_ref != '')"
+    )
+    # The bots after the checks follow the workflow by its new name, and only by it.
+    after = flows["after-checks.yml"]
+    assert "Quick checks" in watched_after_the_checks(after)
+    assert "Secret scan" not in after
+    assert "Dependency review" not in after
+    # The list of the files of the blueprint names it, so a pull request that changes
+    # it hears so, and an update removes the two files before it.
+    if kind != "blueprint":
+        owned = (folder / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+        lines = owned.splitlines()
+        assert ".github/workflows/quick-checks.yml" in lines
+        assert ".github/workflows/secret-scan.yml" not in lines
+        assert ".github/workflows/dependency-review.yml" not in lines
+    answers = (folder / ".bestpractices.json").read_text(encoding="utf-8")
+    assert "secret-scan.yml" not in answers
+    assert "/.github/workflows/quick-checks.yml" in answers
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
@@ -11509,7 +11571,7 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     # younger than a week comes anyway, on the branches that Renovate names it, alone
     # or in a group; one that waits begins with review- and stays out.
     review = job_in(
-        (root / ".github/workflows/dependency-review.yml").read_text(encoding="utf-8"),
+        (root / ".github/workflows/quick-checks.yml").read_text(encoding="utf-8"),
         "dependency-review",
     )
     age = step_in(review, "age")
@@ -15837,11 +15899,10 @@ def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
 # The workflows of the required checks besides the tests, the same in every repository.
 OTHER_CHECKS = {
     "CodeQL",
-    "Dependency review",
     "Docs",
     "Lint",
     "Pull request title",
-    "Secret scan",
+    "Quick checks",
 }
 # The workflows of the scanners of the pull requests that change what they read, and of
 # zizmor, whose analysis the rules of main wait for; the PR coach reports them too.
@@ -16580,7 +16641,7 @@ def test_the_bot_for_replaced_commits_cancels_only_the_checks(
     root = ROOT if project == "blueprint" else projects[project]
     checks = checks_of(root)
     # Every kind of project has the checks of its pull requests in the list...
-    assert {"Lint", "Pull request title", "Secret scan", "CodeQL"} <= checks
+    assert {"Lint", "Pull request title", "Quick checks", "CodeQL"} <= checks
     assert any(name.startswith("CI (") for name in checks) or project == "blueprint"
     # ...and no bot that does something when a pull request closes, and no release.
     assert checks.isdisjoint(UNWATCHED - {"Mutation"} | {"Release", "After the checks"})
@@ -21495,8 +21556,7 @@ def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
 # other, and some that take minutes, whose runs for a newer commit cancel the older.
 QUICK_CHECKS = [
     "pull-request-title.yml",
-    "dependency-review.yml",
-    "secret-scan.yml",
+    "quick-checks.yml",
     "area-labels.yml",
     "docs.yml",
 ]
@@ -21917,10 +21977,16 @@ def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
     # main takes a pull request only when it is up to date, so a merge gives main the
     # tree that the checks of the pull request passed with.
     flows = workflows(ROOT)
-    for name in ("variants.yml", "lint.yml", "secret-scan.yml", "sbom.yml", "fuzz.yml"):
+    for name in (
+        "variants.yml",
+        "lint.yml",
+        "quick-checks.yml",
+        "sbom.yml",
+        "fuzz.yml",
+    ):
         assert "push" not in triggers(flows[name]), name
     # What depends on tools and sites that move on their own runs every week instead.
-    for name in ("variants.yml", "secret-scan.yml", "sbom.yml", "fuzz.yml"):
+    for name in ("variants.yml", "quick-checks.yml", "sbom.yml", "fuzz.yml"):
         assert "schedule" in triggers(flows[name]), name
     # Every release carries an SBOM of its own; the weekly one is the repository's.
     assert set(triggers(flows["sbom.yml"])) == {"schedule", "workflow_dispatch"}
@@ -22354,7 +22420,7 @@ def test_without_code_scanning_no_workflow_sends_its_findings_there(
                     gated.add(f"{path.name} {step['name']}")
     expected = {
         "codeql.yml Upload the results",
-        "dependency-review.yml Check dependency changes for known vulnerabilities",
+        "quick-checks.yml Check dependency changes for known vulnerabilities",
         "osv-scanner.yml pull-request",
         "osv-scanner.yml repository",
         "scorecard.yml Upload results to code scanning",
@@ -22418,7 +22484,7 @@ def test_without_the_dependency_review_osv_scanner_checks_the_lock_files(
 ) -> None:
     done = workflow_steps.run_step(
         tmp_path,
-        "dependency-review.yml",
+        "quick-checks.yml",
         "dependency-review",
         "Leave the vulnerabilities to OSV-Scanner",
     )
@@ -22431,7 +22497,7 @@ def test_without_the_dependency_review_osv_scanner_checks_the_lock_files(
     osv = parse((ROOT / ".github/workflows/osv-scanner.yml").read_text("utf-8"))
     assert osv["jobs"]["pull-request"]["name"] == "osv-scanner (pull request)"
     job = job_in(
-        (ROOT / ".github/workflows/dependency-review.yml").read_text("utf-8"),
+        (ROOT / ".github/workflows/quick-checks.yml").read_text("utf-8"),
         "dependency-review",
     )
     fallback = step_in(job, "Leave the vulnerabilities to OSV-Scanner")

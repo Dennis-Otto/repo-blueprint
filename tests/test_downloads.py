@@ -1175,7 +1175,7 @@ def test_the_secret_scan_hands_the_commits_of_a_pull_request_to_gitleaks(
 ) -> None:
     done = run_step(
         tmp_path,
-        "secret-scan.yml",
+        "quick-checks.yml",
         "gitleaks",
         "Scan tracked history for exposed secrets",
         env={"BASE_SHA": base, "HEAD_SHA": head},

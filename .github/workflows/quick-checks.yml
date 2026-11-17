@@ -1,37 +1,53 @@
-name: Dependency review
+name: Quick checks
 
-# The review of the dependencies that a pull request adds or changes: one with a
-# known vulnerability of moderate severity or more, or with a license outside the
-# list of .github/dependency-review.yml, fails it. An advisory that the repository
-# accepts goes into allow-ghsas there, with its reason. Started by hand, it compares
-# two commits. A private repository without GitHub Code Security has no dependency
-# review: there the settings bot sets the variable DEPENDENCY_REVIEW to off, and the
-# check leaves the vulnerabilities of the lock files to OSV-Scanner. In a pull request
-# of Renovate's weekly refresh of the lock files, which merges by itself only from
-# versions at least a week old, it fails on a younger one as well (decision 0137).
+# The quick checks of every pull request that need a workflow of their own outside
+# Lint: the secret scan and the review of the dependencies, as two jobs of one
+# workflow, so that a push starts one run, and one run of After the checks, for both
+# (decision 0173). Not in Lint, whose runs for a pull request cancel each other.
+#
+# gitleaks looks for secrets in the commits of every pull request, and every week in
+# the whole history of every branch. Not after a merge, which brings only the commits
+# of a pull request that it scanned; GitHub's secret scanning with push protection
+# guards every push as well.
+#
+# dependency-review reviews the dependencies that a pull request adds or changes: one
+# with a known vulnerability of moderate severity or more, or with a license outside
+# the list of .github/dependency-review.yml, fails it. An advisory that the repository
+# accepts goes into allow-ghsas there, with its reason. A private repository without
+# GitHub Code Security has no dependency review: there the settings bot sets the
+# variable DEPENDENCY_REVIEW to off, and the check leaves the vulnerabilities of the
+# lock files to OSV-Scanner. In a pull request of Renovate's weekly refresh of the
+# lock files, which merges by itself only from versions at least a week old, it fails
+# on a younger one as well (decision 0137).
+#
+# Started by hand without inputs, as Bot health starts a schedule that GitHub missed,
+# the workflow scans the whole history; with a base and a head commit, it also
+# compares the dependencies of the two.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
   pull_request:
+  schedule:
+    - cron: "55 4 * * 5"
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Base commit for the dependency comparison"
-        required: true
+        description: "Base commit for the dependency comparison, empty for none"
+        required: false
         type: string
       head_ref:
-        description: "Candidate commit for the dependency comparison"
-        required: true
+        description: "Candidate commit for the dependency comparison, empty for none"
+        required: false
         type: string
 
 permissions:
   contents: read
 
-# One run for each commit of a pull request: a quick check, whose runs for different
+# One run for each commit of a pull request: quick checks, whose runs for different
 # commits never cancel each other, so that a late run for an older commit can't
-# cancel the check of the head.
+# cancel the checks of the head.
 concurrency:
-  group: dependency-review-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.head.sha }}
+  group: quick-checks-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
@@ -39,8 +55,51 @@ env:
   GH_TELEMETRY: "false"
 
 jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # .github/gitleaks.sh downloads gitleaks through the API, with the token of the
+      # job, which gitleaks itself doesn't get, and scans the commits of the pull
+      # request, or without one the whole history (decision 0139).
+      - name: Scan tracked history for exposed secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            bash .github/gitleaks.sh "$BASE_SHA" "$HEAD_SHA"
+          else
+            bash .github/gitleaks.sh
+          fi
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: gitleaks
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
+
   dependency-review:
     name: dependency-review
+    # A pull request, or a start by hand with both commits to compare; not the weekly
+    # scan and not a start without them, which have nothing to compare.
+    if: >-
+      github.event_name == 'pull_request'
+      || (github.event_name == 'workflow_dispatch' && inputs.base_ref != '' && inputs.head_ref != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

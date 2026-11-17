@@ -122,11 +122,11 @@ What the workflows say of it:
 `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security. The settings bot sets it to `off` on such a repository and back to `on` once GitHub offers the review; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
 
 - **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
-- **Read by:** [`dependency-review.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependency-review.yml) (Dependency review, every repository)
+- **Read by:** [`quick-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/quick-checks.yml) (Quick checks, every repository)
 
 What the workflows say of it:
 
-- `dependency-review.yml`: A private repository without GitHub Code Security has no dependency review: there the settings bot sets the variable `DEPENDENCY_REVIEW` to off, and the check leaves the vulnerabilities of the lock files to OSV-Scanner.
+- `quick-checks.yml`: A private repository without GitHub Code Security has no dependency review: there the settings bot sets the variable `DEPENDENCY_REVIEW` to off, and the check leaves the vulnerabilities of the lock files to OSV-Scanner.
 
 ### `ISSUE_ASSISTANT_AI`
 

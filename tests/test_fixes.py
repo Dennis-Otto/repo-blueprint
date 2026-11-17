@@ -1049,8 +1049,8 @@ WATCHED = Watched(
 # The list of HomeDarts for Autodarts, with the tests of its own: Docker E2E, and
 # Visual check by the answer test_workflows of the blueprint.
 HOMEDARTS = (
-    "CI (home-assistant), Docker E2E, Visual check, CodeQL, Dependency review, Docs, "
-    "Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, "
+    "CI (home-assistant), Docker E2E, Visual check, CodeQL, Docs, Lint, "
+    "Pull request title, Quick checks, Fuzzing, Links, OSV-Scanner, "
     "Workflow security, Release"
 )
 
@@ -1117,7 +1117,7 @@ def test_the_bot_goes_by_the_list_and_the_files_of_main(tmp_path: Path) -> None:
     write(
         tmp_path,
         ".github/workflows/comment.yml",
-        workflow("Secret scan") + "      # name: fixes-old\n",
+        workflow("Quick checks") + "      # name: fixes-old\n",
     )
     write(tmp_path, ".github/workflows/unnamed.yml", "on: push\n")
     write(
@@ -3626,10 +3626,9 @@ def test_a_run_of_a_check_starts_the_fix_bot_however_it_ends(
         "Issue assistant sync",
         "Downstream",
         "CodeQL",
-        "Dependency review",
         "Docs",
         "Pull request title",
-        "Secret scan",
+        "Quick checks",
         "Fuzzing",
         "Links",
         "OSV-Scanner",

@@ -5,13 +5,14 @@ config:
 ---
 flowchart TB
     accTitle: Die Jobs eines Pull Requests
-    accDescr: Jeder Job eines Pushes wartet auf einen eigenen Runner, und das Konto führt etwa 20 Jobs gleichzeitig aus. Darum teilen sich die schnellen Prüfungen ihre Jobs: lint führt jeden Linter aus, der Job des Titels prüft Titel und Eintrag im Changelog, codeql analysiert jede Sprache unter der Kategorie ihrer Warnungen, und home-assistant führt HACS und hassfest aus. signed commits steht für sich, außerhalb der Pflichtprüfungen, weil die Regel von GitHub selbst den Merge schon blockiert. Jeder Schritt läuft auch, wenn einer davor fehlschlug, und der PR-Coach erklärt jede Prüfung eines Jobs, die fehlschlug.
+    accDescr: Jeder Job eines Pushes wartet auf einen eigenen Runner, und das Konto führt etwa 20 Jobs gleichzeitig aus. Darum teilen sich die schnellen Prüfungen ihre Jobs: lint führt jeden Linter aus, der Job des Titels prüft Titel und Eintrag im Changelog, codeql analysiert jede Sprache unter der Kategorie ihrer Warnungen, und home-assistant führt HACS und hassfest aus. Secret-Scan und Dependency Review sind die zwei Jobs eines Workflows, Quick checks, mit einem Lauf für jeden Commit, außerhalb von Lint, dessen Läufe für einen Pull Request einander abbrechen. signed commits steht für sich, außerhalb der Pflichtprüfungen, weil die Regel von GitHub selbst den Merge schon blockiert. Jeder Schritt läuft auch, wenn einer davor fehlschlug, und der PR-Coach erklärt jede Prüfung eines Jobs, die fehlschlug.
 
     push["Ein Push in einen Pull Request"]
     lint["lint<br>Workflows · Lizenzen · Markdown<br>Issue-Assistent · Sign-off · Sprache"]
     title["conventional title<br>Titel · Eintrag im Changelog"]
     signed["signed commits<br>eine verifizierte Signatur auf jedem Commit"]
     codeql["codeql<br>jede Sprache nacheinander<br>jede unter /language:name"]
+    quick["Quick checks, ein Lauf für jeden Commit<br>gitleaks · dependency-review"]
     ha["home-assistant<br>HACS · hassfest"]
     coach["PR-Coach<br>erklärt jede Prüfung, die fehlschlug"]
 
@@ -19,16 +20,18 @@ flowchart TB
     push --> title
     push --> signed
     push --> codeql
+    push --> quick
     push -- "Home Assistant" --> ha
     lint --> coach
     title --> coach
     signed --> coach
     codeql --> coach
+    quick --> coach
     ha --> coach
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class push person
-    class lint,title,signed,codeql,ha bot
+    class lint,title,signed,codeql,quick,ha bot
     class coach done
