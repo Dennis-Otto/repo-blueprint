@@ -643,7 +643,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/usr/src/app" --workdir /usr/src/app \
-            ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435 \
+            ghcr.io/renovatebot/renovate:44.249.1@sha256:3378d0a549251b1e25d4e7a1c3e03c171cd431c12ee72d70dfe933c5f632f715 \
             renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
       - name: Validate the integration with hassfest
         if: matrix.start != 'adopted' && matrix.kind == 'home-assistant'
@@ -802,7 +802,8 @@ jobs:
         with:
           egress-policy: audit
       # The plan too: a plan that fails skips the legs, which would look like none had
-      # to run.
+      # to run. Its error says that the job only sums up the others, so that the
+      # flaky-test bot counts the job that failed, not this one as well.
       - name: Require every variant to pass, or none to run
         env:
           RESULT: ${{ needs.plan.result }} ${{ needs.variant.result }} ${{ needs.pictures.result }}
@@ -810,7 +811,10 @@ jobs:
           echo "The plan, the variants and their pictures: $RESULT"
           read -ra results <<<"$RESULT"
           for result in "${results[@]}"; do
-            [[ "$result" == success || "$result" == skipped ]]
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error title=Variants::A job that this one needs ended with $result (the plan, the variants and their pictures: $RESULT); this job only sums up the jobs that it needs, and the errors of the job that failed say why."
+              exit 1
+            fi
           done
       # The PR coach needs blueprint.py and .github/checks.toml, nothing else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

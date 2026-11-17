@@ -1,6 +1,6 @@
 # A job stops when Harden-Runner doesn't block
 
-- Status: accepted, amends [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md) and follows up [0133](0133-the-downloads-of-the-workflows-go-through-the-api.md); followed up by [0136](0136-an-outage-of-github-starts-no-bot-failure.md), with which the bots run no run again that GitHub couldn't start, and [0141](0141-the-bot-health-bot-runs-every-bot-again-that-harden-runner-stopped.md), with which the bot-health bot runs the bots of events and the workflows with an issue of their own again
+- Status: accepted, amends [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md) and follows up [0133](0133-the-downloads-of-the-workflows-go-through-the-api.md); followed up by [0136](0136-an-outage-of-github-starts-no-bot-failure.md), with which the bots run no run again that GitHub couldn't start, and [0141](0141-the-bot-health-bot-runs-every-bot-again-that-harden-runner-stopped.md), with which the bot-health bot runs the bots of events and the workflows with an issue of their own again, and [0171](0171-a-job-that-one-failed-lookup-stopped-says-so.md), with which the step names a single failed lookup that took the agent away
 - Date: 2026-11-09
 
 ## Context

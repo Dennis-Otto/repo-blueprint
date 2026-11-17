@@ -7,6 +7,28 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.5...v1.20.6) (2026-11-17)
+
+### Bug fixes
+
+* **deps:** update the issue assistant to v1.13.3 ([#1009](https://github.com/Dennis-Otto/repo-blueprint/issues/1009)) ([e339dad](https://github.com/Dennis-Otto/repo-blueprint/commit/e339dad6b6b0da9c7bb520708b27ac6d2df82d81))
+
+## [1.20.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.4...v1.20.5) (2026-11-17)
+
+### Bug fixes
+
+- The upgrade test of a Nextcloud app can install krankerl again. The checks and the release now name the package of krankerl in `KRANKERL_ASSET` beside its version and sha256, and a workflow of the project that reads the pin of krankerl from `.github/workflows/ci.yml`, such as an upgrade test in `.github/workflows/e2e.yml`, downloads that name instead of building it from the version: read `KRANKERL_ASSET` with `KRANKERL_VERSION` and `KRANKERL_SHA256` and pass `"$KRANKERL_ASSET"` to `.github/download.sh`. When krankerl names its package anew, one change of its address in the blueprint brings the new name to every repository.
+
+## [1.20.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.3...v1.20.4) (2026-11-17)
+
+### Bug fixes
+
+- The checks and the release of a Nextcloud app install krankerl 0.14.3. Since 0.14.1, krankerl names its package with the revision `-1`, such as `krankerl_0.14.3-1_amd64.deb`, so Renovate's update of krankerl could not download it and stopped. When a tool renames the files of its release again, the error in Renovate's pull request names the files that the release has instead.
+- **A check that GitHub keeps failing says so once, and the issue of flaky tests leaves it out:** when GitHub answered no query of the files of the actions, even after every try, as when the network of a runner didn't reach `api.github.com` for minutes, `blueprint.py settings actions` claimed that GitHub wouldn't start the workflows and wrote an error for each action, which then went into the issue of flaky tests when the check passed again. It now writes one error that says that GitHub kept failing, as in an outage of GitHub or of the network of the runner, and that nothing in the repository causes it, and asks GitHub no more after that; the check still fails, so run it again. The flaky-test bot counts no flaky test for such a check, nor for the check *variants* of the blueprint, which only sums up the jobs that it needs: the job among them that failed has its own row.
+- The screenshot bot and the visual checks count only a change of pixels that one sees. The shades that a GIF picks from its palette and the edges of letters that a new browser or image draws a little differently no longer make a picture different, so an update of a dependency no longer reports pictures that look the same. A picture that differs only so keeps its file, and the report names it under `unseen`. The red frames of the difference and of the comparison are as small as the change with a little air, and join only when they would touch; a picture that changed all over gets no frames, and the table says *changed all over*. The report also names, for each changed picture, how many pixels changed, where, and whether it changed all over, as `pixels`, `box`, `seen` and `all_over`; the pager reads it as before.
+- Renovate's update of Playwright merges by itself again. The packages of Playwright from npm and PyPI now come without the week of waiting, as its images on mcr.microsoft.com already did, so the image and the package that starts its browsers move to the same release. Before, the newest image met a package a few patches older, and the checks of the update failed.
+- The Renovate of the Renovate workflow and of the Variants workflow is 44.247.2, and the shared rules of Renovate keep the dependency dashboard switched off in the form that Renovate asks for since 44.232.0, `dependencyDashboard: { enabled: false, title: "Dependency dashboard" }`. Its check of the configuration failed on the two settings of before, so the update of the images could not merge.
+
 ## [1.20.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.2...v1.20.3) (2026-11-16)
 
 ### Bug fixes

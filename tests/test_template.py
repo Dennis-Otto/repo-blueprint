@@ -64,7 +64,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, ownership, screenshots
+from blueprint import bootstrap, diagrams, ownership, screenshots
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -97,7 +97,7 @@ from blueprint.checklist import (
 )
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
-from blueprint.github import Api
+from blueprint.github import Api, GitHubError
 from blueprint.locks import why_renovate_skips
 from blueprint.migrate import (
     ISSUE_ASSISTANT,
@@ -112,6 +112,7 @@ from blueprint.migrate import (
     no_bot_fixes_label,
 )
 from blueprint.mutation import NOTHING_MATCHES, default_paths
+from blueprint.outage import check_unavailable
 from blueprint.pages import CELL_WORDS, layouts, long_blocks, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import (
@@ -1858,6 +1859,80 @@ def test_the_job_stops_when_the_agent_of_harden_runner_stopped(tmp_path: Path) -
     assert result.returncode == 1
     assert calls == ["systemctl is-active --quiet agent"]
     assert f"{DOESNT_BLOCK}has an agent that stopped, so" in result.stdout
+
+
+AGENT_LOG = "home/agent/agent.log"
+# The lines of the agent's log when one lookup of a host that it allows failed, as in
+# the stops of 17 November 2026 (step-security/agent v0.18.1, agent.go 179 to 187).
+REVERTED = "[2026-11-17 09:12:01] Reverted changes\n"
+FAILED_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    "dns.google unable to resolve domain productionresultssa121.blob.core.windows.net."
+    ", status 2"
+)
+UNREACHABLE_LOOKUP = (
+    "[2026-11-17 09:12:01] Error resolving allowed domain error in response from "
+    'dns.google error in response from dns.google Get "https://cloudflare-dns.com/'
+    'dns-query?name=fulcio.sigstore.dev.&type=A": dial tcp 1.1.1.1:443: i/o timeout'
+)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("lookup", "host"),
+    [
+        (FAILED_LOOKUP, "productionresultssa121.blob.core.windows.net"),
+        (UNREACHABLE_LOOKUP, "fulcio.sigstore.dev"),
+    ],
+)
+def test_the_job_stops_at_once_when_one_lookup_took_the_agent_away(
+    tmp_path: Path, lookup: str, host: str
+) -> None:
+    # The agent looks up every host that it allows before its firewall stands, and takes
+    # itself away when one lookup fails (#1006): it writes no status, so the job needn't
+    # wait half a minute for one, and the annotation names the host instead of an
+    # agent that didn't start. The words that the bots look for stay.
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}\n{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        f"lookup of {host}, a host that it allows, failed, which is no outage, so this "
+        f"job {STOPPED}. That is no problem of the change: run the job again."
+    ) in result.stdout
+    assert f"The log of the agent: {lookup}\n" in result.stdout
+    assert "didn't start" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_failed_lookup_without_a_host_in_the_log_still_names_the_cause(
+    tmp_path: Path,
+) -> None:
+    lookup = "[2026-11-17 09:12:01] Error resolving allowed domain unexpected EOF\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{lookup}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}has an agent that took itself away again because a single "
+        "lookup of a host that it allows failed, which is no outage, so"
+    ) in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_an_agent_that_took_its_changes_back_for_another_cause_keeps_its_words(
+    tmp_path: Path,
+) -> None:
+    # It took them back, as for a DNS server that it couldn't set, and writes no status:
+    # the job stops at once, in the words of an agent that didn't start.
+    log = "[2026-11-17 09:12:01] Error setting DNS server exit status 1\n"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_LOG: f"{log}{REVERTED}"})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert f"{DOESNT_BLOCK}has an agent that didn't start, so" in result.stdout
+    assert "The log of the agent" not in result.stdout
 
 
 def test_a_check_whose_job_blocks_explains_a_harden_runner_that_doesnt() -> None:
@@ -6964,17 +7039,22 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
 
 
 def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
-    pins = [
+    # The version, its sha256 and the name of its package, which python3 pins.py
+    # writes from the address in .github/pins.toml; the upgrade test of a Nextcloud
+    # app reads all three from its ci.yml and builds no name itself (#994).
+    found = [
         dict(
             re.findall(
-                r"(KRANKERL_(?:VERSION|SHA256)): (\S+)",
+                r"(KRANKERL_(?:VERSION|SHA256|ASSET)): (\S+)",
                 (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
             )
         )
         for name in ("ci-php.yml", "build-release.yml")
     ]
-    assert len(pins[0]) == 2
-    assert pins[0] == pins[1]
+    assert len(found[0]) == 3
+    assert found[0] == found[1]
+    krankerl = pins.load_record(ROOT)["ChristophWurst/krankerl"]
+    assert found[0]["KRANKERL_ASSET"] == krankerl.asset(found[0]["KRANKERL_VERSION"])
 
 
 # The PHP that each major version of Nextcloud runs on, oldest and newest, as its
@@ -7382,9 +7462,8 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     tmp_path: Path, cache: str
 ) -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
-    version = dict(re.findall(r"(KRANKERL_(?:VERSION|SHA256)): (\S+)", workflow))[
-        "KRANKERL_VERSION"
-    ]
+    pin = dict(re.findall(r"(KRANKERL_(?:VERSION|ASSET)): (\S+)", workflow))
+    version, asset = pin["KRANKERL_VERSION"], pin["KRANKERL_ASSET"]
     # Restored before the install, under a key that changes with krankerl; GitHub
     # saves it only after a run that passed, which checked it.
     names = names_of(job_with(workflow, "Restore krankerl from the cache"))
@@ -7399,7 +7478,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     )
     package = b"the package of krankerl\n"
     temp = tmp_path / "temp"
-    deb = temp / f"krankerl/krankerl_{version}_amd64.deb"
+    deb = temp / f"krankerl/{asset}"
     if cache != "empty":
         deb.parent.mkdir(parents=True)
         deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
@@ -7426,6 +7505,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
         RUNNER_TEMP=temp.as_posix(),
         KRANKERL_VERSION=version,
         KRANKERL_SHA256=sha256,
+        KRANKERL_ASSET=asset,
     )
 
     downloads = [call for call in calls if call.startswith("download.sh ")]
@@ -7440,7 +7520,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     assert downloads == (
         [
             f"download.sh ChristophWurst/krankerl v{version}"
-            f" krankerl_{version}_amd64.deb {deb.as_posix()} {sha256}"
+            f" {asset} {deb.as_posix()} {sha256}"
         ]
         if cache == "empty"
         else []
@@ -9447,6 +9527,50 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     assert "@.github/agents.project.md" in claude
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_agents_and_contributors_push_once_and_leave_the_update_to_the_branch_bot(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Every push starts every check again, and the branch bot brings the pull
+    # requests with auto-merge up to date one after the other (decision 0028). The
+    # blueprint and every kind of project say so in the same words, to coding agents
+    # and to people, so that a change of the rule changes all of them.
+    heading = "## Commits and pull requests"
+    rules = section_of((ROOT / "AGENTS.md").read_text(encoding="utf-8"), heading)
+    workflow = section_of(
+        (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    steps = re.findall(r"^[578]\. .*$", workflow, re.MULTILINE)
+    assert len(steps) == 3
+    for rule in (
+        "Run `scripts/check.sh`, then push once.",
+        "push a second time before the first round of checks has answered only to fix",
+        "Turn on auto-merge",
+        "leave the update to the branch bot",
+        "is not in the bot's line",
+        "neither with *Update branch* on GitHub nor with a merge of `main`",
+        "yourself only in two cases",
+        "in the same push as your fix, with a signed merge commit",
+        "never by a rebase through GitHub",
+        "the label `merge-conflict`",
+        "why GitHub starts no run of the pull request at all",
+        "a required check fails and `main` holds its fix",
+    ):
+        assert rule.lower() in rules.lower(), rule
+        assert rule.lower() in "\n".join(steps).lower(), rule
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert section_of(agents, heading) == rules
+    contributing = section_of(
+        (project / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
+    )
+    assert re.findall(r"^[578]\. .*$", contributing, re.MULTILINE) == steps
+    # Every kind of project has the bot and the label that the rule names.
+    assert (project / ".github/workflows/update-branches.yml").is_file()
+    labels = (project / ".github/labels.toml").read_text(encoding="utf-8")
+    assert 'name = "merge-conflict"' in labels
+
+
 def test_copying_runs_no_code_of_the_blueprint() -> None:
     # Without tasks, migrations or Jinja extensions, Copier only renders the template
     # in its sandbox and needs no --trust; docs/security.md promises it.
@@ -10836,6 +10960,15 @@ def test_renovate_brings_every_image_without_a_collision(
             "matchDatasources": ["docker"],
             "minimumReleaseAgeBehaviour": "timestamp-optional",
         },
+        # The images of Playwright have no release age at all (decision 0168).
+        {
+            "matchDatasources": ["docker"],
+            "matchPackageNames": [
+                "mcr.microsoft.com/playwright",
+                "mcr.microsoft.com/playwright/**",
+            ],
+            "minimumReleaseAge": None,
+        },
         {
             "matchDatasources": ["docker"],
             "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
@@ -10860,7 +10993,7 @@ def test_renovate_brings_every_image_without_a_collision(
     # The new digest of a tag goes into a branch of its own also in a group of the
     # project, which sets no group of its own: in one branch with the new version of
     # the same image, Renovate keeps only one of them.
-    assert [rule for rule in rules if "group" in rule] == docker[2:]
+    assert [rule for rule in rules if "group" in rule] == docker[3:]
     # Renovate logs a collision at the level info, which the issue of its problems,
     # from the warnings alone, would miss.
     # Its warning of every update without a date, which the rule of the images lets
@@ -10869,6 +11002,119 @@ def test_renovate_brings_every_image_without_a_collision(
         {"matchMessage": COLLISION, "newLogLevel": "warn"},
         {"matchMessage": "/did not have a releaseTimestamp/", "newLogLevel": "info"},
     ]
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_brings_playwright_at_once_like_its_image(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The images of Playwright come at once, as mcr.microsoft.com gives no date, and
+    # hold the browsers of one release, which only its package of the same release
+    # starts. With the week for the package alone, Renovate grouped the image of
+    # 1.65.2 with the package of 1.65.0, and the update failed in five repositories
+    # (#977, decision 0168).
+    root = ROOT if kind == "blueprint" else projects[kind]
+    text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    rules = renovate_rules(text)["packageRules"]
+    playwright = [
+        rule
+        for rule in rules
+        if "playwright" in json.dumps(rule.get("matchPackageNames"))
+    ]
+    assert playwright == [
+        {
+            "matchDatasources": ["npm", "pypi"],
+            "matchPackageNames": ["playwright", "playwright-core", "@playwright/**"],
+            "minimumReleaseAge": None,
+        },
+        {
+            "matchDatasources": ["docker"],
+            "matchPackageNames": [
+                "mcr.microsoft.com/playwright",
+                "mcr.microsoft.com/playwright/**",
+            ],
+            "minimumReleaseAge": None,
+        },
+    ]
+    assert "decision 0168" in text
+    # Right after the rule of the images, and no later rule of the blueprint gives the
+    # package a week again.
+    images = rules.index(
+        {
+            "matchDatasources": ["docker"],
+            "minimumReleaseAgeBehaviour": "timestamp-optional",
+        }
+    )
+    assert rules[images + 1 : images + 3] == playwright
+    assert not [rule for rule in rules[images + 3 :] if "minimumReleaseAge" in rule]
+    # The accessibility check of the blueprint runs its playwright-core with the
+    # Chrome of the runner, beside no image, so its group keeps the week.
+    own = renovate_rules((ROOT / ".github/renovate.json5").read_text(encoding="utf-8"))
+    assert {
+        "matchFileNames": [".github/a11y/**"],
+        "matchPackageNames": ["playwright-core"],
+        "minimumReleaseAge": "7 days",
+    } in own["packageRules"]
+
+
+def release_age(rules: list[dict[str, Any]], datasource: str, name: str) -> Any:
+    # The minimumReleaseAge of a minor update of the package `name`, from the shared
+    # rules of Renovate in their order; a rule with a match of another kind, such as
+    # of a manager or of a file, is left out.
+    age: Any = "7 days"
+    for rule in rules:
+        matches = {key for key in rule if key.startswith("match")}
+        if matches - {"matchDatasources", "matchPackageNames", "matchUpdateTypes"}:
+            continue
+        if datasource not in rule.get("matchDatasources", [datasource]):
+            continue
+        if "minor" not in rule.get("matchUpdateTypes", ["minor"]):
+            continue
+        patterns = rule.get("matchPackageNames", [name])
+        if not any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns):
+            continue
+        age = rule.get("minimumReleaseAge", age)
+    return age
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_an_update_of_playwright_gives_npm_no_release_age(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Renovate gives npm the minimumReleaseAge of the first update of a branch as
+    # --before. In the group of paperless-sync, the image of Playwright came first
+    # with its week, npm found no playwright-core of the same release that old,
+    # installed it again without --before and warned of it in every run of Renovate
+    # (#998). Every update of such a group comes without the week, so the branch
+    # gives npm none, whichever comes first.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    rules = renovate_rules(text)["packageRules"]
+    for datasource, name in [
+        ("docker", "mcr.microsoft.com/playwright"),
+        ("docker", "mcr.microsoft.com/playwright/python"),
+        ("npm", "playwright"),
+        ("npm", "playwright-core"),
+        ("npm", "@playwright/test"),
+        ("pypi", "playwright"),
+    ]:
+        assert release_age(rules, datasource, name) is None, name
+    # Every other package keeps its week, an image with a date as well.
+    for datasource, name in [
+        ("docker", "ghcr.io/paperless-ngx/paperless-ngx"),
+        ("docker", "mcr.microsoft.com/devcontainers/python"),
+        ("docker", "playwright"),
+        ("npm", "axe-core"),
+        ("npm", "playwright-extra"),
+        ("pypi", "pytest-playwright"),
+    ]:
+        assert release_age(rules, datasource, name) == "7 days", name
+    # The warning of an npm that couldn't keep to the week stays a warning, which
+    # reaches the issue "Renovate logs problems": where a branch still has a week,
+    # such as the weekly refresh of the lock files, it means that the refresh brings
+    # versions younger than that, which the check dependency-review holds.
+    remapped = [rule["matchMessage"] for rule in renovate_rules(text)["logLevelRemap"]]
+    assert not [message for message in remapped if "before" in message]
 
 
 # It asks Git for the files of the repository, which the copy of the mutation tests
@@ -11039,13 +11285,20 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     project = shutil.copytree(projects[kind], tmp_path / kind)
     # Home Assistant pins packages such as Pillow for the tests of every integration,
     # so a new one accepts what the blueprint accepts in stacks/home-assistant/, in the
-    # root, where its requirements-test.txt is.
+    # root, where its requirements-test.txt is; a new Cloudflare Worker accepts what
+    # the blueprint accepts in stacks/worker/, beside its package-lock.json.
     accepted = project / "osv-scanner.toml"
-    blueprint = (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text("utf-8")
-    assert accepted.is_file() == (kind == "home-assistant")
+    stacks = {
+        "home-assistant": ("home-assistant", "requirements-test.txt"),
+        "cloudflare-worker": ("worker", "package-lock.json"),
+    }
+    assert accepted.is_file() == (kind in stacks)
+    blueprint = ""
     if accepted.is_file():
+        stack, lock = stacks[kind]
+        blueprint = (ROOT / f"stacks/{stack}/osv-scanner.toml").read_text("utf-8")
         assert accepted.read_text(encoding="utf-8") == blueprint
-        assert (project / "requirements-test.txt").is_file()
+        assert (project / lock).is_file()
     # The rules of the blueprint extend those of the project's osv-scanner.toml.
     rules = renovate_rules(
         (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
@@ -11074,6 +11327,48 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# The advisory of picomatch that no version fixes (repo-blueprint#1018), in the lock
+# files of the tools that bring picomatch.
+PICOMATCH = "GHSA-fc5q-39xc-vjpf"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_tools_of_the_prose_accept_only_the_advisory_of_picomatch(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The acceptance beside the lock file of the spelling hint is the blueprint's own,
+    # in every kind of project, where OSV-Scanner reads it.
+    project = projects[kind]
+    accepted = ".github/prose/osv-scanner.toml"
+    blueprint = (ROOT / accepted).read_text(encoding="utf-8")
+    assert (project / accepted).read_text(encoding="utf-8") == blueprint
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert accepted in owned.splitlines()
+
+
+@pytest.mark.parametrize(
+    "config", [".github/prose/osv-scanner.toml", "stacks/worker/osv-scanner.toml"]
+)
+def test_an_advisory_without_a_fix_is_accepted_alone_and_ends(config: str) -> None:
+    # One advisory, by its id, with its reason and an end, after which OSV-Scanner
+    # reports it again; no version with every advisory, which would write a rule of
+    # Renovate that holds back the update that fixes it.
+    data = tomllib.loads((ROOT / config).read_text(encoding="utf-8"))
+    assert set(data) == {"IgnoredVulns"}
+    [entry] = data["IgnoredVulns"]
+    assert entry["id"] == PICOMATCH
+    assert set(entry) == {"id", "ignoreUntil", "reason"}
+    assert entry["ignoreUntil"] - datetime.date(2026, 11, 17) <= datetime.timedelta(
+        days=31
+    )
+    assert "picomatch" in entry["reason"]
+    # The lock file beside it has the package that the advisory names.
+    lock = json.loads((ROOT / config).with_name("package-lock.json").read_text("utf-8"))
+    assert "node_modules/picomatch" in lock["packages"]
+    preset = (ROOT / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
+    assert "picomatch" not in preset
 
 
 def renovate_rules(text: str) -> dict[str, Any]:
@@ -11296,14 +11591,13 @@ def test_renovate_keeps_no_dependency_dashboard_and_the_whole_monday(
     # No issue stays open for Renovate, so that a repository can have none: what
     # waits for the maintainer is a pull request. Renovate closes the dashboard that
     # an earlier release kept open only by its exact title, which therefore stays.
+    # Since Renovate 44.232.0 both are one object, and its check of the configuration
+    # fails on the two settings of before (#962).
     assert {
         key: value
         for key, value in shared.items()
         if key.startswith("dependencyDashboard")
-    } == {
-        "dependencyDashboard": False,
-        "dependencyDashboardTitle": "Dependency dashboard",
-    }
+    } == {"dependencyDashboard": {"enabled": False, "title": "Dependency dashboard"}}
     assert not any(key.startswith("dependencyDashboard") for key in own)
     # A rule that asks for the approval of the dashboard would open it again.
     assert "DashboardApproval" not in json.dumps([shared, own])
@@ -20693,6 +20987,128 @@ def test_the_flaky_test_bot_reports_no_job_that_harden_runner_stopped(
     assert not any(call.startswith("issue ") for call in calls)
 
 
+# What the error of the variants says, which only sums up the jobs that it needs.
+SUMS_UP = "this job only sums up the jobs that it needs"
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_check_that_github_kept_failing(
+    tmp_path: Path,
+) -> None:
+    # As in Dennis-Otto/repo-blueprint#970: the runner of a variant didn't reach
+    # api.github.com for minutes, so its check of the allowed actions said so, and the
+    # variants failed with it. Neither is a flaky test; a test that failed in another
+    # job of the same run still is.
+    unavailable = check_unavailable(
+        GitHubError(0, 'Post "https://api.github.com/graphql": i/o timeout'),
+        "read what the actions of the workflows run in turn",
+    )
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "variant (node-package)",
+                        "failure",
+                        (
+                            "Check that the allowed actions of the project let every"
+                            " action start",
+                            "failure",
+                        ),
+                    ),
+                    job_of_a_run(
+                        12,
+                        "variants",
+                        "failure",
+                        ("Require every variant to pass, or none to run", "failure"),
+                    ),
+                    job_of_a_run(
+                        13, "test (3.12)", "failure", ("Run the tests", "failure")
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                unavailable, EXITED
+            ),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(
+                f"A job that this one needs ended with failure; {SUMS_UP}.", EXITED
+            ),
+            "repos/o/r/check-runs/13/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/13/logs": (
+                "FAILED tests/test_a.py::test_one - AssertionError: no\n"
+            ),
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "variant (node-package)" not in summary
+    assert "| `variants`" not in summary
+    assert "tests/test_a.py::test_one" in summary
+    assert "variant" not in "".join(written.values())
+    assert any(call.startswith("issue create") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "others",
+    [
+        # Another step failed with an error of its own,
+        ("the Markdown lint found a long line", EXITED),
+        # or with no error but its exit.
+        (EXITED,),
+    ],
+)
+def test_the_flaky_test_bot_reports_a_job_that_failed_besides_github(
+    tmp_path: Path, others: tuple[str, ...]
+) -> None:
+    # In the job Lint, the steps after the checkout run even after one failed: when
+    # GitHub kept failing the check of the allowed actions and another step failed as
+    # well, that step may be flaky, and the job keeps its row.
+    unavailable = check_unavailable(
+        GitHubError(502, "Bad Gateway"), "read the allowed actions"
+    )
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        14,
+                        "Lint",
+                        "failure",
+                        (
+                            "Check that the allowed actions of the project let every"
+                            " action start",
+                            "failure",
+                        ),
+                        ("Lint the Markdown", "failure"),
+                    )
+                ]
+            },
+            "repos/o/r/check-runs/14/annotations": annotations_of_a_job(
+                unavailable, EXITED, *others
+            ),
+            "repos/o/r/actions/jobs/14/logs": "",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "Lint" in summary
+    assert any(call.startswith("issue create") for call in calls)
+
+
 @WITH_JQ
 def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     tmp_path: Path,
@@ -21362,6 +21778,13 @@ def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
     )
 
     assert (done.returncode == 0) == passes, done.stderr
+    # The flaky-test bot counts the variant that failed, not this job as well.
+    assert (SUMS_UP in done.stdout) != passes
+    if not passes:
+        assert done.stdout.startswith(
+            f"The plan, the variants and their pictures: {result}\n"
+            f"::error title=Variants::A job that this one needs ended with {result} ("
+        )
 
 
 def test_the_check_variants_fails_with_its_plan() -> None:
@@ -23120,6 +23543,76 @@ def test_every_project_draws_its_diagrams_as_pictures(
     # The colors of the blueprint's diagrams, the same in every repository.
     for color in ("`#526cfe`", "`#f59e0b`", "`#16a34a`"):
         assert color in contributing, color
+
+
+# In the copy of the mutation tests, scripts/diagrams.sh starts the tool of the project,
+# which is the code with the mutants and finds no configuration of mutmut in the
+# process that the script starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+def test_a_project_warns_of_a_diagram_changed_without_its_pictures(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The check of scripts/check.sh names a source that the branch changed without its
+    # pictures, so that its author draws them before the push, and fails nothing.
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    source = (
+        "flowchart TB\n    accTitle: How a change ships\n"
+        "    accDescr: A pull request merges.\n\n    pr --> main\n"
+    )
+    files = {
+        "docs/diagrams/steps.mmd": source,
+        "docs/images/diagrams/steps.svg": "<svg>\n",
+        "docs/images/diagrams/steps.dark.svg": "<svg dark>\n",
+        "docs/steps.md": "# Steps\n\n"
+        + diagrams.picture("steps", Path("docs/steps.md"), diagrams.alt_text(source)),
+    }
+    for name, text in files.items():
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).write_text(text, encoding="utf-8", newline="\n")
+    git = ["git", "-c", "user.name=T", "-c", "user.email=t@example.com"]
+    for arguments in (
+        ["init", "--quiet", "--initial-branch", "main"],
+        ["config", "core.autocrlf", "false"],
+        ["add", "--all"],
+        ["commit", "--quiet", "--no-gpg-sign", "-m", "Main"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["switch", "--quiet", "-c", "feature"],
+    ):
+        subprocess.run([*git, *arguments], cwd=project, check=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    environment = {**os.environ, "STUBS": stubs.as_posix(), "PYTHONIOENCODING": "utf-8"}
+
+    def check() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            in_bash("scripts/diagrams.sh", "--check"),
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    (project / "docs/diagrams/steps.mmd").write_text(
+        source.replace("--> main", "--> release"), encoding="utf-8", newline="\n"
+    )
+    alone = check()
+    for picture in ("steps.svg", "steps.dark.svg"):
+        (project / "docs/images/diagrams" / picture).write_text(
+            "<svg anew>\n", encoding="utf-8", newline="\n"
+        )
+    drawn = check()
+
+    assert alone.returncode == 0, alone.stdout + alone.stderr
+    assert alone.stdout.startswith(
+        "docs/diagrams/steps.mmd: changed on this branch, but its pictures in"
+        " docs/images/diagrams/ are not\nA warning: "
+    )
+    assert drawn.returncode == 0, drawn.stdout + drawn.stderr
+    assert (
+        drawn.stdout == "Each of the 1 diagram(s) in docs/diagrams/ has its pictures.\n"
+    )
 
 
 def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:

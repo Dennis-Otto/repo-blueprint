@@ -40,10 +40,15 @@ jobs:
       # Whether the job kept the report of the taint analysis for code scanning.
       taint: ${{ steps.taint.outcome }}
     env:
-      # The same krankerl as the release workflow's.
+      # The same krankerl as the release workflow's. The name of its package comes from
+      # its address in .github/pins.toml, which pins.py of the blueprint writes into
+      # KRANKERL_ASSET as it writes the sha256: the steps, and the upgrade test of a
+      # Nextcloud app that reads this pin, download that name and never build it from
+      # the version, as the revision -1 that krankerl added in 0.14.1 showed.
       # renovate: datasource=github-releases depName=ChristophWurst/krankerl extractVersion=^v(?<version>.+)$
-      KRANKERL_VERSION: 0.14.0
-      KRANKERL_SHA256: 9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f
+      KRANKERL_VERSION: 0.14.3
+      KRANKERL_SHA256: 3ca43eebc0c4766ce31db67dde96312b6c8b3d981ffebe4aeecf4fe0481883ef
+      KRANKERL_ASSET: krankerl_0.14.3-1_amd64.deb
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -125,10 +130,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          deb="$RUNNER_TEMP/krankerl/krankerl_${KRANKERL_VERSION}_amd64.deb"
+          deb="$RUNNER_TEMP/krankerl/$KRANKERL_ASSET"
           if [[ ! -f "$deb" ]]; then
             bash .github/download.sh ChristophWurst/krankerl "v$KRANKERL_VERSION" \
-              "krankerl_${KRANKERL_VERSION}_amd64.deb" "$deb" "$KRANKERL_SHA256"
+              "$KRANKERL_ASSET" "$deb" "$KRANKERL_SHA256"
           fi
           # The package of the cache too.
           echo "$KRANKERL_SHA256  $deb" | sha256sum --check --strict
@@ -265,18 +270,34 @@ jobs:
         run: |
           # The agent writes Initialized into its status once its firewall stands, and
           # runs as the service agent until the end of the job; one that is there may
-          # still be starting.
+          # still be starting. One that took its changes back says so in its log, and
+          # no status will come.
+          log=/home/agent/agent.log
           for _ in {1..30}; do
             [[ -e /home/agent/agent.status || ! -e /home/agent/agent ]] && break
+            grep -qs 'Reverted changes' "$log" && break
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
+          # Before its firewall stands, the agent looks up each host that it allows, and
+          # takes itself away again when a single lookup fails; its log names the host.
+          lookup="$(grep -s -m 1 'Error resolving allowed domain' "$log" || true)"
           if [[ ! -d /home/agent/ ]]; then
             # Harden-Runner returns before it makes the folder of the agent when
             # StepSecurity says that it is unavailable, or the repository skips it.
             why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
           elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
+          elif [[ -n "$lookup" ]]; then
+            # The host follows "resolve domain" when the resolver answered with an
+            # error, and "name=" when no resolver could be reached.
+            what="a host that it allows"
+            pattern='resolve domain ([^ ,]+)|name=([^&" ]+)'
+            if [[ "$lookup" =~ $pattern ]]; then
+              host="${BASH_REMATCH[1]:-${BASH_REMATCH[2]}}"
+              what="${host%.}, a host that it allows,"
+            fi
+            why="has an agent that took itself away again because a single lookup of $what failed, which is no outage,"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"
           elif ! systemctl is-active --quiet agent; then
@@ -286,6 +307,7 @@ jobs:
             exit 0
           fi
           echo "The status of the agent: ${status:-none}"
+          [[ -z "$lookup" ]] || echo "The log of the agent: $lookup"
           echo "::error title=Harden-Runner doesn't block::Harden-Runner $why so this job would reach every host, and it stops here instead. That is no problem of the change: run the job again."
           exit 1
       - name: Wait until Harden-Runner lets the hosts through

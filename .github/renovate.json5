@@ -78,6 +78,14 @@
       groupName: "the tools of the accessibility check",
     },
     {
+      // Its playwright-core drives the Chrome of the runner, beside no image of
+      // Playwright, so it keeps the week that the shared rules take from the packages
+      // of Playwright (decision 0168).
+      matchFileNames: [".github/a11y/**"],
+      matchPackageNames: ["playwright-core"],
+      minimumReleaseAge: "7 days",
+    },
+    {
       // The Mermaid that every website draws its diagrams with, within the major
       // version that Material loads: .github/mkdocs_blueprint.py warns when Material
       // loads another one, which fails the check docs, and then both move. The hooks

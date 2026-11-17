@@ -21,28 +21,38 @@ from shared import load_yaml
 from blueprint.cli import main
 from blueprint.screenshots import (
     ARROW,
+    AVERAGE,
     COMPARED_FILES,
     JOB_MINUTES,
     LARGEST,
+    MOST_MARKS,
     MOST_MINUTES,
+    MOST_REGIONS,
     RED,
     REPORT,
     SHOWN,
     STRIP,
+    TOLERANCE,
     Correction,
     Kept,
+    Measured,
+    Most,
     Page,
     Picture,
     Settings,
+    below_sight,
     changed_share,
     collect,
     commit_request,
+    compared,
     comparison,
     comparison_path,
     corrected_pages,
     corrections,
     diff_path,
     difference,
+    differences,
+    drawing,
     drawn_differences,
     due,
     fit_page,
@@ -50,10 +60,13 @@ from blueprint.screenshots import (
     fitted_size,
     frames,
     is_picture,
+    joined_box,
     keep,
     kept,
     listing,
     looks_like_its_kind,
+    marks,
+    most_changed,
     overtaken,
     pages_of_folder,
     parts,
@@ -69,9 +82,14 @@ from blueprint.screenshots import (
     settings,
     shown_picture,
     shown_share,
+    side_by_side,
     span,
     summary,
+    touching,
     written,
+)
+from blueprint.screenshots import (
+    changes as measured_changes,
 )
 
 GIT = shutil.which("git")
@@ -445,9 +463,15 @@ def compared_picture(
     before: tuple[int, int] | None = None,
     frame: int = 1,
     frames: int = 1,
+    pixels: int = 1,
+    box: tuple[int, int, int, int] = (0, 0, 1, 1),
+    all_over: bool = False,
 ) -> Picture:
     """A changed picture as keep names it with the picture of its difference and its
-    comparison, of the frame numbered frame of frames."""
+    comparison, of the frame numbered frame of frames, with pixels changed pixels,
+    by default the first of the top row, inside box, and all over the picture or
+    not. A picture of four pixels with one changed changed all over: its frame would
+    cover all of it."""
     return Picture(
         path,
         "changed",
@@ -457,6 +481,10 @@ def compared_picture(
         comparison=comparison_path(path),
         frame=frame,
         frames=frames,
+        pixels=pixels,
+        box=box,
+        seen=True,
+        all_over=all_over,
     )
 
 
@@ -773,13 +801,437 @@ def test_a_comparison_needs_the_same_size_and_frames_and_a_change() -> None:
     assert comparison(gif([blue, white], [100, 100]), gif([blue], [100])) is None
 
 
+# The threshold of sight
+
+SIGHT = Path(__file__).parent / "data" / "sight"
+
+
+def real_pair(name: str) -> tuple[bytes, bytes]:
+    """A real pair of tests/data/sight: a part of a picture of the visual check of
+    paperless-sync#511, as committed and as rendered with the new images of Nextcloud
+    of that pull request."""
+    return (
+        (SIGHT / f"{name}-before.png").read_bytes(),
+        (SIGHT / f"{name}-after.png").read_bytes(),
+    )
+
+
+def measured_of(before: bytes, after: bytes) -> Measured:
+    pairs = compared(before, after)
+    assert pairs is not None
+    return measured_changes(pairs)
+
+
+def test_the_shades_of_a_palette_and_the_edges_of_letters_are_no_change() -> None:
+    # paperless-sync#511: in frame 6 of archive-dark.gif, which the pager sent with
+    # 0.65 % of its pixels changed, the GIF took other colors of its palette for the
+    # same page, by up to 13 of 255, and other shades at the edges of letters, by up to
+    # 38: in this part, 706 pixels differ and nobody sees a change.
+    before, after = real_pair("palette")
+    pairs = compared(before, after)
+    assert pairs is not None
+    strongest_change = max(
+        value for value, count in enumerate(differences(*pairs[0]).histogram()) if count
+    )
+    # So a threshold on the colors alone would still count the edges of letters.
+    assert strongest_change > TOLERANCE
+    found = measured_of(before, after)
+    assert (found.differing, found.pixels, found.share, found.most) == (706, 0, 0, None)
+    assert found.spread == (0, 0, 320, 160)
+    assert difference(before, after) is None
+    assert comparison(before, after) is None
+
+
+def test_a_new_icon_is_a_change_with_a_frame_around_it_alone() -> None:
+    # The same pull request brought a new icon of the button that shows and hides
+    # the navigation of Nextcloud in every picture: a real change. 210 pixels differ
+    # in 18 by 14, and 140 of them in 17 by 14 lie above the threshold of sight.
+    before, after = real_pair("icon")
+    most = most_changed(before, after)
+    assert most is not None
+    assert most.mask.getbbox() == (45, 28, 62, 42)
+    assert marks(most) == [(45, 28, 62, 42)]
+    drawn = looked_at(difference(before, after))
+    # A picture 160 pixels long: a frame one pixel wide, two pixels away from the
+    # icon, around the icon alone.
+    frame = outline(43, 26, 63, 43)
+    assert frame <= red_of(drawn)
+    assert all(43 <= x <= 63 and 26 <= y <= 43 for x, y in red_of(drawn))
+
+
+def test_a_toolbar_laid_out_anew_is_a_change() -> None:
+    # The new viewer of PDF files of the same images moved the buttons of its toolbar.
+    before, after = real_pair("toolbar")
+    found = measured_of(before, after)
+    assert found.pixels > 1000
+    assert found.most is not None
+    assert found.most.mask.getbbox() == (7, 12, 752, 40)
+
+
+def page_of(data: bytes) -> Image.Image:
+    with Image.open(io.BytesIO(data)) as image:
+        return image.convert("RGB")
+
+
+def written_line(words: str, offset: int = 0) -> bytes:
+    """A line of dark text on white, drawn four times as large and scaled down, so
+    that its letters have soft edges, offset quarters of a pixel to the right."""
+    from PIL import ImageDraw, ImageFont
+
+    large = Image.new("RGB", (800, 120), (255, 255, 255))
+    ImageDraw.Draw(large).text(
+        (20 + offset, 20),
+        words,
+        fill=(34, 34, 34),
+        font=ImageFont.load_default(size=56),
+    )
+    return saved(large.resize((200, 30), Image.Resampling.BOX))
+
+
+@pytest.mark.parametrize("offset", [1, 2, 4])
+def test_letters_drawn_a_little_further_are_no_change(offset: int) -> None:
+    # A new browser draws the edges of the letters in other shades, or a pixel
+    # further: a quarter, a half and a whole pixel.
+    before, after = (
+        written_line("Mirror of Paperless"),
+        written_line("Mirror of Paperless", offset),
+    )
+    assert measured_of(before, after).differing > 300
+    assert changed_share(before, after) == 0
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("Mirror of Paperless", "Mirror of Paperwork"),
+        ("Updated 5 minutes ago", "Updated 6 minutes ago"),
+        ("Version 1.2.1", "Version 1.2.7"),
+        # A single letter that changes little: o for c.
+        ("Paperless docs", "Paperless dccs"),
+        # A space more, which moves the words after it.
+        ("Mirror of Paperless", "Mirror  of Paperless"),
+    ],
+)
+def test_another_text_is_a_change(before: str, after: str) -> None:
+    assert changed_share(written_line(before), written_line(after)) != 0
+
+
+def changed_page(change: str) -> bytes:
+    """The real picture of the icon with the button New moved, with another word or
+    in another color."""
+    from PIL import ImageDraw, ImageFont
+
+    page = page_of(real_pair("icon")[1])
+    button = page.crop((76, 16, 157, 54))
+    blue = page.getpixel((90, 22))
+    if change.startswith("moved"):
+        page.paste((255, 255, 255), (76, 16, 157, 54))
+        page.paste(button, (76 + int(change.split()[1]), 16))
+    elif change == "text":
+        draw = ImageDraw.Draw(page)
+        draw.rectangle((110, 26, 148, 44), fill=blue)
+        draw.text(
+            (112, 27), "Neu", fill=(255, 255, 255), font=ImageFont.load_default(size=14)
+        )
+    else:
+        lighter = int(change.split()[1])
+        page.paste(button.point(lambda value: min(255, value + lighter)), (76, 16))
+    return saved(page)
+
+
+@pytest.mark.parametrize(
+    ("change", "seen"),
+    [
+        ("moved 4", True),
+        ("moved 2", True),
+        # A pixel further is an edge that moved, as the edges of letters do.
+        ("moved 1", False),
+        ("text", True),
+        ("color 25", True),
+        ("color 40", True),
+        # Lighter by TOLERANCE, which nobody tells apart.
+        (f"color {TOLERANCE}", False),
+    ],
+)
+def test_a_moved_button_another_word_and_another_color_are_changes(
+    change: str, seen: bool
+) -> None:
+    before = real_pair("icon")[1]
+    assert (changed_share(before, changed_page(change)) != 0) is seen
+
+
+@pytest.mark.parametrize(("shade", "seen"), [(170, False), (160, True)])
+def test_a_thin_line_that_changes_its_shade_little_is_no_change(
+    shade: int, seen: bool
+) -> None:
+    # A known blind spot of the threshold (decision 0169): a line one pixel wide
+    # beside white is an edge, and a shade of it within the edge is no change.
+    from PIL import ImageDraw
+
+    def bordered(gray: int) -> bytes:
+        page = Image.new("RGB", (200, 100), (255, 255, 255))
+        ImageDraw.Draw(page).rectangle((20, 20, 179, 79), outline=(gray,) * 3)
+        return saved(page)
+
+    assert (measured_of(bordered(200), bordered(shade)).pixels != 0) is seen
+
+
+@pytest.mark.parametrize("size", [12, 14, 16])
+def test_an_i_that_becomes_an_l_is_no_change(size: int) -> None:
+    # The other known blind spot: a stroke one pixel wide that grows by a pixel
+    # beside a stroke as dark, as an I that becomes an l in a small font.
+    from PIL import ImageDraw, ImageFont
+
+    def written(words: str) -> bytes:
+        page = Image.new("RGB", (120, 40), (255, 255, 255))
+        ImageDraw.Draw(page).text(
+            (10, 10), words, fill=(0, 0, 0), font=ImageFont.load_default(size=size)
+        )
+        return saved(page)
+
+    found = measured_of(written("I"), written("l"))
+    assert found.differing > 0
+    assert found.pixels == 0
+
+
+def test_a_single_pixel_counts_when_it_shows() -> None:
+    blue = Image.new("RGB", (200, 100), BLUE[:3])
+    dot = blue.copy()
+    dot.putpixel((100, 50), (255, 255, 255))
+    assert measured_of(saved(blue), saved(dot)).pixels == 1
+    faint = blue.copy()
+    faint.putpixel((100, 50), (160, 160, 255))
+    # Its average of nine pixels changed by less than AVERAGE.
+    assert (160 - BLUE[0]) // 9 < AVERAGE
+    assert measured_of(saved(blue), saved(faint)).pixels == 0
+
+
+def test_frames_join_only_when_they_would_touch() -> None:
+    assert touching([(0, 0, 10, 10), (14, 0, 20, 10), (40, 40, 50, 50)], 5) == [
+        (0, 0, 20, 10),
+        (40, 40, 50, 50),
+    ]
+    assert touching([(0, 0, 10, 10), (15, 0, 20, 10)], 5) == [
+        (0, 0, 10, 10),
+        (15, 0, 20, 10),
+    ]
+    # Joined boxes join the next one too.
+    assert touching([(0, 0, 4, 4), (6, 0, 10, 4), (12, 0, 16, 4)], 3) == [(0, 0, 16, 4)]
+
+
+def spots_changed(spots: list[tuple[int, int, int, int]], size: int = 1000) -> Most:
+    before = Image.new("RGB", (size, size), (240, 240, 240))
+    after = before.copy()
+    for box in spots:
+        after.paste((0, 0, 0), box)
+    most = most_changed(saved(before), saved(after))
+    assert most is not None
+    return most
+
+
+def test_a_picture_that_changed_in_a_few_places_gets_a_frame_around_each() -> None:
+    # Changes 16 pixels apart share a frame, changes far apart don't.
+    most = spots_changed(
+        [(100, 100, 110, 110), (126, 100, 136, 110), (700, 700, 720, 710)]
+    )
+    assert marks(most) == [(100, 100, 136, 110), (700, 700, 720, 710)]
+
+
+def test_many_small_changes_close_together_get_one_frame_around_them_all() -> None:
+    # A column of counters that each changed a little, too many frames to follow,
+    # in a small part of the picture: one frame points at them all.
+    spots = [(100, 50 + 50 * row, 108, 60 + 50 * row) for row in range(MOST_MARKS + 2)]
+    most = spots_changed(spots)
+    assert marks(most) == [joined_box(spots)]
+    drawn = page_of(drawing(most))
+    left, top, right, bottom = joined_box(spots)
+    changed = {
+        (x, y)
+        for spot in spots
+        for x in range(spot[0], spot[2])
+        for y in range(spot[1], spot[3])
+    }
+    # A frame besides the changed pixels, within its margin of them.
+    assert red_of(drawn) - changed
+    assert all(
+        left - 10 <= x < right + 10 and top - 10 <= y < bottom + 10
+        for x, y in red_of(drawn)
+    )
+
+
+@pytest.mark.parametrize(
+    "spots",
+    [
+        # One large place, a quarter of the picture.
+        [(0, 0, 500, 500)],
+        # More places than a person follows, over the whole picture: the one frame
+        # around them all would cover more than a fifth of it.
+        [
+            (250 * x, 250 * y, 250 * x + 4, 250 * y + 4)
+            for x in range(4)
+            for y in range(4)
+        ],
+        # So many places that their frames aren't even joined.
+        [
+            (90 * x, 90 * y, 90 * x + 4, 90 * y + 4)
+            for x in range(MOST_REGIONS // 10 + 1)
+            for y in range(11)
+        ],
+    ],
+)
+def test_a_picture_that_changed_all_over_gets_no_frame(
+    spots: list[tuple[int, int, int, int]],
+) -> None:
+    most = spots_changed(spots)
+    assert marks(most) is None
+    drawn = page_of(drawing(most))
+    # Only the changed pixels are red, with no frame around them.
+    assert red_of(drawn) == {
+        (x, y)
+        for left, top, right, bottom in spots
+        for x in range(left, right)
+        for y in range(top, bottom)
+    }
+    compared_of = page_of(side_by_side(most))
+    assert not red_of(compared_of)
+
+
+def test_keep_measures_each_change_and_names_what_nobody_sees(tmp_path: Path) -> None:
+    before_palette, after_palette = real_pair("palette")
+    before_icon, after_icon = real_pair("icon")
+    big = Image.new("RGB", (400, 300), (240, 240, 240))
+    changed_all_over = big.copy()
+    changed_all_over.paste((0, 0, 0), (0, 0, 300, 200))
+    root = repository(
+        tmp_path / "repository",
+        {
+            "docs/images/palette.png": before_palette,
+            "docs/images/icon.png": before_icon,
+            "docs/images/all.png": saved(big),
+        },
+    )
+    write(
+        root,
+        {
+            "docs/images/palette.png": after_palette,
+            "docs/images/icon.png": after_icon,
+            "docs/images/all.png": saved(changed_all_over),
+        },
+    )
+    folder = tmp_path / "kept"
+    found = keep(root, folder)
+
+    assert found.pictures == (
+        compared_picture(
+            "docs/images/all.png",
+            0.5,
+            pixels=60_000,
+            box=(0, 0, 300, 200),
+            all_over=True,
+        ),
+        compared_picture(
+            "docs/images/icon.png", 140 / 12_800, pixels=140, box=(45, 28, 62, 42)
+        ),
+    )
+    assert found.unseen == (
+        Picture(
+            "docs/images/palette.png",
+            "changed",
+            706 / 51_200,
+            pixels=706,
+            box=(0, 0, 320, 160),
+            seen=False,
+        ),
+    )
+    assert (root / "docs/images/palette.png").read_bytes() == before_palette
+    assert kept(folder) == found
+    text = summary(found)
+    assert "| `docs/images/all.png` | changed all over | 50.00 % |" in text
+    assert "| `docs/images/icon.png` | changed | 1.09 % |" in text
+    assert below_sight(found) in text
+    assert below_sight(found) == (
+        "These pictures differ only below the threshold of sight, such as in the "
+        "shades of a palette or at the edges of letters, so they keep their files: "
+        "`docs/images/palette.png` (706 pixels).\n"
+    )
+    assert below_sight(found) in report(folder, SHA, RUN)
+
+
+def test_the_sentence_of_what_nobody_sees_names_ten() -> None:
+    unseen = tuple(
+        Picture(f"docs/{number}.png", "changed", 0.1, pixels=3, seen=False)
+        for number in range(12)
+    )
+    assert below_sight(Kept((), unseen=unseen)).endswith(
+        "`docs/9.png` (3 pixels) and 2 more.\n"
+    )
+    assert below_sight(Kept(())) == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("box", [0, 0, 0, 1], r"\[0, 0, 0, 1\] is no box"),
+        ("box", [1, 2, 3], r"is no box"),
+        ("box", [-1, 0, 1, 1], r"is no box"),
+        ("box", [0, 0, 1, 1.5], r"1\.5 is no whole number"),
+        ("pixels", "1", r"'1' is no whole number"),
+        ("seen", "yes", r"'yes' is no true or false"),
+        ("all_over", 1, r"1 is no true or false"),
+    ],
+)
+def test_the_bot_needs_readable_measures_in_the_report(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [compared_picture("docs/a.png", 0.25)],
+        drawn={"diff/docs/a.png": png(), "comparison/docs/a.png": png()},
+    )
+    assert kept(folder).pictures[0].box == (0, 0, 1, 1)
+    data = json.loads((folder / REPORT).read_text(encoding="utf-8"))
+    data["pictures"][0][field] = value
+    (folder / REPORT).write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        kept(folder)
+
+
+@pytest.mark.parametrize(
+    ("unseen", "message"),
+    [
+        (
+            Picture("docs/a.png", "changed", 0.1, pixels=1, seen=False),
+            r"names docs/a\.png below the threshold of sight, which is no picture "
+            r"that kept its file",
+        ),
+        (
+            Picture("README.md", "changed", 0.1, pixels=1, seen=False),
+            r"names README\.md below the threshold",
+        ),
+    ],
+)
+def test_the_bot_takes_only_pictures_below_the_threshold_that_kept_their_files(
+    tmp_path: Path, unseen: Picture, message: str
+) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [Picture("docs/a.png", "new")],
+        unseen=(unseen,),
+    )
+    with pytest.raises(ValueError, match=message):
+        kept(folder)
+
+
 # What the bot keeps
 
 
 def rendered(tmp_path: Path) -> Path:
     """A repository after scripts/screenshots.sh rendered its pictures anew: one in
     another file with the same pixels, one with other pixels, a new one, a deleted
-    one, an animation that waited longer, and a page of Markdown."""
+    one, an animation that waited longer, one in a shade that nobody sees, and a page
+    of Markdown."""
     blue, white = (82, 108, 254), (255, 255, 255)
     root = repository(
         tmp_path / "repository",
@@ -790,12 +1242,15 @@ def rendered(tmp_path: Path) -> Path:
             "docs/images/gone.png": png(),
             "docs/images/recording.gif": gif([blue, white], [100, 100]),
             "docs/images/untouched.png": png(changed=2),
+            "docs/images/faint.png": png(),
         },
     )
     write(
         root,
         {
             "README.md": b"# Demo, rendered\n",
+            # Another shade of the blue, by 8 of 255, which nobody sees.
+            "docs/images/faint.png": png(color=(90, 112, 250, 255)),
             "docs/images/same.png": png(level=0),
             "docs/images/other.png": png(changed=1),
             "docs/images/new.png": png(size=(2, 2)),
@@ -815,15 +1270,27 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
         (
             Picture("docs/images/gone.png", "deleted"),
             Picture("docs/images/new.png", "new"),
-            compared_picture("docs/images/other.png", 0.25),
+            compared_picture("docs/images/other.png", 0.25, all_over=True),
         ),
         ("README.md",),
+        (
+            Picture(
+                "docs/images/faint.png",
+                "changed",
+                1.0,
+                pixels=4,
+                box=(0, 0, 4, 1),
+                seen=False,
+            ),
+        ),
     )
     # The pictures that look the same have their committed files back.
     assert git_in(root, "status", "--porcelain", "--", "docs/images/same.png") == ""
     assert (
         git_in(root, "status", "--porcelain", "--", "docs/images/recording.gif") == ""
     )
+    # So does one whose pixels changed below the threshold of sight.
+    assert git_in(root, "status", "--porcelain", "--", "docs/images/faint.png") == ""
     files = sorted(
         path.relative_to(folder).as_posix()
         for path in folder.rglob("*")
@@ -860,6 +1327,10 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "comparison": None,
                 "frame": None,
                 "frames": None,
+                "pixels": None,
+                "box": None,
+                "seen": None,
+                "all_over": False,
             },
             {
                 "path": "docs/images/new.png",
@@ -870,6 +1341,10 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "comparison": None,
                 "frame": None,
                 "frames": None,
+                "pixels": None,
+                "box": None,
+                "seen": None,
+                "all_over": False,
             },
             {
                 "path": "docs/images/other.png",
@@ -880,9 +1355,22 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "comparison": "comparison/docs/images/other.png",
                 "frame": 1,
                 "frames": 1,
+                "pixels": 1,
+                "box": [0, 0, 1, 1],
+                "seen": True,
+                "all_over": True,
             },
         ],
         "ignored": ["README.md"],
+        "unseen": [
+            {
+                "path": "docs/images/faint.png",
+                "share": 1.0,
+                "pixels": 4,
+                "box": [0, 0, 4, 1],
+                "seen": False,
+            }
+        ],
     }
     # What it kept passes the checks of the job that commits it.
     assert kept(folder) == found
@@ -969,7 +1457,7 @@ def test_keep_takes_a_video_beside_a_gif_only_with_the_gif(tmp_path: Path) -> No
         {
             "docs/images/a.gif": gif([(1, 2, 3), (1, 2, 3)], [50, 50]),
             "docs/images/a.mp4": video + b"new",
-            "docs/images/b.gif": gif([(0, 0, 0)], [100]),
+            "docs/images/b.gif": gif([(255, 255, 255)], [100]),
             "docs/images/b.mp4": video + b"new",
         },
     )
@@ -1001,10 +1489,13 @@ def folder_with(
     name: str = "kept",
     ignored: tuple[str, ...] = (),
     drawn: dict[str, bytes] | None = None,
+    unseen: tuple[Picture, ...] | None = None,
 ) -> Path:
     """The folder of a run of keep with these files, and with the pictures of the
     differences in drawn, by their paths in the folder. Its report names diff only
-    for a picture that has one, as a keep before the differences left it."""
+    for a picture that has one, as a keep before the differences left it, what keep
+    measured only for a picture that says whether it is seen, and unseen only when
+    there is a list of them, as a keep before the threshold of sight left it."""
     folder = tmp_path / name
     for path, data in [
         *((f"files/{path}", data) for path, data in files.items()),
@@ -1037,10 +1528,36 @@ def folder_with(
                             if p.comparison
                             else {}
                         ),
+                        **(
+                            {
+                                "pixels": p.pixels,
+                                "box": p.box,
+                                "seen": p.seen,
+                                "all_over": p.all_over,
+                            }
+                            if p.seen is not None
+                            else {}
+                        ),
                     }
                     for p in pictures
                 ],
                 "ignored": list(ignored),
+                **(
+                    {
+                        "unseen": [
+                            {
+                                "path": p.path,
+                                "share": p.share,
+                                "pixels": p.pixels,
+                                "box": p.box,
+                                "seen": False,
+                            }
+                            for p in unseen
+                        ]
+                    }
+                    if unseen is not None
+                    else {}
+                ),
             }
         ),
         encoding="utf-8",
@@ -1754,7 +2271,7 @@ def repository_with_pages(tmp_path: Path) -> Path:
         root,
         {
             "s/a.png": png(size=(660, 878)),
-            "s/same.png": png(size=(660, 788), changed=2),
+            "s/same.png": png(size=(660, 788), changed=3),
         },
     )
     return root
@@ -1768,7 +2285,9 @@ def test_keep_names_the_size_of_a_picture_that_came_out_at_another(
     found = keep(root, folder)
     assert found.pictures == (
         Picture("s/a.png", "changed", None, (660, 788)),
-        compared_picture("s/same.png", 1 / (660 * 788)),
+        # Of its two new white pixels, the one beside the white one before is an
+        # edge that moved by a pixel, which nobody sees.
+        compared_picture("s/same.png", 1 / (660 * 788), box=(2, 0, 3, 1)),
     )
     assert kept(folder) == found
     assert resized(found, root) == {"s/a.png": ((660, 788), (660, 878))}
@@ -1813,7 +2332,7 @@ def test_the_incident_of_a_pull_request_that_could_not_pass(tmp_path: Path) -> N
         for addition in additions
     } == {
         "s/a.png": png(size=(660, 878)),
-        "s/same.png": png(size=(660, 788), changed=2),
+        "s/same.png": png(size=(660, 788), changed=3),
         **{page.path: page.data for page in pages},
     }
 
@@ -2415,7 +2934,7 @@ def test_keep_takes_the_files_that_the_settings_name(tmp_path: Path) -> None:
             Picture("docs/demo/gone.json", "deleted", kind="file"),
             Picture("docs/demo/new.json", "new", kind="file"),
             Picture(TIMELINE, "changed", kind="file"),
-            compared_picture("docs/images/a.png", 0.25),
+            compared_picture("docs/images/a.png", 0.25, all_over=True),
         ),
         ("docs/demo/other.json",),
     )
@@ -2538,6 +3057,17 @@ def test_the_summary_and_the_description_name_the_files(tmp_path: Path) -> None:
 # Shards
 
 
+# A picture whose pixels differ only below the threshold of sight, as keep names it.
+FAINT = Picture(
+    "docs/images/en/faint.png",
+    "changed",
+    0.5,
+    pixels=4,
+    box=(0, 0, 4, 1),
+    seen=False,
+)
+
+
 def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
     english = folder_with(
         tmp_path / "shards",
@@ -2552,6 +3082,7 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
             EN_DIFFERENCE: png(color=(*RED, 255)),
             EN_COMPARISON: png(color=(*RED, 128)),
         },
+        unseen=(FAINT,),
     )
     german = folder_with(
         tmp_path / "shards",
@@ -2571,6 +3102,7 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
             Picture("docs/images/en/old.png", "deleted"),
         ),
         ("README.md", "notes.txt"),
+        (FAINT,),
     )
     # As one run of keep over every picture would have left it, and checked alike.
     assert kept(folder, (TIMELINE,)) == found
@@ -2592,7 +3124,20 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
         "comparison": EN_COMPARISON,
         "frame": 3,
         "frames": 7,
+        "pixels": 1,
+        "box": [0, 0, 1, 1],
+        "seen": True,
+        "all_over": False,
     }
+    assert report_of["unseen"] == [
+        {
+            "path": "docs/images/en/faint.png",
+            "share": 0.5,
+            "pixels": 4,
+            "box": [0, 0, 4, 1],
+            "seen": False,
+        }
+    ]
     assert report_of["pictures"][1]["diff"] is None
     assert report_of["pictures"][1]["comparison"] is None
 
@@ -2653,7 +3198,8 @@ def test_the_commands_of_the_screenshot_bot(
     assert main(["screenshots", "keep", str(folder)], root=root) == 0
     assert capsys.readouterr().out.startswith("These pictures look different:")
     assert main(["screenshots", "restore"], root=root) == 0
-    assert "| `docs/images/other.png` | changed | 25.00 % |" in capsys.readouterr().out
+    restored = capsys.readouterr().out
+    assert "| `docs/images/other.png` | changed all over | 25.00 % |" in restored
     # Without Pillow, the command names what installs it.
     with pytest.MonkeyPatch.context() as patch:
         patch.setitem(sys.modules, "PIL", None)

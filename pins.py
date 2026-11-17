@@ -15,7 +15,18 @@ version, it runs
                               download; tests/test_pins.py fails on them
 
 so that the update merges on its own like any other, and the blueprint bot brings it
-to every repository.
+to every repository. When the new release of a tool on GitHub has no asset of the
+name in the record, as when krankerl 0.14.1 added the revision -1 to the name of its
+package, the error that Renovate shows in the pull request names the assets that the
+release has instead.
+
+A pin may name its file as well, on a third line whose name ends in ASSET or asset,
+such as KRANKERL_ASSET: krankerl_0.14.3-1_amd64.deb: pins.py writes it from the
+address of the record, as it writes the sha256, and --check names each that differs,
+so that a file that downloads it, or reads the pin of another file, as the upgrade
+test of a Nextcloud app reads the one of its CI, takes the name from the pin and never
+builds it from the version itself. A new name of a release then is one change of the
+address in the record, and python3 pins.py writes it into every file.
 
 The record also keeps the version of the package of npm that an action runs, such as
 markdownlint-cli2 of DavidAnson/markdownlint-cli2-action, from the package.json of the
@@ -50,12 +61,14 @@ FILES = (
     ".github/mkdocs-blueprint-pins.toml",
 )
 # A download, pinned below its line "# renovate:": the version as in YAML (NAME: 1.2.3),
-# in the shell (name=1.2.3) or in TOML (name = "1.2.3"), and the sha256 on the next
-# line in the same form.
+# in the shell (name=1.2.3) or in TOML (name = "1.2.3"), the sha256 on the next line
+# in the same form, and maybe the name of its file on the line after that, by a name
+# that ends in ASSET or asset (KRANKERL_ASSET: krankerl_1.2.3-1_amd64.deb).
 PIN = re.compile(
     r"# renovate: datasource=\S+ depName=(?P<dep>\S+)[^\n]*\n"
     r"[ \t]*(?P<name>[\w-]+)(?:: | ?= ?)\"?(?P<version>[^\"\s]+)\"?[ \t]*\n"
-    r"[ \t]*[\w-]+(?:: | ?= ?)\"?(?P<sha256>[0-9a-f]{64})\"?[ \t]*$",
+    r"[ \t]*[\w-]+(?:: | ?= ?)\"?(?P<sha256>[0-9a-f]{64})\"?[ \t]*$"
+    r"(?:\n[ \t]*[\w-]*(?:ASSET|asset)(?:: | ?= ?)\"?(?P<asset>[^\"\s]+)\"?[ \t]*$)?",
     re.MULTILINE,
 )
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -68,6 +81,13 @@ USES = re.compile(r"uses: (?P<dep>[\w.-]+/[\w.-]+)@(?P<commit>[0-9a-f]{40})\b")
 IMAGE_FILES = (".github/*.sh", ".github/workflows/*.yml", "scripts/*.sh")
 # The package.json of an action at a commit, from which pins.py reads its version.
 PACKAGE_JSON = "https://raw.githubusercontent.com/{dep}/{commit}/package.json"
+# The address of an asset of a release on GitHub, and the release of its tag, which
+# lists the names of its assets.
+RELEASE_ASSET = re.compile(
+    r"https://github\.com/(?P<repository>[^/]+/[^/]+)/releases/download/"
+    r"(?P<tag>[^/]+)/(?P<asset>[^/]+)"
+)
+RELEASE = "https://api.github.com/repos/{repository}/releases/tags/{tag}"
 HEADER = """\
 # The tools that the workflows, the scripts and the websites of .github download and
 # check by their sha256, each pinned below a line "# renovate:": the address of the
@@ -104,6 +124,10 @@ class Download:
     version: str
     sha256: str
 
+    def asset(self, version: str) -> str:
+        """The name of the file of a version: the end of its address."""
+        return self.url.rsplit("/", 1)[-1].replace("{version}", version)
+
 
 @dataclass(frozen=True)
 class Bundle:
@@ -136,7 +160,8 @@ class Image:
 
 @dataclass(frozen=True)
 class Pin:
-    """A download that a file pins, and where its sha256 is in the file."""
+    """A download that a file pins, where its sha256 is in the file, and the name of
+    its file with where that is, when the pin names it."""
 
     path: str
     dep: str
@@ -144,6 +169,8 @@ class Pin:
     version: str
     sha256: str
     start: int
+    asset: str | None = None
+    asset_start: int = -1
 
 
 def read_record(root: Path) -> dict[str, Any]:
@@ -247,6 +274,8 @@ def find_pins(root: Path) -> list[Pin]:
                         found["version"],
                         found["sha256"],
                         found.start("sha256"),
+                        found["asset"],
+                        found.start("asset"),
                     )
                 )
     return pins
@@ -393,6 +422,12 @@ def check(root: Path) -> list[str]:
                 f"{pin.path}: the sha256 of {pin.dep} {pin.version} differs from "
                 f"{RECORD}; python3 pins.py writes the right one"
             )
+        if pin.asset is not None and pin.asset != download.asset(pin.version):
+            problems.append(
+                f"{pin.path}: {pin.dep} {pin.version} is the file "
+                f"{download.asset(pin.version)} by its address in {RECORD}, not "
+                f"{pin.asset}; python3 pins.py writes the right one"
+            )
     return problems + bundle_problems(root, load_bundles(root))
 
 
@@ -456,6 +491,30 @@ def bundled(url: str, package: str, read: Fetch) -> str:
     return version
 
 
+def renamed(dep: str, url: str, read: Fetch) -> list[str]:
+    """For an asset of a release on GitHub that could not be downloaded, the names of
+    the assets that the release has, when its own is not among them: a release may
+    name its files anew, as krankerl 0.14.1 named its package krankerl_0.14.1-1_amd64.deb
+    instead of krankerl_0.14.1_amd64.deb, and the address of the record then needs the
+    new name. Nothing for any other address, or when the release can't be read."""
+    asset = RELEASE_ASSET.fullmatch(url)
+    if not asset:
+        return []
+    try:
+        release = json.loads(read(RELEASE.format(**asset.groupdict())))
+        names = [str(entry["name"]) for entry in release["assets"]]
+    except (PinError, ValueError, KeyError, TypeError):
+        return []
+    if asset["asset"] in names:
+        return []
+    return [
+        f"The release {asset['tag']} of {asset['repository']} has no asset "
+        f"{asset['asset']}, only {', '.join(names) or 'none'}: give the url of {dep} "
+        f"in {RECORD} the new name, with {{version}} for the version; python3 pins.py "
+        "then writes it into each pin that names the file"
+    ]
+
+
 def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]:
     """Write the sha256 of each version that moved, and the version of the package of
     each action whose commit moved; what it wrote, a line each."""
@@ -471,18 +530,34 @@ def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]
     for dep, entry in record.items():
         version = pinned[dep][0]
         if version != entry.version:
-            sha256 = fetch(entry.url.replace("{version}", version))
+            url = entry.url.replace("{version}", version)
+            try:
+                sha256 = fetch(url)
+            except PinError as error:
+                raise PinError(error.problems + renamed(dep, url, read)) from error
             record[dep] = replace(entry, version=version, sha256=sha256)
             done.append(f"{dep} {version}: sha256 {sha256}")
-    texts: dict[str, str] = {}
+    # What changes in each file, from its end to its start, so that a name of another
+    # length leaves the places of the changes before it as they are.
+    edits: dict[str, list[tuple[int, int, str]]] = {}
     for pin in pins:
-        sha256 = record[pin.dep].sha256
-        if pin.sha256 != sha256:
-            if pin.path not in texts:
-                texts[pin.path] = (root / pin.path).read_bytes().decode("utf-8")
-            text = texts[pin.path]
-            texts[pin.path] = text[: pin.start] + sha256 + text[pin.start + 64 :]
+        entry = record[pin.dep]
+        if pin.sha256 != entry.sha256:
+            edits.setdefault(pin.path, []).append(
+                (pin.start, pin.start + 64, entry.sha256)
+            )
             done.append(f"{pin.path}: the sha256 of {pin.dep} {pin.version}")
+        asset = entry.asset(pin.version)
+        if pin.asset is not None and pin.asset != asset:
+            end = pin.asset_start + len(pin.asset)
+            edits.setdefault(pin.path, []).append((pin.asset_start, end, asset))
+            done.append(f"{pin.path}: the file of {pin.dep} {pin.version}, {asset}")
+    texts: dict[str, str] = {}
+    for path, changes in edits.items():
+        text = (root / path).read_bytes().decode("utf-8")
+        for start, end, new in sorted(changes, reverse=True):
+            text = text[:start] + new + text[end:]
+        texts[path] = text
     pinned = commits(uses)
     for dep, bundle in bundles.items():
         commit = pinned[dep][0]
