@@ -802,7 +802,8 @@ jobs:
         with:
           egress-policy: audit
       # The plan too: a plan that fails skips the legs, which would look like none had
-      # to run.
+      # to run. Its error says that the job only sums up the others, so that the
+      # flaky-test bot counts the job that failed, not this one as well.
       - name: Require every variant to pass, or none to run
         env:
           RESULT: ${{ needs.plan.result }} ${{ needs.variant.result }} ${{ needs.pictures.result }}
@@ -810,7 +811,10 @@ jobs:
           echo "The plan, the variants and their pictures: $RESULT"
           read -ra results <<<"$RESULT"
           for result in "${results[@]}"; do
-            [[ "$result" == success || "$result" == skipped ]]
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error title=Variants::A job that this one needs ended with $result (the plan, the variants and their pictures: $RESULT); this job only sums up the jobs that it needs, and the errors of the job that failed say why."
+              exit 1
+            fi
           done
       # The PR coach needs blueprint.py and .github/checks.toml, nothing else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

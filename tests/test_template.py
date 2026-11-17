@@ -97,7 +97,7 @@ from blueprint.checklist import (
 )
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
-from blueprint.github import Api
+from blueprint.github import Api, GitHubError
 from blueprint.locks import why_renovate_skips
 from blueprint.migrate import (
     ISSUE_ASSISTANT,
@@ -112,6 +112,7 @@ from blueprint.migrate import (
     no_bot_fixes_label,
 )
 from blueprint.mutation import NOTHING_MATCHES, default_paths
+from blueprint.outage import check_unavailable
 from blueprint.pages import CELL_WORDS, layouts, long_blocks, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import (
@@ -20693,6 +20694,128 @@ def test_the_flaky_test_bot_reports_no_job_that_harden_runner_stopped(
     assert not any(call.startswith("issue ") for call in calls)
 
 
+# What the error of the variants says, which only sums up the jobs that it needs.
+SUMS_UP = "this job only sums up the jobs that it needs"
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_check_that_github_kept_failing(
+    tmp_path: Path,
+) -> None:
+    # As in Dennis-Otto/repo-blueprint#970: the runner of a variant didn't reach
+    # api.github.com for minutes, so its check of the allowed actions said so, and the
+    # variants failed with it. Neither is a flaky test; a test that failed in another
+    # job of the same run still is.
+    unavailable = check_unavailable(
+        GitHubError(0, 'Post "https://api.github.com/graphql": i/o timeout'),
+        "read what the actions of the workflows run in turn",
+    )
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "variant (node-package)",
+                        "failure",
+                        (
+                            "Check that the allowed actions of the project let every"
+                            " action start",
+                            "failure",
+                        ),
+                    ),
+                    job_of_a_run(
+                        12,
+                        "variants",
+                        "failure",
+                        ("Require every variant to pass, or none to run", "failure"),
+                    ),
+                    job_of_a_run(
+                        13, "test (3.12)", "failure", ("Run the tests", "failure")
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                unavailable, EXITED
+            ),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(
+                f"A job that this one needs ended with failure; {SUMS_UP}.", EXITED
+            ),
+            "repos/o/r/check-runs/13/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/13/logs": (
+                "FAILED tests/test_a.py::test_one - AssertionError: no\n"
+            ),
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "variant (node-package)" not in summary
+    assert "| `variants`" not in summary
+    assert "tests/test_a.py::test_one" in summary
+    assert "variant" not in "".join(written.values())
+    assert any(call.startswith("issue create") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "others",
+    [
+        # Another step failed with an error of its own,
+        ("the Markdown lint found a long line", EXITED),
+        # or with no error but its exit.
+        (EXITED,),
+    ],
+)
+def test_the_flaky_test_bot_reports_a_job_that_failed_besides_github(
+    tmp_path: Path, others: tuple[str, ...]
+) -> None:
+    # In the job Lint, the steps after the checkout run even after one failed: when
+    # GitHub kept failing the check of the allowed actions and another step failed as
+    # well, that step may be flaky, and the job keeps its row.
+    unavailable = check_unavailable(
+        GitHubError(502, "Bad Gateway"), "read the allowed actions"
+    )
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        14,
+                        "Lint",
+                        "failure",
+                        (
+                            "Check that the allowed actions of the project let every"
+                            " action start",
+                            "failure",
+                        ),
+                        ("Lint the Markdown", "failure"),
+                    )
+                ]
+            },
+            "repos/o/r/check-runs/14/annotations": annotations_of_a_job(
+                unavailable, EXITED, *others
+            ),
+            "repos/o/r/actions/jobs/14/logs": "",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "Lint" in summary
+    assert any(call.startswith("issue create") for call in calls)
+
+
 @WITH_JQ
 def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     tmp_path: Path,
@@ -21362,6 +21485,13 @@ def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
     )
 
     assert (done.returncode == 0) == passes, done.stderr
+    # The flaky-test bot counts the variant that failed, not this job as well.
+    assert (SUMS_UP in done.stdout) != passes
+    if not passes:
+        assert done.stdout.startswith(
+            f"The plan, the variants and their pictures: {result}\n"
+            f"::error title=Variants::A job that this one needs ended with {result} ("
+        )
 
 
 def test_the_check_variants_fails_with_its_plan() -> None:
