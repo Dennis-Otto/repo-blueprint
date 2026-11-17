@@ -11428,14 +11428,21 @@ def refresh_of(
 
 
 # The weekly refresh of the lock files of a package manager that keeps it to versions
-# at least a week old merges by itself; any other waits for the maintainer on a branch
-# of its own, which the check of the age leaves alone.
+# at least a week old merges by itself; so does that of Composer, which nothing dates
+# (decision 0174), on a branch of its own; any other waits for the maintainer on a
+# branch of its own, which the check of the age leaves alone.
 MERGES_BY_ITSELF = {
     "minimumReleaseAge": "7 days",
     "automerge": True,
     "updateNotScheduled": False,
     "additionalBranchPrefix": "",
     "statusCheckWhen": {"minimumReleaseAge": "never"},
+}
+COMPOSER = {
+    "minimumReleaseAge": None,
+    "automerge": True,
+    "updateNotScheduled": False,
+    "additionalBranchPrefix": "composer-",
 }
 WAITS = {
     "minimumReleaseAge": None,
@@ -11462,10 +11469,12 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     }
     # npm takes --before= from minimumReleaseAge, and blueprint.py compiles the lock
     # files of pip-compile again, both from versions a week old: their refresh merges
-    # by itself. Composer and any other package manager can't keep to that age, so
-    # theirs waits. Renovate builds a refresh anew only in its window, so that what
-    # merges is what the checks and the maintainer saw; the branch bot keeps it up to
-    # date with main, as Renovate does in its window.
+    # by itself. Composer can't keep to that age, and its refresh merges by itself
+    # all the same, with no week that would pretend to hold and on a branch of its
+    # own, so that it can't take the --before= of npm away in a shared one; any other
+    # package manager waits. Renovate builds a refresh anew only in its window, so
+    # that what merges is what the checks saw; the branch bot keeps it up to date
+    # with main, as Renovate does in its window.
     blueprint = "blueprint.py" if kind == "blueprint" else ".github/blueprint.py"
     for manager in ("npm", "pip-compile"):
         refresh = refresh_of(shared, own, manager)
@@ -11482,7 +11491,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
             else None
         )
     assert shared["rebaseWhen"] == "behind-base-branch"
-    for manager in ("composer", "poetry", "bundler"):
+    assert refresh_of(shared, own, "composer") == COMPOSER
+    for manager in ("poetry", "bundler", "gomod"):
         assert refresh_of(shared, own, manager) == WAITS, manager
     # The age of a refresh, and the command after it, are for the refresh alone: the
     # fix of a vulnerability still comes at once and merges on its own.
@@ -11507,7 +11517,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     assert not re.search(allowed[0], f"python3 {blueprint} locks --fix")
     # The check dependency-review holds a refresh that merges by itself when a version
     # younger than a week comes anyway, on the branches that Renovate names it, alone
-    # or in a group; one that waits begins with review- and stays out.
+    # or in a group, and names the versions of Composer that nothing dates; one that
+    # waits begins with review- and stays out.
     review = job_in(
         (root / ".github/workflows/dependency-review.yml").read_text(encoding="utf-8"),
         "dependency-review",
@@ -11517,6 +11528,7 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     assert branches == [
         "renovate/lock-file-maintenance",
         "renovate/pip-compile-refresh",
+        f"renovate/{COMPOSER['additionalBranchPrefix']}lock-file-maintenance",
     ]
     assert not any(
         f"renovate/{WAITS['additionalBranchPrefix']}".startswith(branch)
@@ -11550,8 +11562,10 @@ def test_the_mend_app_keeps_npm_alone_to_versions_a_week_old(tmp_path: Path) -> 
     )
     # The Mend Renovate app runs no command of the blueprint, so the refresh of
     # pip-compile waits for the maintainer; npm takes --before= from Renovate itself.
+    # Composer needs no command, so its refresh merges by itself there too.
     assert refresh_of(shared, own, "npm") == MERGES_BY_ITSELF
     assert refresh_of(shared, own, "pip-compile") == WAITS
+    assert refresh_of(shared, own, "composer") == COMPOSER
     assert "postUpgradeTasks" not in str(shared)
 
 

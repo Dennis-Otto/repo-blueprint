@@ -1365,11 +1365,31 @@ def locks_refresh_command(root: Path) -> int:
 
 def locks_age_command(base: str, root: Path) -> int:
     """Whether each version that the refresh in HEAD adds to the lock files of base
-    is at least a week old, as the refresh merges by itself only then."""
-    added, problems = lock_age.check(root, base, datetime.now(UTC))
-    for problem in problems:
+    is at least a week old, as the refresh merges by itself only then; the versions
+    of Composer, which nothing dates, pass on the branch of its refresh, and the
+    summary names them."""
+    found = lock_age.check(
+        root, base, datetime.now(UTC), branch=os.environ.get("GITHUB_HEAD_REF", "")
+    )
+    if found.undated:
+        undated = [f"{version}: nothing dates it." for version in found.undated]
+        note = (
+            f"Nothing dates the {len(found.undated)} version(s) of Composer that the "
+            "refresh adds: Composer has no cooldown, and whoever publishes a version "
+            "sets its time in composer.lock. So the refresh of Composer brings "
+            "versions of any age, also one published minutes before, and merges by "
+            "itself once every check passes, as decision 0174 of the blueprint "
+            "accepts."
+        )
+        print("\n".join([*undated, note]))
+        to_summary(
+            "### Versions that nothing dates\n\n"
+            + "".join(f"- `{version}`\n" for version in found.undated)
+            + f"\n{note}\n"
+        )
+    for problem in found.problems:
         print(problem)
-    if problems:
+    if found.problems:
         print(
             "The weekly refresh of the lock files merges by itself only from versions "
             "at least a week old, as every other update waits a week, so this one "
@@ -1385,9 +1405,11 @@ def locks_age_command(base: str, root: Path) -> int:
             "for the maintainer on a branch of its own."
         )
         return 1
-    print(
-        f"Each of the {added} version(s) that the refresh adds is at least a week old."
-    )
+    if found.dated or not found.undated:
+        print(
+            f"Each of the {found.dated} version(s) that the refresh adds is at least "
+            "a week old."
+        )
     return 0
 
 
