@@ -7,6 +7,12 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.20.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.4...v1.20.5) (2026-11-17)
+
+### Bug fixes
+
+- The upgrade test of a Nextcloud app can install krankerl again. The checks and the release now name the package of krankerl in `KRANKERL_ASSET` beside its version and sha256, and a workflow of the project that reads the pin of krankerl from `.github/workflows/ci.yml`, such as an upgrade test in `.github/workflows/e2e.yml`, downloads that name instead of building it from the version: read `KRANKERL_ASSET` with `KRANKERL_VERSION` and `KRANKERL_SHA256` and pass `"$KRANKERL_ASSET"` to `.github/download.sh`. When krankerl names its package anew, one change of its address in the blueprint brings the new name to every repository.
+
 ## [1.20.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.3...v1.20.4) (2026-11-17)
 
 ### Bug fixes
