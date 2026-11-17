@@ -9,19 +9,16 @@ requests when there is none.
 
 ## [1.21.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.6...v1.21.0) (2026-11-17)
 
-
 ### Features
 
-* scripts/check.sh warns of a diagram source changed without its pictures ([#1013](https://github.com/Dennis-Otto/repo-blueprint/issues/1013)) ([a162eea](https://github.com/Dennis-Otto/repo-blueprint/commit/a162eea1af0f8e698b67968b98aa140ed780ef73))
-
+- `bash scripts/check.sh` warns when your branch changes the source of a diagram in `docs/diagrams/` but not its two pictures, which would fail the check *diagrams* once after the push and start a second round of checks. With Docker, it says to run `bash scripts/diagrams.sh` before the push; without Docker, that the diagram bot draws the pictures after the push, or that a pull request from a fork finds them in the artifact of the check. It compares the branch with its merge base with the default branch, only warns and fails nothing, and says nothing in a shallow clone or without the default branch.
 
 ### Bug fixes
 
-* **advisories:** accept the advisory of picomatch that no version fixes ([#1021](https://github.com/Dennis-Otto/repo-blueprint/issues/1021)) ([e387ce4](https://github.com/Dennis-Otto/repo-blueprint/commit/e387ce44a5f480194c64bc8997a3330eba14b3ee))
-* **deps:** a young version of main no longer breaks the weekly lock refresh ([#1015](https://github.com/Dennis-Otto/repo-blueprint/issues/1015)) ([1370dae](https://github.com/Dennis-Otto/repo-blueprint/commit/1370dae234c8002cef2115a570527bfec1a06ce2))
-* **deps:** an update of Playwright no longer warns that npm's --before failed ([#1017](https://github.com/Dennis-Otto/repo-blueprint/issues/1017)) ([08f2c1c](https://github.com/Dennis-Otto/repo-blueprint/commit/08f2c1c445ffd5735de3f37d007e921b9ab79343))
-* **deps:** lock file maintenance ([#983](https://github.com/Dennis-Otto/repo-blueprint/issues/983)) ([5cb9952](https://github.com/Dennis-Otto/repo-blueprint/commit/5cb995205aae52069a7ef95b0115d3de5fc72ecc))
-* **harden-runner:** a job that one failed lookup stopped names the host ([#1014](https://github.com/Dennis-Otto/repo-blueprint/issues/1014)) ([29e02bd](https://github.com/Dennis-Otto/repo-blueprint/commit/29e02bd3ad349a7d03a1901701b94adcf98ec883))
+- An update of Playwright no longer makes Renovate warn that npm's `--before` could not be enforced, which reached the issue *Renovate logs problems* in every run until the update merged. The images of Playwright on mcr.microsoft.com now come without a release age, as their packages do, so a group of Playwright gives npm no `--before` whichever of its updates comes first. The pull request installs what it did before, and the image still comes at once.
+- A job that blocks and stops because the agent of Harden-Runner took itself away again after one failed lookup of a host that it allows now says so: its annotation names the host and that it was no outage, instead of an agent that didn't start, and the job stops at once instead of waiting half a minute for a status that can't come. The bots still run such a job again, and the fix of the cause belongs in Harden-Runner's agent. A workflow of the project with a job that blocks copies the step *Make sure that Harden-Runner blocks* from `.github/workflows/welcome.yml` again.
+- The weekly refresh of the lock files of pip-compile no longer fails when `main` has a version younger than a week, such as the fix of a vulnerability or a release of Playwright: that package keeps the version of `main`, and every other package still takes only versions at least a week old. A refresh that would take back a version of `main`, such as npm's refresh that resolves a range back to an older version, now waits until Renovate builds it anew, and no longer passes once that version is a week old.
+- OSV-Scanner and Findings pass on `main` again: the advisory GHSA-fc5q-39xc-vjpf (CVE-2026-112366) of picomatch, which no version fixes yet, is accepted alone, until 2026-12-17, in the new `.github/prose/osv-scanner.toml` beside the tools of the spelling hint, which bring picomatch to every repository, with the reason that only the repository's own documents and the documents of a pull request in its own job reach it. Every other advisory still fails the scan, and nothing keeps Renovate from the version that fixes it: the weekly refresh of the lock files brings it. A new Cloudflare Worker gets the same acceptance in its `osv-scanner.toml` for the picomatch of Vitest and Vite. An existing Worker keeps its own `osv-scanner.toml`: add the entry `[[IgnoredVulns]]` of `stacks/worker/osv-scanner.toml` of the blueprint to it, or create the file with that content, beside its `package-lock.json`.
 
 ## [1.20.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.5...v1.20.6) (2026-11-17)
 
