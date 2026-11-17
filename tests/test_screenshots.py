@@ -964,7 +964,7 @@ def test_a_moved_button_another_word_and_another_color_are_changes(
 def test_a_thin_line_that_changes_its_shade_little_is_no_change(
     shade: int, seen: bool
 ) -> None:
-    # A known blind spot of the threshold (decision 0168): a line one pixel wide
+    # A known blind spot of the threshold (decision 0169): a line one pixel wide
     # beside white is an edge, and a shade of it within the edge is no change.
     from PIL import ImageDraw
 

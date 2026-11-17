@@ -111,7 +111,7 @@ RED = (220, 38, 38)
 # the red of the changes stands out, while a dark page stays dark, a light one light,
 # and the picture and its text stay clear.
 VEIL = 0.2
-# The threshold of sight (decision 0168). A pixel changed only when both hold:
+# The threshold of sight (decision 0169). A pixel changed only when both hold:
 # - one of its colors, or its opacity, lies more than TOLERANCE of 255 beyond those of
 #   the same place and its eight neighbors in the other picture, either way: the box
 #   around the colors of the neighbors takes every shade between them, which is what

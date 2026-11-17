@@ -1,6 +1,6 @@
 # Keep draws the difference of every picture, with frames for a phone
 
-- Status: accepted, amended by [0149](0149-a-comparison-shows-the-place-of-a-change-before-and-after-of-one-frame.md), with which the difference shows the picture in its own colors behind a light veil, beside a comparison of the place of the change before and after, and by [0168](0168-what-nobody-sees-is-no-change-and-frames-point-at-what-changed.md), with which only a change that one sees counts and the frames join only when they would touch
+- Status: accepted, amended by [0149](0149-a-comparison-shows-the-place-of-a-change-before-and-after-of-one-frame.md), with which the difference shows the picture in its own colors behind a light veil, beside a comparison of the place of the change before and after, and by [0169](0169-what-nobody-sees-is-no-change-and-frames-point-at-what-changed.md), with which only a change that one sees counts and the frames join only when they would touch
 - Date: 2026-11-08
 
 ## Context

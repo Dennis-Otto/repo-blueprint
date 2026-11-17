@@ -643,7 +643,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/usr/src/app" --workdir /usr/src/app \
-            ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435 \
+            ghcr.io/renovatebot/renovate:44.247.2@sha256:5b777fc44b9736e4bd656ba7c54dc54fb76290b2701983c0bb06f16df0c54ad5 \
             renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
       - name: Validate the integration with hassfest
         if: matrix.start != 'adopted' && matrix.kind == 'home-assistant'
