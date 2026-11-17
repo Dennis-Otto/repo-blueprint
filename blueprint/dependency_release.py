@@ -1,9 +1,12 @@
-"""Whether the open release pull request merges itself as a release of dependency
-updates (decision 0087), for the release bot.
+"""Whether the open release pull request merges itself in this run of the release
+bot: as a release of dependency updates (decision 0087), or as the daily release of a
+repository whose variable RELEASE_MERGE is daily (decision 0176).
 
 A release of nothing but dependency updates merges itself once a day, in the run of
 the schedule of the release bot or in one started by hand, and at once when an update
 fixes a vulnerability; a release with a change of a person waits for the maintainer.
+With RELEASE_MERGE daily, every release merges in that daily run, at most one a day,
+and at once in a run started by hand or with the fix of a vulnerability.
 What counts is what the release is made of: a commit that release-please makes
 something of, as `matters()` of the overrides says, is in the release, and it must be
 a dependency update without a version of its own. A commit that release-please makes
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from blueprint.bot_health import default_branch
 from blueprint.github import Api, Json
@@ -40,6 +44,36 @@ LATER = (
 )
 NOW = (
     "The release holds nothing but dependency updates and merges once its checks pass."
+)
+
+# The value of the variable RELEASE_MERGE with which the release bot merges every
+# release once a day; any other value, or none, leaves it to the maintainer.
+DAILY = "daily"
+# The event of the daily run, which merges the release at most once a day (UTC).
+SCHEDULE = "schedule"
+# The time of the schedule of release.yml in the blueprint, which a test keeps equal
+# to its cron; a repository made from the blueprint runs it some minutes later.
+TIME = "02:25 UTC"
+# The comment that says in the release pull request when it goes, found by its first
+# line, so that each pull request gets it once.
+NOTICE = "<!-- The daily release of the release bot -->"
+
+DAILY_NOW = "The daily release: the release merges once its checks pass."
+BY_HAND = (
+    "A run started by hand, or by the bot-health bot for a daily run that GitHub"
+    " missed: the release merges at once, once its checks pass."
+)
+SECURITY_NOW = (
+    "The release holds the fix of a vulnerability and merges at once, once its"
+    " checks pass."
+)
+WAITS = (
+    f"The release merges in the daily release of the release bot at {TIME},"
+    " once its checks pass."
+)
+TODAY = (
+    "A release went out today already: this one merges in the daily release of"
+    f" tomorrow, at {TIME}."
 )
 
 
@@ -92,10 +126,67 @@ def decide(commits: list[Json], event: str) -> Verdict:
     return Verdict(True, NOW)
 
 
-def dependency_release(api: Api, repo: str, event: str) -> Verdict:
+def daily(commits: list[Json], event: str, *, today: bool) -> Verdict:
+    """Whether the release with these commits since the last one merges in a run of
+    the event, where the release bot merges every release once a day: in the daily run
+    when no release went out on its day (UTC) yet, and at once in a run started by
+    hand or with the fix of a vulnerability, the ways for what can't wait."""
+    if any(SECURITY.search(message_of(commit).split("\n", 1)[0]) for commit in commits):
+        return Verdict(True, SECURITY_NOW)
+    if event == MERGE:
+        return Verdict(False, WAITS)
+    if event != SCHEDULE:
+        return Verdict(True, BY_HAND)
+    if today:
+        return Verdict(False, TODAY)
+    return Verdict(True, DAILY_NOW)
+
+
+def same_day(published: object, now: datetime) -> bool:
+    """Whether a release published at this time of GitHub, such as
+    2026-11-17T02:41:07Z, went out on the day (UTC) of now."""
+    if not isinstance(published, str) or not published:
+        return False
+    moment = datetime.fromisoformat(published.replace("Z", "+00:00"))
+    return moment.astimezone(UTC).date() == now.astimezone(UTC).date()
+
+
+def notice() -> str:
+    """The comment that says in the release pull request when it goes, and how it
+    goes at once."""
+    return "\n".join(
+        [
+            NOTICE,
+            f"The release bot merges this pull request in the daily release at {TIME},"
+            " once its checks pass; GitHub may start its daily run later. A release"
+            " that went out the same day (UTC) moves it to the next one.",
+            "",
+            "For a fix that can't wait, such as one for the repositories that a"
+            " release broke, release at once: start the workflow Release by hand,"
+            " under *Actions → Release → Run workflow* or with"
+            " `gh workflow run release.yml`, and it merges once its checks pass. A fix"
+            " of a vulnerability that Renovate marks with `[security]` goes at once by"
+            " itself.",
+        ]
+    )
+
+
+def dependency_release(
+    api: Api,
+    repo: str,
+    event: str,
+    merge: str = "",
+    now: datetime | None = None,
+) -> Verdict:
     """Whether the open release pull request merges itself in this run of the release
-    bot, by the commits of the default branch since the latest release."""
-    if not isinstance(api.get(f"repos/{repo}/releases/latest"), dict):
+    bot, by the commits of the default branch since the latest release and by the
+    variable RELEASE_MERGE, in merge."""
+    latest = api.get(f"repos/{repo}/releases/latest")
+    if not isinstance(latest, dict):
         return Verdict(False, FIRST)
     branch = default_branch(api, repo)
-    return decide(list(since_last_release(api, repo, branch)), event)
+    commits = list(since_last_release(api, repo, branch))
+    if merge.strip() == DAILY:
+        today = same_day(latest.get("published_at"), now or datetime.now(UTC))
+        return daily(commits, event, today=today)
+    return decide(commits, event)

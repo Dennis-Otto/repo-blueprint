@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1100,13 +1101,20 @@ MERGE_STEP = "Merge a release of dependency updates once its checks pass"
 RELEASE_PR = json.dumps({"number": 21, "headBranchName": "release-please--x"})
 
 
-def decides(verdict: str) -> str:
+# The comment of a daily release, as blueprint.py writes it with RELEASE_MERGE daily.
+NOTICE = "<!-- The daily release of the release bot -->\nIt goes at 02:25 UTC.\n"
+
+
+def decides(verdict: str, notice: str = "") -> str:
     """A stub of python3 that writes its call down and decides as blueprint.py does:
-    merge=true or merge=false into the file after --output, and its reason."""
+    merge=true or merge=false into the file after --output, the notice into the one
+    after --notice, and its reason."""
     return recording(
         "python3",
-        'while [[ "$1" != --output ]]; do shift; done\n'
-        f'printf "merge=%s\\n" {verdict} > "$2"\necho "The reason."',
+        'while (($#)); do case "$1" in --output) output="$2" ;;'
+        ' --notice) notice="$2" ;; esac; shift; done\n'
+        f'printf "merge=%s\\n" {verdict} > "$output"\n'
+        f'printf "%s" {shlex.quote(notice)} > "$notice"\necho "The reason."',
     )
 
 
@@ -1117,6 +1125,8 @@ def run_the_merge_of_dependency_updates(
     event: str = "schedule",
     pr: str = RELEASE_PR,
     script: str = ".github/blueprint.py",
+    merge: str = "maintainer",
+    notice: str = "",
 ) -> StepResult:
     done = run_step(
         tmp_path,
@@ -1124,8 +1134,14 @@ def run_the_merge_of_dependency_updates(
         "release-please",
         MERGE_STEP,
         answers=[*answers, Answer(r"pr merge --repo o/r --auto --squash 21")],
-        env={"GH_TOKEN": "app-token", "PR": pr, "GITHUB_EVENT_NAME": event},
-        stubs={"python3": decides(verdict)},
+        env={
+            "GH_TOKEN": "app-token",
+            "COMMENT_TOKEN": "job-token",
+            "PR": pr,
+            "GITHUB_EVENT_NAME": event,
+            "RELEASE_MERGE": merge,
+        },
+        stubs={"python3": decides(verdict, notice)},
         files={script: ""},
     )
     assert done.returncode == 0, done.stderr
@@ -1155,16 +1171,75 @@ def test_blueprint_py_decides_whether_the_release_merges_itself(
         tmp_path, verdict=verdict, event=event, script=script
     )
 
+    runner = (tmp_path / "runner").as_posix()
     assert done.stubbed == [
         f"python3 {script} --repo o/r release dependency-only --event {event} "
-        f"--output {(tmp_path / 'runner' / 'dependency-only').as_posix()}"
+        f"--merge maintainer --output {runner}/dependency-only "
+        f"--notice {runner}/notice.md"
     ]
+    # Without RELEASE_MERGE daily, no notice: the pull request gets no comment.
+    assert done.called("api") == []
+    assert done.called("pr comment") == []
     assert done.called("pr merge") == (
         ["pr merge --repo o/r --auto --squash 21"] if verdict == "true" else []
     )
     # The reason stays in the log and in the summary of the run.
     assert done.stdout.startswith("The reason.\n")
     assert done.summary == "The reason.\n"
+
+
+# The fake gh leaves out the header of the version of the API.
+COMMENTS = "api --paginate repos/o/r/issues/21/comments --jq .[].body"
+
+
+@WITH_JQ
+@pytest.mark.parametrize("verdict", ["true", "false"])
+def test_the_daily_release_says_when_it_goes_once_in_each_pull_request(
+    tmp_path: Path, verdict: str
+) -> None:
+    done = run_the_merge_of_dependency_updates(
+        tmp_path,
+        Answer(re.escape(COMMENTS), json=[{"body": "Another comment."}]),
+        Answer(r"pr comment --repo o/r 21 --body-file .*"),
+        verdict=verdict,
+        event="push",
+        merge="daily",
+        notice=NOTICE,
+    )
+
+    # The step passes the variable to blueprint.py, which decides by it.
+    assert " --merge daily " in done.stubbed[0]
+    assert done.read_by("pr comment", "--body-file") == [NOTICE]
+    # It says so whether the release merges now, with the fix of a vulnerability,
+    # or waits for the daily run.
+    assert done.called("pr merge") == (
+        ["pr merge --repo o/r --auto --squash 21"] if verdict == "true" else []
+    )
+
+    again = run_the_merge_of_dependency_updates(
+        tmp_path / "again",
+        Answer(
+            re.escape(COMMENTS),
+            json=[{"body": "Another comment."}, {"body": NOTICE}],
+        ),
+        verdict=verdict,
+        event="push",
+        merge="daily",
+        notice=NOTICE,
+    )
+
+    assert again.called("api") == [COMMENTS]
+    assert again.called("pr comment") == []
+
+
+def test_the_comment_of_the_daily_release_starts_no_workflow() -> None:
+    merge = step("release.yml", "release-please", MERGE_STEP)
+
+    # A comment of the release app would start the workflows of issue_comment; one
+    # of the job's token starts none.
+    assert merge["env"]["COMMENT_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert merge["env"]["RELEASE_MERGE"] == "${{ vars.RELEASE_MERGE }}"
+    assert 'GH_TOKEN="$COMMENT_TOKEN" gh pr comment' in merge["run"]
 
 
 @WITH_JQ
@@ -1221,8 +1296,10 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
         ],
         env={
             "GH_TOKEN": "app-token",
+            "COMMENT_TOKEN": "job-token",
             "PR": RELEASE_PR,
             "GITHUB_EVENT_NAME": "schedule",
+            "RELEASE_MERGE": "",
         },
         stubs={"python3": decides("true")},
         files={".github/blueprint.py": ""},

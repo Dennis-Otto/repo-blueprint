@@ -70,7 +70,8 @@ from blueprint.coach import (
 from blueprint.coach import annotation as coach_annotation
 from blueprint.coach import report as coach_report
 from blueprint.coverage_comment import Coverage, coverage_comment
-from blueprint.dependency_release import dependency_release
+from blueprint.dependency_release import DAILY, dependency_release
+from blueprint.dependency_release import notice as release_notice
 from blueprint.diagrams import (
     SOURCES,
     commit_request,
@@ -2030,6 +2031,17 @@ def add_changelog_parsers(
         required=True,
         help="the file to write merge=true or merge=false into",
     )
+    dependency_parser.add_argument(
+        "--merge",
+        default="",
+        help="the variable RELEASE_MERGE: daily merges every release once a day "
+        "(decision 0176); any other value leaves it to the maintainer",
+    )
+    dependency_parser.add_argument(
+        "--notice",
+        help="the file to write the comment into that says in the release pull "
+        "request when it goes, with RELEASE_MERGE daily; empty otherwise",
+    )
     beta_parser = commands.add_parser(
         "beta", help="the notes of a beta of the next release, for the release bot"
     )
@@ -3334,10 +3346,15 @@ def main(
             print(write_overrides(api, repo), end="")
             return 0
         if arguments.command == "release":
-            verdict = dependency_release(api, repo, arguments.event)
+            verdict = dependency_release(api, repo, arguments.event, arguments.merge)
             Path(arguments.output).write_text(
                 f"merge={'true' if verdict.merge else 'false'}\n", encoding="utf-8"
             )
+            if arguments.notice:
+                daily = arguments.merge.strip() == DAILY
+                Path(arguments.notice).write_text(
+                    f"{release_notice()}\n" if daily else "", encoding="utf-8"
+                )
             print(verdict.text)
             return 0
         if arguments.command == "workflows":

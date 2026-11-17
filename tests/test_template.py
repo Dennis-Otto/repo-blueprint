@@ -96,6 +96,7 @@ from blueprint.checklist import (
     social_preview,
 )
 from blueprint.coach import Catalog, missing, undeclared
+from blueprint.dependency_release import DAILY
 from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api, GitHubError
 from blueprint.locks import why_renovate_skips
@@ -10881,12 +10882,45 @@ def test_the_release_bot_rebuilds_its_pull_request_for_every_merge_into_its_note
     # releases waits for auto-merge or the daily run (decision 0175).
     text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert triggers(text)["push"] == ["    branches: [main]"]
-    assert triggers(text)["schedule"] == ['    - cron: "25 5 * * *"']
+    assert triggers(text)["schedule"] == ['    - cron: "25 2 * * *"']
     rebuild = step_named(
         text, "Have the release pull request rebuilt on the current main"
     )
     assert condition_of(rebuild) == "steps.app.outputs.token != ''"
     assert "skip-github-pull-request" not in text
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_project_can_release_once_a_day_as_the_blueprint_does(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # #990: the blueprint releases at most once a day; a new repository keeps the
+    # maintainer's merge, as before, until it chooses the daily release (decision 0176).
+    own = Settings.load(ROOT / ".github/repository.toml")
+    assert own.variables["RELEASE_MERGE"] == DAILY
+    toml = (projects[kind] / ".github/repository.toml").read_text(encoding="utf-8")
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    assert settings.variables["RELEASE_MERGE"] == "maintainer"
+
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/repository.toml").write_text(toml, encoding="utf-8")
+    (tmp_path / ".github/repository.project.toml").write_text(
+        f'[variables]\nRELEASE_MERGE = "{DAILY}"\n', encoding="utf-8"
+    )
+    daily = Settings.load(tmp_path / ".github/repository.toml", projects[kind])
+    assert daily.variables["RELEASE_MERGE"] == DAILY
+
+    # The release bot of every project reads the variable, and its daily run comes
+    # at the hour of the blueprint's, in the minute of the project's slot.
+    text = (projects[kind] / ".github/workflows/release.yml").read_text("utf-8")
+    merge = step_named(
+        text, "Merge a release of dependency updates once its checks pass"
+    )
+    assert merge["env"]["RELEASE_MERGE"] == "${{ vars.RELEASE_MERGE }}"
+    assert '--merge "$RELEASE_MERGE"' in merge["run"]
+    (cron,) = triggers(text)["schedule"]
+    assert re.fullmatch(r'    - cron: "\d+ 2 \* \* \*"', cron)
+    assert "  workflow_dispatch:" in text
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -14711,6 +14745,7 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
         "RELEASE_AUTOMATION_CLIENT_ID": "Iv23liOcto",
         "RELEASE_AUTOMATION_APP_ID": "12345",
         "ISSUE_ASSISTANT_AI": "on",
+        "RELEASE_MERGE": "maintainer",
         "REVIEWS_OF_MAIN": "off",
     }
     creation = next(
