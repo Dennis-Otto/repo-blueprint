@@ -64,7 +64,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, diagrams, ownership, screenshots
+from blueprint import bootstrap, branches, diagrams, ownership, screenshots
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -10870,10 +10870,15 @@ def test_dependabot_merges_as_the_release_app(
     assert "dependabot-automerge.yml" in dangerous
 
 
-def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> None:
+def test_the_release_bot_rebuilds_its_pull_request_for_every_merge_into_its_notes() -> (
+    None
+):
     # main takes only a pull request that is up to date with it, so a release pull
     # request that only the schedule rebuilt couldn't merge for hours, and its notes
-    # would miss what merged since (decision 0033).
+    # would miss what merged since (decision 0033). release-please runs for every push,
+    # and rebuilds its pull request for each merge that changes its notes, such as a
+    # beta's version or a fix of a vulnerability; a merge that changes nothing that it
+    # releases waits for auto-merge or the daily run (decision 0175).
     text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert triggers(text)["push"] == ["    branches: [main]"]
     assert triggers(text)["schedule"] == ['    - cron: "25 5 * * *"']
@@ -10882,6 +10887,27 @@ def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> No
     )
     assert condition_of(rebuild) == "steps.app.outputs.token != ''"
     assert "skip-github-pull-request" not in text
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_branch_bot_can_start_the_release_bot_of_every_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Once auto-merge is turned on for a release pull request that is behind main, the
+    # branch bot starts the release bot by the name of its workflow, which rebuilds the
+    # pull request in a run by hand, as in the daily one (decision 0175).
+    workflows = projects[kind] / ".github/workflows"
+    text = (workflows / branches.RELEASE_WORKFLOW).read_text(encoding="utf-8")
+    assert "workflow_dispatch" in triggers(text)
+    rebuild = step_named(
+        text, "Have the release pull request rebuilt on the current main"
+    )
+    assert '"$GITHUB_EVENT_NAME" == push' in rebuild["run"]
+    # The token of the branch bot's job may start it.
+    bot = job_in(
+        (workflows / "update-branches.yml").read_text(encoding="utf-8"), "update"
+    )
+    assert bot["permissions"]["actions"] == "write"
 
 
 @pytest.mark.parametrize("kind", KINDS)
