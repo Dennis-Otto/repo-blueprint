@@ -1356,7 +1356,8 @@ def test_a_young_version_of_main_stays_while_the_rest_keeps_to_the_week(
     # main got alpha 1.0 a day after the cutoff, such as a release of Playwright,
     # which comes without the week, and Renovate's refresh moved it to the newest
     # patch; gamma's version of main is one that PyPI can't date; epsilon's came out
-    # at the cutoff itself, and zeta's long before.
+    # at the cutoff itself, which uv's cutoff no longer lets through, and zeta's long
+    # before.
     content = lock(
         REQUIREMENTS_HEADER,
         "alpha==1.2",
@@ -1367,7 +1368,7 @@ def test_a_young_version_of_main_stays_while_the_rest_keeps_to_the_week(
     )
     refreshed(root, "requirements.txt", content)
     fake_uv.answers(
-        lock("", "alpha==1.0", "beta==2.0", "gamma==3.0", "epsilon==4.1", "zeta==5.0")
+        lock("", "alpha==1.0", "beta==2.0", "gamma==3.0", "epsilon==4.0", "zeta==5.0")
     )
     answers: dict[str, datetime | None] = {
         "alpha": datetime(2026, 11, 3, 21, 9, tzinfo=UTC),
@@ -1387,12 +1388,18 @@ def test_a_young_version_of_main_stays_while_the_rest_keeps_to_the_week(
     # instead of failing the compile and leaving Renovate's newest versions of every
     # package; the rest of the file still keeps to the week.
     assert not found.failure
-    assert found.differences == ("alpha==1.2", "gamma==3.1", "zeta==5.1")
-    assert fake_uv.constraints == ["alpha==1.0\nepsilon>=4.0\ngamma==3.0\nzeta>=5.0\n"]
-    assert asked(fake_uv)[-6:] == [
+    assert found.differences == (
+        "alpha==1.2",
+        "epsilon==4.1",
+        "gamma==3.1",
+        "zeta==5.1",
+    )
+    assert fake_uv.constraints == ["alpha==1.0\nepsilon==4.0\ngamma==3.0\nzeta>=5.0\n"]
+    assert asked(fake_uv)[-7:] == [
         CUTOFF,
         "--exclude-newer-package=alpha=2026-11-09T15:30:00Z",
         "--exclude-newer-package=beta=2026-11-09T15:30:00Z",
+        "--exclude-newer-package=epsilon=2026-11-09T15:30:00Z",
         "--exclude-newer-package=gamma=2026-11-09T15:30:00Z",
         "--no-header",
         "--quiet",

@@ -463,6 +463,15 @@ TAKEN_BACK = (
         ),
         (
             [
+                Added("p.json", "npm", "kit", "2.5.1"),
+                Added("p.json", "npm", "kit", "3.0.0", replaced=True),
+                Added("p.json", "npm", "kit", "2.5.0", replaced=True),
+            ],
+            {"3.0.0": WEEKS_AGO, "2.5.1": OLD, "2.5.0": OLD},
+            [],
+        ),
+        (
+            [
                 Added("p.json", "npm", "kit", "1.3.0"),
                 Added("p.json", "npm", "kit", "1.2.0", replaced=True),
             ],
@@ -497,6 +506,7 @@ TAKEN_BACK = (
     ],
     ids=[
         "taken back after its week",
+        "line dropped beside an older backport",
         "moved up",
         "by a version that it can't date",
         "taken out beside another, old",
@@ -521,14 +531,19 @@ def test_the_refresh_of_pip_compile_asks_pypi_when_a_version_of_main_came_out() 
         {
             "https://pypi.org/pypi/alpha/1.0/json": pypi(YOUNG, OLD),
             "https://pypi.org/pypi/beta/2.0/json": refused(404),
+            "https://pypi.org/pypi/gamma/3.0/json": {"urls": []},
         }
     )
 
+    # The last file counts, such as wheels that came hours after the sdist: uv's
+    # cutoff judges each file on its own.
     assert lock_age.pypi_uploaded("alpha", "1.0", answers) == datetime(
-        2026, 10, 1, 12, tzinfo=UTC
+        2026, 11, 7, 8, 15, tzinfo=UTC
     )
     # A version that PyPI doesn't know, such as one of an index of its own.
     assert lock_age.pypi_uploaded("beta", "2.0", answers) is None
+    # A version that has no file.
+    assert lock_age.pypi_uploaded("gamma", "3.0", answers) is None
 
 
 def test_the_check_passes_a_refresh_of_versions_a_week_old(

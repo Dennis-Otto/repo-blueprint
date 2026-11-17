@@ -18,6 +18,7 @@ however old that version is."""
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -206,10 +207,17 @@ def pypi_released(
 def pypi_uploaded(
     name: str, version: str, opener: Callable[..., Any] | None = None
 ) -> datetime | None:
-    """When PyPI received the first file of a version, the first that uv's cutoff
-    lets through; none when the check can't learn it."""
+    """When PyPI received the last file of a version; none when the check can't
+    learn it. uv's cutoff judges each file on its own: a version whose wheels came
+    after the cutoff, hours after its sdist, would reach the lock with its sdist
+    alone, so the refresh takes it as young as its last file."""
+    quoted = f"{urllib.parse.quote(name)}/{urllib.parse.quote(version)}"
     try:
-        return pypi_released(name, version, opener)
+        answer = ask(f"{PYPI}{quoted}/json", opener)
+        files = answer.get("urls") if isinstance(answer, dict) else None
+        if not files:
+            return None
+        return max(moment(file.get("upload_time_iso_8601")) for file in files)
     except Undated:
         return None
 
@@ -236,6 +244,11 @@ def released(version: Added, opener: Callable[..., Any] | None = None) -> dateti
     if not version.version:
         raise Undated("it comes from no registry but by an address of its own")
     return RELEASED[version.manager](version.name, version.version, opener)
+
+
+def major(version: str) -> str:
+    """The major line of a version: its first number, such as 3 of 3.0.0."""
+    return re.split(r"[^0-9]", version, maxsplit=1)[0]
 
 
 def young(
@@ -287,12 +300,16 @@ def young(
         same package that came out before it: a refresh that moves it up, or that
         brings a version that the check can't date, is judged by the age of what it
         brings, and one that only takes out a version while another version of the
-        package stays, by the age of the one that it takes out."""
+        package stays, by the age of the one that it takes out. Only a version of the
+        same major line replaces it: package-lock.json keeps several lines of a
+        package side by side, and a refresh that drops the line 3 while it moves the
+        line 2 to an older backport takes nothing back."""
         replacements = [
             dates[other]
             for other in unique
             if not other.replaced
             and (other.file, other.name) == (version.file, version.name)
+            and major(other.version) == major(version.version)
         ]
         return bool(replacements) and all(
             isinstance(other, datetime) and other < came for other in replacements

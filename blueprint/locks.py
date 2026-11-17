@@ -491,8 +491,8 @@ def refresh(
     now. A package that the refresh pins as HEAD does keeps its pin, also a young one
     such as the fix of a vulnerability that came at once. A package that it moved
     stays at least at the version of HEAD, so that no fix goes back. uploaded names
-    when a version came out, or none when it can't tell: a version of HEAD that came
-    after the cutoff, or one that it can't date, stays exactly as it is, since no
+    when the last file of a version came out, or none when it can't tell: a version
+    of HEAD that came at or after the cutoff, or one that it can't date, stays exactly as it is, since no
     version is both that new and a week old and only that one is no younger than what
     HEAD has, while every other package keeps to the week. The differences are the
     pins of the refresh that the week took back."""
@@ -528,7 +528,7 @@ def refresh(
         young = {
             package
             for package, upload in zip(moved, uploads, strict=True)
-            if upload is None or upload > week
+            if upload is None or upload >= week
         }
     floors = "".join(
         f"{package}{'==' if package in young else '>='}{version}\n"
