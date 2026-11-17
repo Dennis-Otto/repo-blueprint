@@ -3,7 +3,7 @@ name: Quick checks
 # The quick checks of every pull request that need a workflow of their own outside
 # Lint: the secret scan and the review of the dependencies, as two jobs of one
 # workflow, so that a push starts one run, and one run of After the checks, for both
-# (decision 0173). Not in Lint, whose runs for a pull request cancel each other.
+# (decision 0174). Not in Lint, whose runs for a pull request cancel each other.
 #
 # gitleaks looks for secrets in the commits of every pull request, and every week in
 # the whole history of every branch. Not after a merge, which brings only the commits
