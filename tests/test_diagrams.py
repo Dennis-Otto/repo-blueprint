@@ -1300,6 +1300,186 @@ def pull_request(
     return head
 
 
+# The warning of a source that a branch changed without its pictures
+
+
+SHOWN = {
+    "README.md": "# Demo\n\n" + picture("steps", Path("README.md"), "Steps"),
+    "docs/diagrams/steps.mmd": DIAGRAM,
+    "docs/images/diagrams/steps.svg": "<svg steps>\n",
+    "docs/images/diagrams/steps.dark.svg": "<svg steps dark>\n",
+}
+FINE = "Each of the 1 diagram(s) in docs/diagrams/ has its pictures.\n"
+ALONE = (
+    "docs/diagrams/steps.mmd: changed on this branch, but its pictures in"
+    " docs/images/diagrams/ are not\n"
+)
+WITH_DOCKER = (
+    "A warning: bash scripts/diagrams.sh draws the pictures of the 1 source(s) anew;"
+    " commit them before the push, or the check diagrams fails once and needs another"
+    " round of checks.\n"
+)
+WITHOUT_DOCKER = (
+    "A warning: without Docker, push as it is; the check diagrams fails once and draws"
+    " the pictures, which the diagram bot commits on a branch of this repository, and"
+    " which a pull request from a fork takes from the artifact diagrams of the check.\n"
+)
+
+
+def write(root: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text, encoding="utf-8", newline="\n")
+
+
+def branch_from(root: Path, files: dict[str, str], default: str = "main") -> Path:
+    """A clone whose default branch on origin has these files, on a branch of its own."""
+    repository(root, files)
+    commit(root, "Main")
+    git_in(root, "branch", "-M", "main")
+    git_in(root, "update-ref", f"refs/remotes/origin/{default}", "HEAD")
+    if default != "main":
+        git_in(
+            root,
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            f"refs/remotes/origin/{default}",
+        )
+    git_in(root, "switch", "--quiet", "-c", "feature")
+    return root
+
+
+@needs_bash
+@pytest.mark.parametrize("committed", [True, False])
+def test_the_check_warns_of_a_source_changed_without_its_pictures(
+    tmp_path: Path, committed: bool
+) -> None:
+    root = branch_from(tmp_path / "repository", SHOWN)
+    write(root, {"docs/diagrams/steps.mmd": MERGES})
+    if committed:
+        commit(root, "The change")
+
+    result = script(root, tmp_path, "--check")
+
+    # Only a warning, which names the source and says to draw it before the push.
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ALONE + WITH_DOCKER + FINE
+
+
+@needs_bash
+def test_without_docker_the_warning_leaves_the_pictures_to_the_bots(
+    tmp_path: Path,
+) -> None:
+    root = branch_from(tmp_path / "repository", SHOWN)
+    write(root, {"docs/diagrams/steps.mmd": MERGES})
+    commit(root, "The change")
+
+    result = script(root, tmp_path, "--check", docker=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ALONE + WITHOUT_DOCKER + FINE
+
+
+@needs_bash
+def test_a_source_with_one_picture_drawn_anew_is_still_named(tmp_path: Path) -> None:
+    root = branch_from(tmp_path / "repository", SHOWN)
+    write(
+        root,
+        {
+            "docs/diagrams/steps.mmd": MERGES,
+            "docs/images/diagrams/steps.svg": "<svg steps merges>\n",
+        },
+    )
+
+    result = script(root, tmp_path, "--check")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ALONE + WITH_DOCKER + FINE
+
+
+@needs_bash
+@pytest.mark.parametrize("committed", [True, False])
+def test_a_source_changed_with_its_pictures_gets_no_warning(
+    tmp_path: Path, committed: bool
+) -> None:
+    root = branch_from(
+        tmp_path / "repository",
+        {"README.md": SHOWN["README.md"], "docs/diagrams/steps.mmd": DIAGRAM},
+    )
+    # New pictures, untracked until the commit, count as changed too.
+    write(
+        root,
+        {
+            "docs/diagrams/steps.mmd": MERGES,
+            "docs/images/diagrams/steps.svg": "<svg steps>\n",
+            "docs/images/diagrams/steps.dark.svg": "<svg steps dark>\n",
+        },
+    )
+    if committed:
+        commit(root, "The change")
+
+    result = script(root, tmp_path, "--check")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == FINE
+
+
+@needs_bash
+def test_a_source_that_no_page_shows_gets_no_warning(tmp_path: Path) -> None:
+    # A source of the project's own way to draw it, which the script leaves alone.
+    root = branch_from(
+        tmp_path / "repository", {**SHOWN, "docs/diagrams/other.mmd": DIAGRAM}
+    )
+    write(root, {"docs/diagrams/other.mmd": MERGES})
+    commit(root, "The change")
+
+    result = script(root, tmp_path, "--check")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "Each of the 1 diagram(s) in docs/diagrams/ that a page shows has its pictures;"
+        " no page shows the other 1 source(s), which are left as they are.\n"
+    )
+
+
+@needs_bash
+def test_the_default_branch_is_the_one_that_origin_names(tmp_path: Path) -> None:
+    root = branch_from(tmp_path / "repository", SHOWN, default="trunk")
+    write(root, {"docs/diagrams/steps.mmd": MERGES})
+    commit(root, "The change")
+
+    result = script(root, tmp_path, "--check")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ALONE + WITH_DOCKER + FINE
+
+
+@needs_bash
+def test_the_check_says_nothing_without_a_base(tmp_path: Path) -> None:
+    # Without the default branch, as in a repository of its own.
+    alone = repository(tmp_path / "alone", SHOWN)
+    commit(alone, "Main")
+    write(alone, {"docs/diagrams/steps.mmd": MERGES})
+    # In a shallow clone, whose history may end before the merge base.
+    origin = branch_from(tmp_path / "origin", SHOWN)
+    git_in(origin, "switch", "--quiet", "main")
+    shallow = tmp_path / "shallow"
+    git_in(tmp_path, "clone", "--quiet", "--depth", "1", origin.as_uri(), str(shallow))
+    write(shallow, {"docs/diagrams/steps.mmd": MERGES})
+    commit(shallow, "The change")
+    # A branch without a history in common with the default branch.
+    unrelated = branch_from(tmp_path / "unrelated", SHOWN)
+    git_in(unrelated, "switch", "--quiet", "--orphan", "other")
+    write(unrelated, {**SHOWN, "docs/diagrams/steps.mmd": MERGES})
+    commit(unrelated, "Other")
+
+    for root in (alone, shallow, unrelated):
+        result = script(root, tmp_path, "--check")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == FINE, root
+
+
 DRAW = (
     "lint.yml",
     "diagrams",
