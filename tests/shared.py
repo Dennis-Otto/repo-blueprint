@@ -18,6 +18,8 @@ from typing import Any
 
 import pytest
 import yaml
+from jinja2 import ChoiceLoader, FileSystemLoader
+from jinja2.sandbox import SandboxedEnvironment
 
 from blueprint.github import API_VERSION_HEADER
 
@@ -54,6 +56,51 @@ YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 def load_yaml(text: str) -> Any:
     """What yaml.safe_load reads, with the fastest parser that PyYAML has."""
     return yaml.load(text, Loader=YAML_LOADER)
+
+
+def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
+    """Jinja as Copier renders the template, with the delimiters and the filters of the
+    blueprint, from the folders and then the blueprint's files."""
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    return SandboxedEnvironment(
+        loader=ChoiceLoader([*map(FileSystemLoader, folders), FileSystemLoader(ROOT)]),
+        extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"],
+        **questions["_envops"],
+    )
+
+
+# The start of the block on: of a workflow of the blueprint of which no job runs in the
+# blueprint itself: there it starts only by hand, and the template gives a repository
+# its real triggers in place of these lines (decision 0179).
+BY_HAND = (
+    blueprint_environment()
+    .from_string('[%- from "includes/replace.jinja" import by_hand -%]{= by_hand =}')
+    .render()
+)
+
+
+def in_a_repository(name: str) -> str:
+    """A workflow of the blueprint, such as ci-node.yml or newest-node.yml, as its
+    template renders it for a repository in the first slot of schedules, where each
+    cron stays as it is: with the real triggers of a workflow that starts only by hand
+    in the blueprint itself, and without the lines that only the blueprint has."""
+    folder = ROOT / "template/.github/workflows"
+    # The checks of each kind are the one ci.yml; the name of the template of another
+    # workflow may carry its condition, such as [% if stack == 'node' %]newest-node.yml.
+    template = folder / "ci.yml.jinja"
+    if not name.startswith("ci-"):
+        (template,) = [
+            path
+            for path in folder.glob("*.jinja")
+            if path.name == f"{name}.jinja" or f"%]{name}[%" in path.name
+        ]
+    return (
+        blueprint_environment()
+        .get_template(template.relative_to(ROOT).as_posix())
+        .render(
+            ci_workflow=name.removeprefix("ci-").removesuffix(".yml"), schedule_slot=0
+        )
+    )
 
 
 def without_the_version(arguments: Sequence[str]) -> list[str]:

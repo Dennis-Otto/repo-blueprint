@@ -23,6 +23,7 @@ import pytest
 import workflow_steps
 from hypothesis import given
 from hypothesis import strategies as st
+from shared import in_a_repository
 from shell import BASH
 from workflow_steps import Answer, condition_of, step_in
 
@@ -4279,8 +4280,9 @@ def test_the_check_of_each_kind_of_project_keeps_its_fixes(path: Path) -> None:
         " github.event_name) || (github.event_name == 'workflow_dispatch' &&"
         " github.ref_name == github.event.repository.default_branch))"
     )
-    # Each week on main, so that what no commit changes repairs itself.
-    assert WEEKLY_RUN.search(path.read_text(encoding="utf-8"))
+    # Each week on main, so that what no commit changes repairs itself: in every
+    # repository, also where the blueprint starts the checks only by hand (0179).
+    assert WEEKLY_RUN.search(in_a_repository(path.name))
     assert fix["env"]["CHECK"] == name
     assert "git checkout --quiet --force --detach HEAD^2" in fix["run"]
     # On main too, only what the commands change is a fix.

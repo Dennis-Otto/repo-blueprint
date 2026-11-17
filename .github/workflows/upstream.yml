@@ -11,8 +11,8 @@ name: Upstream
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  schedule:
-    - cron: "50 4 * * 3"
+  # Only by hand in the blueprint itself, where none of its jobs runs; the template
+  # gives every repository its real triggers (decision 0179).
   workflow_dispatch:
     inputs:
       dry_run:
