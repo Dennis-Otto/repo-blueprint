@@ -1,6 +1,6 @@
 # Every website shows its automation, written from its workflows
 
-- Status: accepted
+- Status: accepted, amended by [0179](0179-a-workflow-that-only-the-repositories-run-starts-here-only-by-hand.md), with which a workflow that only the repositories run starts in the blueprint only by hand
 - Date: 2026-10-18
 
 ## Context
