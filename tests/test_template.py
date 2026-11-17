@@ -64,7 +64,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, ownership, screenshots
+from blueprint import bootstrap, diagrams, ownership, screenshots
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -23299,6 +23299,72 @@ def test_every_project_draws_its_diagrams_as_pictures(
     # The colors of the blueprint's diagrams, the same in every repository.
     for color in ("`#526cfe`", "`#f59e0b`", "`#16a34a`"):
         assert color in contributing, color
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+def test_a_project_warns_of_a_diagram_changed_without_its_pictures(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The check of scripts/check.sh names a source that the branch changed without its
+    # pictures, so that its author draws them before the push, and fails nothing.
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    source = (
+        "flowchart TB\n    accTitle: How a change ships\n"
+        "    accDescr: A pull request merges.\n\n    pr --> main\n"
+    )
+    files = {
+        "docs/diagrams/steps.mmd": source,
+        "docs/images/diagrams/steps.svg": "<svg>\n",
+        "docs/images/diagrams/steps.dark.svg": "<svg dark>\n",
+        "docs/steps.md": "# Steps\n\n"
+        + diagrams.picture("steps", Path("docs/steps.md"), diagrams.alt_text(source)),
+    }
+    for name, text in files.items():
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).write_text(text, encoding="utf-8", newline="\n")
+    git = ["git", "-c", "user.name=T", "-c", "user.email=t@example.com"]
+    for arguments in (
+        ["init", "--quiet", "--initial-branch", "main"],
+        ["config", "core.autocrlf", "false"],
+        ["add", "--all"],
+        ["commit", "--quiet", "--no-gpg-sign", "-m", "Main"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["switch", "--quiet", "-c", "feature"],
+    ):
+        subprocess.run([*git, *arguments], cwd=project, check=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    environment = {**os.environ, "STUBS": stubs.as_posix(), "PYTHONIOENCODING": "utf-8"}
+
+    def check() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            in_bash("scripts/diagrams.sh", "--check"),
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    (project / "docs/diagrams/steps.mmd").write_text(
+        source.replace("--> main", "--> release"), encoding="utf-8", newline="\n"
+    )
+    alone = check()
+    for picture in ("steps.svg", "steps.dark.svg"):
+        (project / "docs/images/diagrams" / picture).write_text(
+            "<svg anew>\n", encoding="utf-8", newline="\n"
+        )
+    drawn = check()
+
+    assert alone.returncode == 0, alone.stdout + alone.stderr
+    assert alone.stdout.startswith(
+        "docs/diagrams/steps.mmd: changed on this branch, but its pictures in"
+        " docs/images/diagrams/ are not\nA warning: "
+    )
+    assert drawn.returncode == 0, drawn.stdout + drawn.stderr
+    assert (
+        drawn.stdout == "Each of the 1 diagram(s) in docs/diagrams/ has its pictures.\n"
+    )
 
 
 def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
