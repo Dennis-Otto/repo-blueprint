@@ -9540,7 +9540,7 @@ def test_agents_and_contributors_push_once_and_leave_the_update_to_the_branch_bo
     workflow = section_of(
         (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
     )
-    steps = re.findall(r"^[678]\. .*$", workflow, re.MULTILINE)
+    steps = re.findall(r"^[578]\. .*$", workflow, re.MULTILINE)
     assert len(steps) == 3
     for rule in (
         "Run `scripts/check.sh`, then push once.",
@@ -9564,7 +9564,7 @@ def test_agents_and_contributors_push_once_and_leave_the_update_to_the_branch_bo
     contributing = section_of(
         (project / "CONTRIBUTING.md").read_text(encoding="utf-8"), "## Workflow"
     )
-    assert re.findall(r"^[678]\. .*$", contributing, re.MULTILINE) == steps
+    assert re.findall(r"^[578]\. .*$", contributing, re.MULTILINE) == steps
     # Every kind of project has the bot and the label that the rule names.
     assert (project / ".github/workflows/update-branches.yml").is_file()
     labels = (project / ".github/labels.toml").read_text(encoding="utf-8")
