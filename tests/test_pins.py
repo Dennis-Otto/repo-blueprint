@@ -75,7 +75,7 @@ class Fetches:
 
     def __call__(self, url: str) -> str:
         self.urls.append(url)
-        version = re.search(r"tool_([\d.]+)_linux", url)
+        version = re.search(r"tool_([\d.]+)(?:-1)?_linux", url)
         assert version
         return hashlib.sha256(f"tool {version[1]}".encode()).hexdigest()
 
@@ -138,22 +138,129 @@ def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
             assert url == hooks().MERMAID
             continue
         text = (ROOT / pin.path).read_text(encoding="utf-8")
-        plain = re.sub(r"\$\{(\w+)\}", r"$\1", text.replace("\\\n", " "))
-        plain = re.sub(r" {2,}", " ", plain)
+        commands = plain(text)
         url = record[pin.dep].url.replace("{version}", f"${pin.name}")
         # An asset of a release on GitHub, which gh downloads by its parts.
         asset = pins.RELEASE_ASSET.fullmatch(url)
         if not asset:
-            assert f'"{url}"' in plain, (pin.path, url)
+            assert f'"{url}"' in commands, (pin.path, url)
             continue
         page = f"github.com/{asset['repository']}/releases/download/"
-        assert page not in plain, (pin.path, page)
+        assert page not in commands, (pin.path, page)
         repository, tag, name = (re.escape(asset[part]) for part in asset.groupdict())
+        if pin.asset is not None:
+            # A pin that names its file: the file downloads that name, which pins.py
+            # writes from the address, and never builds it from the version.
+            variable = asset_variable(pin)
+            assert re.search(
+                rf"^[ \t]*{variable[1:]}(?:: | ?= ?)\"?{re.escape(pin.asset)}\b",
+                text,
+                re.MULTILINE,
+            ), (pin.path, variable)
+            assert asset["asset"] not in commands, (pin.path, asset["asset"])
+            name = re.escape(variable)
         calls = (
             rf'download\.sh"? {repository} "{tag}" "?{name}"? ',
             rf'gh release download "{tag}" --repo {repository} --pattern "?{name}"? ',
         )
-        assert any(re.search(call, plain) for call in calls), (pin.path, url)
+        assert any(re.search(call, commands) for call in calls), (pin.path, url)
+
+
+def plain(text: str) -> str:
+    """The commands of a file, a command a line, with $NAME for ${NAME}."""
+    commands = re.sub(r"\$\{(\w+)\}", r"$\1", text.replace("\\\n", " "))
+    return re.sub(r" {2,}", " ", commands)
+
+
+def asset_variable(pin: pins.Pin) -> str:
+    """The variable that holds the name of the file that a pin names, KRANKERL_ASSET
+    beside KRANKERL_VERSION."""
+    return "$" + pin.name.replace("VERSION", "ASSET").replace("version", "asset")
+
+
+# The files of the blueprint and of its template that may download a tool.
+SOURCES = (
+    ".github/*.sh",
+    ".github/workflows/*.yml",
+    "scripts/**/*.sh",
+    "template/**/*.jinja",
+    "template/**/*.sh",
+    "template/**/*.yml",
+)
+# A download of an asset of a release on GitHub, by .github/download.sh or by gh.
+CALLS = (
+    r'download\.sh"? (?P<repository>[\w.-]+/[\w.-]+) "?\S+?"? "?(?P<asset>[^\s"]+)"? ',
+    r'gh release download "?\S+?"? --repo (?P<repository>[\w.-]+/[\w.-]+)'
+    r' --pattern "?(?P<asset>[^\s"]+)"? ',
+)
+
+
+def built_names(root: Path) -> list[str]:
+    """Each download of a pinned tool by a file that neither pins it nor takes the
+    name of its file from a pin that names it: such a file builds the name from a
+    version that it reads elsewhere, and misses the next new name of the release."""
+    record = pins.load_record(root)
+    found = pins.find_pins(root)
+    pinned = {(pin.path, pin.dep) for pin in found}
+    variables = {asset_variable(pin) for pin in found if pin.asset is not None}
+    repositories = {
+        address["repository"]: dep
+        for dep, download in record.items()
+        if (address := pins.RELEASE_ASSET.fullmatch(download.url))
+    }
+    built = []
+    for pattern in SOURCES:
+        for path in sorted(root.glob(pattern)):
+            name = path.relative_to(root).as_posix()
+            # Without the comments, such as the example of .github/download.sh.
+            text = re.sub(
+                r"^[ \t]*#.*\n", "", path.read_bytes().decode("utf-8"), flags=re.M
+            )
+            commands = plain(text)
+            for call in (m for c in CALLS for m in re.finditer(c, commands)):
+                dep = repositories.get(call["repository"])
+                if dep is None or (name, dep) in pinned or call["asset"] in variables:
+                    continue
+                built.append(f"{name}: {call['repository']} {call['asset']}")
+    return built
+
+
+def test_no_file_builds_the_name_of_a_pinned_download_itself() -> None:
+    # A file that downloads a pinned tool pins it too, and the test above holds it to
+    # the address of the record, or takes the name from a pin that names the file:
+    # the upgrade test of paperless-sync read KRANKERL_VERSION of its CI and built
+    # krankerl_${KRANKERL_VERSION}_amd64.deb, a name that krankerl gave up in 0.14.1,
+    # and failed on main after the update that moved the pin to 0.14.3 (#994).
+    assert built_names(ROOT) == []
+
+
+def test_a_file_that_builds_the_name_of_a_pinned_download_is_named(
+    tmp_path: Path,
+) -> None:
+    record = RENAMED.replace("tool_{version}_linux", "tool_{version}-1_linux")
+    workflow = WORKFLOW.replace(
+        f"TOOL_SHA256: {OLD}",
+        f"TOOL_SHA256: {OLD}\n      TOOL_ASSET: tool_1.1.0-1_linux",
+    )
+    root = repository(tmp_path, record=record, workflow=workflow)
+    # Two files that read the pin of build.yml: one builds the name, as the upgrade
+    # test did, and one takes it from the pin.
+    (root / ".github/workflows/upgrade.yml").write_bytes(
+        b"jobs:\n  upgrade:\n    steps:\n      - run: |\n"
+        b'          bash .github/download.sh owner/tool "v$TOOL_VERSION" \\\n'
+        b'            "tool_${TOOL_VERSION}_linux" "$RUNNER_TEMP/tool" "$TOOL_SHA256"\n'
+    )
+    (root / ".github/workflows/e2e.yml").write_bytes(
+        b"jobs:\n  e2e:\n    steps:\n      - run: |\n"
+        b'          bash .github/download.sh owner/tool "v$TOOL_VERSION" \\\n'
+        b'            "$TOOL_ASSET" "$RUNNER_TEMP/tool" "$TOOL_SHA256"\n'
+        # Another release, of a tool that nothing pins.
+        b"          gh release download v1 --repo owner/other --pattern other_1 \n"
+    )
+
+    assert built_names(root) == [
+        ".github/workflows/upgrade.yml: owner/tool tool_$TOOL_VERSION_linux"
+    ]
 
 
 # ----------------------------------------------------------------- writing the sha256
@@ -249,6 +356,111 @@ def test_two_pins_in_one_file_keep_their_places(tmp_path: Path) -> None:
     assert (root / ".github/workflows/build.yml").read_text() == workflow.replace(
         OLD, NEW
     )
+
+
+# ------------------------------------------------------- the name of the file of a pin
+
+NAMED = RECORD.replace("tool_{version}_linux", "tool_{version}-1_linux")
+
+
+def named(text: str, asset: str, *, shell: bool = False) -> str:
+    """A pin of a workflow or a script that names its file as well."""
+    if shell:
+        return text.replace(f'sha256="{OLD}"\n', f'sha256="{OLD}"\nasset="{asset}"\n')
+    return text.replace(
+        f"TOOL_SHA256: {OLD}\n", f"TOOL_SHA256: {OLD}\n      TOOL_ASSET: {asset}\n"
+    )
+
+
+def test_a_pin_that_names_its_file_gets_the_name_of_its_new_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Renovate moves the version alone; pins.py writes the sha256 and the name of the
+    # file, so that what downloads it takes the name of the new release from the pin.
+    # A second pin in the same file, after a name of another length, keeps its place.
+    workflow = named(WORKFLOW, "tool_1.0.0_linux") + (
+        "  other:\n"
+        "    env:\n"
+        "      # renovate: datasource=github-releases depName=owner/tool\n"
+        "      OTHER_VERSION: 1.1.0\n"
+        f"      OTHER_SHA256: {OLD}\n"
+        "      OTHER_ASSET: tool_1.1.0_linux\n"
+        "      OTHER_NAME: other\n"
+    )
+    script = named(SCRIPT, "tool_1.0.0-1_linux", shell=True)
+    root = repository(tmp_path, record=NAMED, workflow=workflow, script=script)
+    assert pins.check(root) == [
+        ".github/sign.sh: owner/tool 1.1.0 has the sha256 of 1.0.0; python3 pins.py "
+        "writes the right one",
+        ".github/sign.sh: owner/tool 1.1.0 is the file tool_1.1.0-1_linux by its "
+        f"address in {pins.RECORD}, not tool_1.0.0-1_linux; python3 pins.py writes "
+        "the right one",
+        ".github/workflows/build.yml: owner/tool 1.1.0 has the sha256 of 1.0.0; python3 "
+        "pins.py writes the right one",
+        ".github/workflows/build.yml: owner/tool 1.1.0 is the file tool_1.1.0-1_linux "
+        f"by its address in {pins.RECORD}, not tool_1.0.0_linux; python3 pins.py "
+        "writes the right one",
+        ".github/workflows/build.yml: owner/tool 1.1.0 has the sha256 of 1.0.0; python3 "
+        "pins.py writes the right one",
+        ".github/workflows/build.yml: owner/tool 1.1.0 is the file tool_1.1.0-1_linux "
+        f"by its address in {pins.RECORD}, not tool_1.1.0_linux; python3 pins.py "
+        "writes the right one",
+    ]
+
+    assert pins.main([], root=root, fetch=Fetches()) == 0
+
+    assert (root / ".github/workflows/build.yml").read_text() == (
+        workflow.replace(OLD, NEW)
+        .replace("tool_1.0.0_linux", "tool_1.1.0-1_linux")
+        .replace("tool_1.1.0_linux", "tool_1.1.0-1_linux")
+    )
+    assert (root / ".github/sign.sh").read_text() == script.replace(OLD, NEW).replace(
+        "tool_1.0.0-1_linux", "tool_1.1.0-1_linux"
+    )
+    assert capsys.readouterr().out == (
+        f"owner/tool 1.1.0: sha256 {NEW}\n"
+        ".github/sign.sh: the sha256 of owner/tool 1.1.0\n"
+        ".github/sign.sh: the file of owner/tool 1.1.0, tool_1.1.0-1_linux\n"
+        ".github/workflows/build.yml: the sha256 of owner/tool 1.1.0\n"
+        ".github/workflows/build.yml: the file of owner/tool 1.1.0, tool_1.1.0-1_linux\n"
+        ".github/workflows/build.yml: the sha256 of owner/tool 1.1.0\n"
+        ".github/workflows/build.yml: the file of owner/tool 1.1.0, tool_1.1.0-1_linux\n"
+        ".github/pins.toml: 1 downloads\n"
+    )
+    assert pins.check(root) == []
+
+
+def test_a_new_name_in_the_record_is_written_into_each_pin_that_names_the_file(
+    tmp_path: Path,
+) -> None:
+    # A release that names its files anew, as krankerl 0.14.1 did: the address in the
+    # record changes, and pins.py writes the new name into the pins without a download.
+    record = NAMED.replace('"1.0.0"', '"1.1.0"').replace(OLD, NEW)
+    workflow = named(WORKFLOW, "tool_1.1.0_linux").replace(OLD, NEW)
+    root = repository(tmp_path, record=record, workflow=workflow)
+    fetch = Fetches()
+
+    assert pins.update(root, fetch) == [
+        ".github/sign.sh: the sha256 of owner/tool 1.1.0",
+        ".github/workflows/build.yml: the file of owner/tool 1.1.0, tool_1.1.0-1_linux",
+        f"{pins.RECORD}: 1 downloads",
+    ]
+    assert fetch.urls == []
+    assert (root / ".github/workflows/build.yml").read_text() == workflow.replace(
+        "tool_1.1.0_linux", "tool_1.1.0-1_linux"
+    )
+    assert pins.check(root) == []
+
+
+def test_only_a_name_that_ends_in_asset_names_the_file_of_a_pin(tmp_path: Path) -> None:
+    workflow = WORKFLOW.replace(
+        f"TOOL_SHA256: {OLD}\n", f"TOOL_SHA256: {OLD}\n      TOOL_ARCH: amd64\n"
+    )
+    root = repository(tmp_path, workflow=workflow)
+
+    found = [pin for pin in pins.find_pins(root) if pin.path.endswith("build.yml")]
+
+    assert [(pin.asset, pin.asset_start) for pin in found] == [(None, -1)]
 
 
 # --------------------------------------------------------- what keeps it from writing
@@ -482,8 +694,8 @@ def test_an_asset_that_the_release_names_anew_is_named_by_the_error(
         f"pins.py: {asset} could not be downloaded: HTTP Error 404\n"
         "pins.py: The release v1.1.0 of owner/tool has no asset tool_1.1.0_linux, "
         "only tool, tool_1.1.0-1_linux: give the url of owner/tool in "
-        ".github/pins.toml the new name, with {version} for the version, and the "
-        "files that download it the same name\n"
+        ".github/pins.toml the new name, with {version} for the version; python3 "
+        "pins.py then writes it into each pin that names the file\n"
     )
     assert (root / ".github/sign.sh").read_text() == SCRIPT
     assert (root / ".github/pins.toml").read_text() == RENAMED

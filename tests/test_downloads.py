@@ -1328,7 +1328,7 @@ def test_the_tools_of_a_release_come_through_the_api_before_the_checkout(
         if publish_to == "nextcloud-appstore":
             expected.append(
                 f"download.sh ChristophWurst/krankerl v{krankerl}"
-                f" krankerl_{krankerl}-1_amd64.deb {runner}/krankerl.deb"
+                f" {job_env['KRANKERL_ASSET']} {runner}/krankerl.deb"
                 f" {job_env['KRANKERL_SHA256']}"
             )
         assert done.stubbed == expected
