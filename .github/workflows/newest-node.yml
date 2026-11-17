@@ -13,10 +13,8 @@ name: Newest Node
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "40 3 * * 2"
+  # Only by hand in the blueprint itself, where none of its jobs runs; the template
+  # gives every repository its real triggers (decision 0179).
   workflow_dispatch:
 
 permissions:

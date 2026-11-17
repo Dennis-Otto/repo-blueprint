@@ -14,6 +14,16 @@
         [%- from "includes/replace.jinja" import replaced with context -%]
         {= replaced(".github/workflows/docs.yml", [["old", "new"]]) -=}
 -#]
+[#- The start of the block on: of a workflow of the blueprint of which no job runs in
+    the blueprint itself, such as the checks of each kind of project: there it starts
+    only by hand, so that GitHub makes no run of it that only skips (decision 0179).
+    The template of the workflow replaces it with the real triggers of a repository,
+    from on: up to the workflow_dispatch that follows them, which stays:
+
+        [%- from "includes/replace.jinja" import by_hand, replaced with context -%]
+        {= replaced(".github/workflows/upstream.yml", [[by_hand, triggers]]) -=}
+-#]
+[%- set by_hand = "on:\n  # Only by hand in the blueprint itself, where none of its jobs runs; the template\n  # gives every repository its real triggers (decision 0179).\n" -%]
 [%- macro replaced(path, pairs, cuts=[]) -%]
 [%- set text -%][% include path %][%- endset -%]
 [%- set result = namespace(text=text) -%]

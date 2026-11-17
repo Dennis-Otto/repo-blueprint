@@ -5,9 +5,8 @@ name: Action test
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Only by hand in the blueprint itself, where none of its jobs runs; the template
+  # gives every repository its real triggers (decision 0179).
   workflow_dispatch:
 
 permissions:

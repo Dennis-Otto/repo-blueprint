@@ -1,3 +1,10 @@
-[%- from "includes/replace.jinja" import replaced with context -%]
+[%- from "includes/replace.jinja" import by_hand, replaced with context -%]
 [%- set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" -%]
-{= replaced(".github/workflows/action-test.yml", [[guard, ""]]) -=}
+[#- The triggers of a repository; the blueprint starts the workflow only by hand. -#]
+[%- set triggers -%]
+on:
+  push:
+    branches: [main]
+  pull_request:
+[% endset -%]
+{= replaced(".github/workflows/action-test.yml", [[by_hand, triggers], [guard, ""]]) -=}
