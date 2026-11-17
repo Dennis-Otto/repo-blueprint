@@ -1,6 +1,6 @@
 # A major update merges by itself once every check passes
 
-- Status: accepted
+- Status: accepted, amended by [0174](0174-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself too
 - Date: 2026-11-13
 
 ## Context
@@ -21,7 +21,7 @@ The refresh of the lock files of a package manager that can't keep to versions a
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-updates-of-renovate-merge-on-their-own.dark.svg">
-  <img src="../images/diagrams/which-updates-of-renovate-merge-on-their-own.svg" alt="Which updates of Renovate merge on their own: Every update, a major one too, waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files of npm and pip-compile keeps to versions a week old and merges on its own as well. The refresh of a package manager that can't keep to that age, such as Composer, brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer.">
+  <img src="../images/diagrams/which-updates-of-renovate-merge-on-their-own.svg" alt="Which updates of Renovate merge on their own: Every update, a major one too, waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files of npm and pip-compile keeps to versions a week old and merges on its own as well. The refresh of Composer can't keep to that age, as nothing dates its versions, and merges on its own with versions of any age once every check passes. The refresh of any other package manager brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer.">
 </picture>
 
 ## Consequences

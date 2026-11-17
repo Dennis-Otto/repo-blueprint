@@ -440,6 +440,19 @@ TESTED = {
     ("publish-store.yml", "store", "Submit the release for review"): "test_template.py",
     ("after-checks.yml", "rerun", "Run the failed jobs once more"): "test_template.py",
     ("after-checks.yml", "branches", "Start the branch bot"): "test_workflow_steps.py",
+    **{
+        (name, "bot-health", "Start the bot-health bot"): "test_workflow_steps.py"
+        for name in (
+            "area-labels.yml",
+            "commands.yml",
+            "dependabot-automerge.yml",
+            "diagrams.yml",
+            "newest-node.yml",
+            "newest-python.yml",
+            "next-runner.yml",
+            "welcome.yml",
+        )
+    },
     (
         "after-checks.yml",
         "stopped",
@@ -1055,6 +1068,72 @@ def test_a_branch_bot_that_github_never_starts_fails_with_what_follows(
     assert done.summary == ""
 
 
+# The start of the bot-health bot after a failed job of a bot of events.
+
+START_THE_BOT_HEALTH_BOT = "workflow run bot-health.yml --field run=77"
+
+
+def start_the_bot_health_bot(tmp_path: Path, *answers: Answer) -> StepResult:
+    return run_step(
+        tmp_path,
+        "welcome.yml",
+        "bot-health",
+        "Start the bot-health bot",
+        answers=answers,
+        env={"RUN": "77"},
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+def test_a_bot_whose_job_failed_starts_the_bot_health_bot_with_its_run(
+    tmp_path: Path,
+) -> None:
+    done = start_the_bot_health_bot(tmp_path, exact(START_THE_BOT_HEALTH_BOT))
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT]
+    assert done.summary == (
+        "A job failed, so the bot-health bot looks whether Harden-Runner stopped it, "
+        "and runs the failed jobs once more then.\n"
+    )
+    assert done.stubbed == []
+
+
+def test_the_start_of_the_bot_health_bot_tries_again_when_github_fails(
+    tmp_path: Path,
+) -> None:
+    done = start_the_bot_health_bot(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 502", code=1, once=True),
+        exact(START_THE_BOT_HEALTH_BOT),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 2
+    assert done.stubbed == ["sleep 10"]
+
+
+def test_a_bot_health_bot_that_github_refuses_to_start_fails_with_what_follows(
+    tmp_path: Path,
+) -> None:
+    # As for a run that Dependabot started, whose token may only read: the run says
+    # so, and the nightly look runs it again when Harden-Runner stopped a job of it.
+    done = start_the_bot_health_bot(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 403", code=1),
+    )
+
+    assert done.returncode == 1
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 3
+    assert done.stubbed == ["sleep 10", "sleep 20"]
+    assert (
+        "::error title=The bot-health bot didn't start::GitHub didn't start Bot "
+        "health for this run; its nightly look runs the failed jobs once more if "
+        "Harden-Runner stopped one of them."
+    ) in done.stdout
+    assert done.summary == ""
+
+
 # The bots that merge.
 
 
@@ -1240,11 +1319,30 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
 
 
 @pytest.mark.parametrize(
-    ("state", "behind", "rebuilt"),
-    [("OPEN", "3", True), ("OPEN", "0", False), ("MERGED", None, False)],
+    ("state", "behind", "merging", "event", "rebuilt"),
+    [
+        # Auto-merge on: every run rebuilds it, so that it can merge.
+        ("OPEN", "3", True, "push", True),
+        # A merge that changes nothing that it releases leaves it behind main; one that
+        # changes its notes has it rebuilt by release-please itself (decision 0175).
+        ("OPEN", "3", False, "push", False),
+        # The daily run, which merges a release of dependency updates (decision 0087),
+        # and a run by hand, such as the one that the branch bot starts once auto-merge
+        # is turned on.
+        ("OPEN", "3", False, "schedule", True),
+        ("OPEN", "3", False, "workflow_dispatch", True),
+        ("OPEN", "0", True, "push", False),
+        ("OPEN", "0", False, "schedule", False),
+        ("MERGED", None, True, "schedule", False),
+    ],
 )
-def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
-    tmp_path: Path, state: str, behind: str | None, rebuilt: bool
+def test_the_release_pull_request_is_rebuilt_when_it_is_behind_main_and_about_to_merge(
+    tmp_path: Path,
+    state: str,
+    behind: str | None,
+    merging: bool,
+    event: str,
+    rebuilt: bool,
 ) -> None:
     branch = "release-please--branches--main"
     done = run_step(
@@ -1257,14 +1355,19 @@ def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
                 r"pr list --state open --label autorelease: pending .*",
                 f"21 {branch}\n",
             ),
-            exact("pr view 21 --json state --jq .state", f"{state}\n"),
+            # Its state and whether auto-merge is on, in one look.
+            exact(
+                "pr view 21 --json state,autoMergeRequest"
+                r' --jq "\(.state) \(.autoMergeRequest != null)"',
+                f"{state} {str(merging).lower()}\n",
+            ),
             exact(
                 f"api repos/o/r/compare/main...{branch} --jq .behind_by", f"{behind}\n"
             ),
             exact("pr view 21 --json body --jq .body", "The notes\n"),
             Answer(r"pr edit 21 --body .*"),
         ],
-        env={"GH_TOKEN": "app-token"},
+        env={"GH_TOKEN": "app-token", "GITHUB_EVENT_NAME": event},
     )
 
     assert done.returncode == 0, done.stderr
@@ -1278,6 +1381,32 @@ def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
         if rebuilt
         else []
     )
+    # One that waits says why, so that the log of the run explains it.
+    waits = behind == "3" and not rebuilt
+    assert ("once auto-merge is on for it, or in the daily run" in done.stdout) == waits
+
+
+def test_a_failed_look_at_the_release_pull_request_fails_the_run(
+    tmp_path: Path,
+) -> None:
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        "Have the release pull request rebuilt on the current main",
+        answers=[
+            Answer(
+                r"pr list --state open --label autorelease: pending .*",
+                "21 release-please--branches--main\n",
+            ),
+            Answer(r"pr view 21 --json state,autoMergeRequest .*", code=1),
+        ],
+        env={"GH_TOKEN": "app-token", "GITHUB_EVENT_NAME": "push"},
+    )
+
+    assert done.returncode != 0
+    assert done.called("api repos/o/r/compare") == []
+    assert done.called("pr edit") == []
 
 
 OVERRIDES = "Give release-please the title of each merged pull request"

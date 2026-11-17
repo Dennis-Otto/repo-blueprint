@@ -1,0 +1,48 @@
+# The bots of events start the bot-health bot after a failure
+
+- Status: accepted, amends [0141](0141-the-bot-health-bot-runs-every-bot-again-that-harden-runner-stopped.md) and the filter of the branches that [0151](0151-the-bots-after-the-checks-start-the-branch-bot-when-a-check-failed-for-good.md) turned down
+- Date: 2026-11-17
+
+## Context
+
+*Bot health* started on `workflow_run` at the end of every run of 34 workflows. GitHub has no filter on the conclusion, so each end created a run first, and only the `if` of its jobs decided that there was nothing to do. From 2026-11-10 to 2026-11-16, in the blueprint and the seven repositories that follow it, about 8,700 of these runs had nothing to do ([issue 999](https://github.com/Dennis-Otto/repo-blueprint/issues/999)):
+
+- **The bots of events and the workflows with an issue of their own,** *Area labels*, *Commands*, *Dependabot maintenance*, *Welcome*, *Diagrams*, *Newest Node*, *Newest Python* and *Next runner*, ended 4,707 times. The job *run a bot again that Harden-Runner stopped* of decision 0141 had work only after a failure at the first attempt, and it gave no second try all week: the two runs that failed, of *Newest Python*, failed in their checks, not by a stop of Harden-Runner.
+- **The runs of pull requests of the other watched workflows,** such as *Workflow security*, *Links* or *Issue lifecycle*, ended 3,969 times, and the job *look at the end of a bot's run* leaves every run of a pull request out.
+
+They filled the list of the runs of *Bot health*, in which a real failure is hard to find, and every listing of the API that pages through it, the problem that decision 0151 set out to solve for *Update branches*. Decision 0151 turned down a filter `branches:` for one reason: the bots of events run on `pull_request_target` with the branch of the pull request, the job *stopped* needs those runs, and one `workflow_run` has one filter for all of its workflows.
+
+## Options
+
+1. **The filter alone.** It would take away the second try of the bots of events after a stop of Harden-Runner, which nothing else gives them.
+2. **A second workflow that holds only the job *stopped*,** on `workflow_run` of the eight workflows without a filter. Every end of the eight would still start a run of it, and every repository would get one more workflow file.
+3. **The eight start the bot themselves, then the filter.** Each gets a last job that runs only when one of its jobs failed at the first attempt and starts *Bot health* by `workflow_dispatch` with the run, as the job *branches* of *After the checks* starts *Update branches* (decision 0151). The eight leave the list of `workflow_run`, which then takes the filter.
+
+## Decision
+
+Option 3.
+
+- **The last job.** *start the bot-health bot after a failure* (`bot-health`) needs every other job of the workflow and runs when `failure() && github.run_attempt == 1`, not in a fork. It holds only `actions: write`, blocks every host but `api.github.com`, checks out nothing, and runs `gh workflow run bot-health.yml --field run=<the run>` on the default branch, twice more when GitHub fails the call. A rerun of the failed jobs runs the jobs that need them again, so the last job runs again at the second attempt and starts nothing then: each run gets one second try. A run that passed or skipped, of which nearly every one is, starts no run of *Bot health* at all. The job is the same in the blueprint and in every kind of project, as the template includes the eight workflows of the blueprint.
+- **The job *stopped*** of *Bot health* runs for a start by hand that names a run, in the input `run`, and the nightly look for one that names none. `blueprint.py bot-health stopped RUN` acts only on a run of one of the eight (`LAST_JOB` of `blueprint/bot_health.py`, `EVENT_BOTS` and `OWN_ISSUE`), never one of the event `pull_request`, which would be a fork's workflow that only took the name of one of them. The last job starts it while its own run still ends, so it waits for the end of the run, every 10 seconds up to four minutes; a run that someone runs again in that time is theirs, and one that takes longer is left to the nightly look. Then it runs the failed jobs once more when Harden-Runner stopped one of them, as before. One run of the job at a time for each run.
+- **The filter.** The list of `workflow_run` takes `branches: [main, "v*"]`. GitHub then drops the end of a run of a pull request before it makes a run of *Bot health*. `v*` keeps the runs of *Release verification* that a release published by hand starts, with the tag `vX.Y.Z` as their branch. The `if` of the job *run* stays as it was: a branch named `main` of a fork still passes the filter, and the job still leaves it out.
+- **The nightly look** gives the second try that nothing else gives: to the runs of the eight of the last two days, of every branch but not of the event `pull_request`, that failed at their first attempt with a job that Harden-Runner stopped and that no one ran again. That is a run whose last job Harden-Runner stopped too, one whose run of *Bot health* Harden-Runner stopped, and one whose start of *Bot health* GitHub refused, as it may for a run that Dependabot started, whose token may only read; the last job then fails with *The bot-health bot didn't start*. It also looks at the latest verification of a release published by hand of the last two days, and gives it its second try or its issue, as the end of the run would have. Both say so in the summary of the look, and a refused try fails it.
+
+## What stays
+
+- **One run at a time for each watched workflow,** so that two ends never open two issues ([0019](0019-a-failing-bot-keeps-one-issue-open.md)): the concurrency of the job *run* is unchanged.
+- **An issue within minutes** for a bot of `main`, closed by the next run that passes (0019), and a run of a bot of `main` that GitHub couldn't start reported at once ([0136](0136-an-outage-of-github-starts-no-bot-failure.md)): the job *run* and its `if` are unchanged.
+- ***Update branches* and *Issue lifecycle*** stay in the list with every event on `main` (0151): only their runs of pull requests leave, which the job *run* left out before.
+- ***Findings*** stays in the list (0019).
+- **The second try of a stopped *Welcome*, *Area labels*, *Dependabot maintenance* and `/fix`** comes within seconds, from the last job instead of the end of the run (0141).
+
+Tests keep each of these: `test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only` holds the filter, the input, the conditions and the concurrency of the jobs; `test_the_bot_health_bot_watches_every_bot` holds that the list keeps every bot and scheduled workflow, *Update branches*, *Issue lifecycle* and *Findings* among them, and none of the eight; `test_the_bots_that_bot_health_runs_again_start_it_after_a_failure` holds that each of the eight carries the same last job, after all its other jobs, in the blueprint and in every kind of project, and that no other workflow has one. The tests of `tests/test_workflow_steps.py` run the step that starts the bot, also when GitHub refuses it, and those of `tests/test_bot_health.py` the waiting for the end, a second attempt, a run of another workflow or of the event `pull_request`, and the nightly look at the stopped runs and at a release published by hand.
+
+## Consequences
+
+About 8,700 runs of *Bot health* a week less in the blueprint and the repositories that follow it, and a list of its runs in which nearly every run did something. A bot of events that failed adds one short job, which takes a runner for a few seconds.
+
+The second try of a stopped bot of events comes as soon as before, from the job of the run itself. When Harden-Runner stops the last job as well, or GitHub refuses its start, it comes with the nightly look, up to a day late, which no workflow of 0141 had to wait for before; a run of a pull request that ran again by then is a person's.
+
+Whether GitHub takes the tag `vX.Y.Z` of a run of *Release verification* that the event `release` started for the filter `v*` could not be watched before the merge, as no release was published by hand in the weeks before. GitHub's documentation says that the filter matches the branch of the run, and the branch of such a run is its tag. Should GitHub not match it, the nightly look covers the run of the last two days, a day late, and the weekly run of *Release verification* checks the latest release again on `main`.
+
+A workflow of a project that keeps an issue of its own with the line `# bot-health: own-issue` was never in the list, and stays as it was.

@@ -202,14 +202,14 @@ def test_a_lock_file_whose_versions_the_check_cant_read_holds_the_refresh(
 def test_a_file_of_another_package_manager_holds_the_refresh(tmp_path: Path) -> None:
     root = refresh(
         tmp_path,
-        {"composer.lock": "{}\n"},
-        {"composer.lock": '{"packages": []}\n'},
+        {"yarn.lock": "# yarn lockfile v1\n"},
+        {"yarn.lock": "# yarn lockfile v1\n\nleft-pad@^1.0.0:\n"},
     )
 
     assert lock_age.added(root, "HEAD~1") == (
         [],
         [
-            "composer.lock: the refresh changes it, and the check can't date the "
+            "yarn.lock: the refresh changes it, and the check can't date the "
             "versions of such a file."
         ],
     )
@@ -353,9 +353,12 @@ def test_the_check_of_a_refresh_names_each_young_version(
         {
             "requirements.in": "alpha\n",
             "requirements.txt": HEADER + "alpha==1.0\n",
-            "composer.lock": "{}\n",
+            "yarn.lock": "# yarn lockfile v1\n",
         },
-        {"requirements.txt": HEADER + "alpha==1.5\n", "composer.lock": "[]\n"},
+        {
+            "requirements.txt": HEADER + "alpha==1.5\n",
+            "yarn.lock": "# yarn lockfile v1\n\nleft-pad@^1.0.0:\n",
+        },
     )
     young = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     opened_by_urllib(
@@ -372,7 +375,7 @@ def test_the_check_of_a_refresh_names_each_young_version(
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == (
-        "composer.lock: the refresh changes it, and the check can't date the "
+        "yarn.lock: the refresh changes it, and the check can't date the "
         "versions of such a file."
     )
     assert lines[1].startswith("requirements.txt: alpha 1.5: released ")
@@ -425,12 +428,13 @@ def test_a_refresh_that_takes_back_a_young_version_of_main_waits(
         {url: answer, "https://pypi.org/pypi/alpha/1.2/json": pypi(OLD)}
     )
 
-    added, problems = lock_age.check(root, "HEAD~1", NOW, answers)
+    found = lock_age.check(root, "HEAD~1", NOW, answers)
 
     version = "1.3.0" if name.endswith(".json") else "1.3"
     package = "left-pad" if name.endswith(".json") else "alpha"
-    assert added == 1
-    assert problems == [
+    assert found.dated == 1
+    assert found.undated == []
+    assert found.problems == [
         f"{name}: the refresh replaces {package} {version}, which main has and which "
         "came out 2026-11-07 08:15 UTC, with a version released before it, and so "
         "would take back what main got, such as the fix of a vulnerability; the "
@@ -570,4 +574,244 @@ def test_the_check_passes_a_refresh_of_versions_a_week_old(
 
     assert capsys.readouterr().out == (
         "Each of the 1 version(s) that the refresh adds is at least a week old.\n"
+    )
+
+
+def composer_lock(
+    *packages: tuple[str, str], dev: tuple[str, str] | None = None
+) -> str:
+    """A composer.lock with these packages, and one for the tests when dev names it."""
+
+    def entry(package: tuple[str, str]) -> dict[str, str]:
+        # The publisher sets the time, so the check doesn't read it.
+        return {
+            "name": package[0],
+            "version": package[1],
+            "time": "2020-01-01T00:00:00+00:00",
+        }
+
+    return json.dumps(
+        {
+            "packages": [entry(package) for package in packages],
+            "packages-dev": [entry(dev)] if dev else [],
+        }
+    )
+
+
+def test_the_check_reads_what_the_refresh_adds_to_composer_lock(
+    tmp_path: Path,
+) -> None:
+    root = refresh(
+        tmp_path,
+        {
+            "composer.lock": composer_lock(
+                ("guzzlehttp/psr7", "2.7.0"), dev=("vimeo/psalm", "6.0.0")
+            ),
+            "vendor-bin/tools/composer.lock": composer_lock(("amphp/amp", "3.0.0")),
+        },
+        {
+            "composer.lock": composer_lock(
+                ("guzzlehttp/psr7", "2.7.1"),
+                ("psr/log", "3.0.2"),
+                dev=("vimeo/psalm", "6.0.0"),
+            ),
+            # A version that goes back: nothing dates either, so nothing tells.
+            "vendor-bin/tools/composer.lock": composer_lock(("amphp/amp", "2.6.4")),
+            "vendor-bin/new/composer.lock": composer_lock(
+                ("phpunit/phpunit", "12.0.0")
+            ),
+        },
+    )
+
+    assert lock_age.added(root, "HEAD~1", composer=True) == (
+        [
+            Added("composer.lock", "composer", "guzzlehttp/psr7", "2.7.1"),
+            Added("composer.lock", "composer", "psr/log", "3.0.2"),
+            Added(
+                "vendor-bin/new/composer.lock", "composer", "phpunit/phpunit", "12.0.0"
+            ),
+            Added("vendor-bin/tools/composer.lock", "composer", "amphp/amp", "2.6.4"),
+        ],
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{ not JSON",
+        json.dumps(["no", "lock", "file"]),
+        json.dumps({"packages": {"psr/log": "3.0.2"}}),
+        json.dumps({"packages": ["psr/log"]}),
+        json.dumps({"packages-dev": [{"name": "psr/log"}]}),
+    ],
+    ids=["no JSON", "a list", "a map", "a name", "no version"],
+)
+def test_a_composer_lock_that_the_check_cant_read_holds_the_refresh(
+    tmp_path: Path, text: str
+) -> None:
+    root = refresh(
+        tmp_path,
+        {"composer.lock": composer_lock(("psr/log", "3.0.0"))},
+        {"composer.lock": text},
+    )
+
+    assert lock_age.added(root, "HEAD~1", composer=True) == (
+        [],
+        ["composer.lock: the check can't read its versions."],
+    )
+
+
+@pytest.mark.parametrize(
+    "branch", ["renovate/lock-file-maintenance", "renovate/pip-compile-refresh", ""]
+)
+def test_a_composer_lock_in_another_refresh_holds_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    branch: str,
+) -> None:
+    # Only the refresh of Composer, on a branch of its own, brings versions that
+    # nothing dates (decision 0174): in npm's refresh, such as one that a project
+    # groups with Composer, composer.lock holds it, as before.
+    root = refresh(
+        tmp_path,
+        {"composer.lock": composer_lock(("psr/log", "3.0.0"))},
+        {"composer.lock": composer_lock(("psr/log", "3.0.2"))},
+    )
+    registries = Registries({})
+    opened_by_urllib(monkeypatch, registries)
+    monkeypatch.setenv("GITHUB_HEAD_REF", branch)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    assert main(["locks", "--age", "HEAD~1"], root=root) == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == (
+        "composer.lock: the refresh changes it, and the check can't date the "
+        "versions of such a file."
+    )
+    assert not any("nothing dates it" in line for line in lines)
+    assert registries.asked == []
+
+
+def test_a_refresh_of_composer_passes_and_names_what_nothing_dates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = refresh(
+        tmp_path,
+        {"composer.json": "{}\n", "composer.lock": composer_lock(("psr/log", "3.0.0"))},
+        {"composer.lock": composer_lock(("psr/log", "3.0.2"), ("psr/clock", "1.0.0"))},
+    )
+    # No registry is asked: nothing that the publisher can't set dates a version of
+    # Composer.
+    registries = Registries({})
+    opened_by_urllib(monkeypatch, registries)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
+
+    assert main(["locks", "--age", "HEAD~1"], root=root) == 0
+
+    note = (
+        "Nothing dates the 2 version(s) of Composer that the refresh adds: Composer "
+        "has no cooldown, and whoever publishes a version sets its time in "
+        "composer.lock. So the refresh of Composer brings versions of any age, also "
+        "one published minutes before, and merges by itself once every check passes, "
+        "as decision 0174 of the blueprint accepts."
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        "composer.lock: psr/clock 1.0.0: nothing dates it.",
+        "composer.lock: psr/log 3.0.2: nothing dates it.",
+        note,
+    ]
+    assert summary.read_text(encoding="utf-8") == (
+        "### Versions that nothing dates\n\n"
+        "- `composer.lock: psr/clock 1.0.0`\n"
+        "- `composer.lock: psr/log 3.0.2`\n"
+        f"\n{note}\n\n"
+    )
+    assert registries.asked == []
+
+
+def test_a_young_version_of_npm_holds_a_refresh_beside_composer(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The week of npm and pip-compile stays as strict beside a refresh of Composer.
+    root = refresh(
+        tmp_path,
+        {
+            "composer.lock": composer_lock(("psr/log", "3.0.0")),
+            "web/package.json": "{}\n",
+            "web/package-lock.json": npm_lock(registry("left-pad", "1.2.0")),
+        },
+        {
+            "composer.lock": composer_lock(("psr/log", "3.0.2")),
+            "web/package-lock.json": npm_lock(registry("left-pad", "1.3.0")),
+        },
+    )
+    young = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    opened_by_urllib(
+        monkeypatch,
+        Registries(
+            {
+                "https://registry.npmjs.org/left-pad": {
+                    "time": {"1.3.0": young, "1.2.0": OLD}
+                }
+            }
+        ),
+    )
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
+
+    assert main(["locks", "--age", "HEAD~1"], root=root) == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "composer.lock: psr/log 3.0.2: nothing dates it."
+    assert lines[1].startswith("Nothing dates the 1 version(s) of Composer")
+    assert lines[2].startswith("web/package-lock.json: left-pad 1.3.0: released ")
+    assert lines[2].endswith(" UTC, less than a week ago.")
+    assert lines[3].startswith(
+        "The weekly refresh of the lock files merges by itself only from versions "
+        "at least a week old"
+    )
+
+
+def test_a_refresh_with_versions_of_both_counts_those_that_a_registry_dates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = refresh(
+        tmp_path,
+        {
+            "composer.lock": composer_lock(("psr/log", "3.0.0")),
+            "requirements.in": "alpha\n",
+            "requirements.txt": HEADER + "alpha==1.0\n",
+        },
+        {
+            "composer.lock": composer_lock(("psr/log", "3.0.2")),
+            "requirements.txt": HEADER + "alpha==1.5\n",
+        },
+    )
+    opened_by_urllib(
+        monkeypatch,
+        Registries(
+            {
+                "https://pypi.org/pypi/alpha/1.5/json": pypi(OLD),
+                "https://pypi.org/pypi/alpha/1.0/json": pypi(OLD),
+            }
+        ),
+    )
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
+
+    assert main(["locks", "--age", "HEAD~1"], root=root) == 0
+
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "Each of the 1 version(s) that the refresh adds is at least a week old."
     )

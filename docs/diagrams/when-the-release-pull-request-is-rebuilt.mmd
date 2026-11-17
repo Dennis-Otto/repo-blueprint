@@ -1,0 +1,39 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When the release pull request is rebuilt
+    accDescr: A merge into main starts the release bot. A merge that changes the notes of the release pull request, such as a feat, a fix or a perf, has release-please rebuild it on main at once. A merge that changes nothing that it releases, such as docs, chore, ci or test, rebuilds it only when auto-merge is on for it; otherwise it stays behind main, which holds up nothing. Once you turn auto-merge on, the branch bot starts the release bot, unless a run of it that came since still runs. The daily run, which also turns auto-merge on for a release of dependency updates, and a run by hand rebuild it as well. Rebuilt on main, its checks run, and it merges once they pass. The branch bot never updates its branch.
+
+    merge["`A merge into *main*`"]
+    notes{"Does it change the notes<br>of the release pull request?"}
+    now["`release-please rebuilds it<br>on main at once`"]
+    auto{"Is auto-merge<br>on for it?"}
+    waits["`It stays behind main,<br>which holds up nothing`"]
+    turned["`You turn auto-merge on`"]
+    start["`The branch bot starts the release bot,<br>unless a run of it that came since runs;<br>it never updates the branch itself`"]
+    daily["`The daily run, which merges a release<br>of dependency updates, or a run by hand`"]
+    rebuilt["`The release bot rebuilds it on main`"]
+    merged["`Its checks run, and it merges<br>once they pass`"]
+
+    merge --> notes
+    notes -- "yes: feat, fix, perf" --> now
+    notes -- "no: docs, chore, ci, test" --> auto
+    auto -- "yes" --> rebuilt
+    auto -- "no" --> waits
+    waits --> turned
+    waits --> daily
+    turned --> start
+    start --> rebuilt
+    daily --> rebuilt
+    now --> merged
+    rebuilt --> merged
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge,now,start,daily,rebuilt bot
+    class turned you
+    class merged done

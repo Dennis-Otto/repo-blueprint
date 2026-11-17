@@ -3,7 +3,7 @@ name: Quick checks
 # The quick checks of every pull request that need a workflow of their own outside
 # Lint: the secret scan and the review of the dependencies, as two jobs of one
 # workflow, so that a push starts one run, and one run of After the checks, for both
-# (decision 0174). Not in Lint, whose runs for a pull request cancel each other.
+# (decision 0178). Not in Lint, whose runs for a pull request cancel each other.
 #
 # gitleaks looks for secrets in the commits of every pull request, and every week in
 # the whole history of every branch. Not after a merge, which brings only the commits
@@ -135,15 +135,18 @@ jobs:
       # Renovate's weekly refresh of the lock files merges by itself only from
       # versions at least a week old, as every other update waits a week: the step
       # asks PyPI and the registry of npm when each version that it adds came out, and
-      # fails on a younger one, or one that it can't date. Its branches that wait for
-      # the maintainer begin with renovate/review- instead.
+      # fails on a younger one, or one that it can't date. The refresh of Composer
+      # merges by itself with versions of any age, since nothing dates them that their
+      # publisher can't set: the step names them in its summary. The branches that
+      # wait for the maintainer begin with renovate/review- instead.
       - name: Check the age of what the refresh of the lock files brings
         id: age
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
           && (startsWith(github.head_ref, 'renovate/lock-file-maintenance')
-          || startsWith(github.head_ref, 'renovate/pip-compile-refresh')) }}
+          || startsWith(github.head_ref, 'renovate/pip-compile-refresh')
+          || startsWith(github.head_ref, 'renovate/composer-lock-file-maintenance')) }}
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py

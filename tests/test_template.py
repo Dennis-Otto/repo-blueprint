@@ -64,7 +64,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, diagrams, ownership, screenshots
+from blueprint import bootstrap, branches, diagrams, ownership, screenshots
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -75,6 +75,7 @@ from blueprint.bot_health import (
     FAILED,
     LABEL,
     LABELS,
+    LAST_JOB,
     OWN_ISSUE,
     RENOVATE_LABEL,
     STEP,
@@ -2306,7 +2307,11 @@ def test_the_next_runner_runs_the_variants_every_week(
         (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
     )
     names = [job["name"] for job in parse(next_runner)["jobs"].values()]
-    assert names == ["next runner", "report"]
+    assert names == [
+        "next runner",
+        "report",
+        "start the bot-health bot after a failure",
+    ]
     assert not set(names) & set(settings["branch"]["required_checks"])
     # The workflow of the blueprint alone, whose variants are those of every project.
     for project in projects.values():
@@ -7326,7 +7331,7 @@ def test_the_secret_scan_and_the_dependency_review_share_one_workflow(
     projects: dict[str, Path], kind: str
 ) -> None:
     # Two workflows of one job each started two runs, and two runs of After the checks,
-    # for every push to a pull request (decision 0174). One workflow, Quick checks,
+    # for every push to a pull request (decision 0178). One workflow, Quick checks,
     # runs both jobs under the names that the rulesets require.
     folder = ROOT if kind == "blueprint" else projects[kind]
     flows = workflows(folder)
@@ -10894,7 +10899,11 @@ def test_dependabot_merges_as_the_release_app(
     assert set(triggers(text)) == {"pull_request_target"}
     job = job_in(text, "auto-merge")
     assert job["environment"] == {"name": "release", "deployment": False}
-    assert len(parse(text)["jobs"]) == 1
+    # Besides it, only the last job, which starts the bot-health bot after a failure
+    # without the environment (decision 0176).
+    jobs = parse(text)["jobs"]
+    assert set(jobs) == {"auto-merge", "bot-health"}
+    assert "environment" not in jobs["bot-health"]
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
     # merge, besides the waits for Harden-Runner.
@@ -10936,10 +10945,15 @@ def test_dependabot_merges_as_the_release_app(
     assert "dependabot-automerge.yml" in dangerous
 
 
-def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> None:
+def test_the_release_bot_rebuilds_its_pull_request_for_every_merge_into_its_notes() -> (
+    None
+):
     # main takes only a pull request that is up to date with it, so a release pull
     # request that only the schedule rebuilt couldn't merge for hours, and its notes
-    # would miss what merged since (decision 0033).
+    # would miss what merged since (decision 0033). release-please runs for every push,
+    # and rebuilds its pull request for each merge that changes its notes, such as a
+    # beta's version or a fix of a vulnerability; a merge that changes nothing that it
+    # releases waits for auto-merge or the daily run (decision 0175).
     text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert triggers(text)["push"] == ["    branches: [main]"]
     assert triggers(text)["schedule"] == ['    - cron: "25 5 * * *"']
@@ -10948,6 +10962,27 @@ def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> No
     )
     assert condition_of(rebuild) == "steps.app.outputs.token != ''"
     assert "skip-github-pull-request" not in text
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_branch_bot_can_start_the_release_bot_of_every_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Once auto-merge is turned on for a release pull request that is behind main, the
+    # branch bot starts the release bot by the name of its workflow, which rebuilds the
+    # pull request in a run by hand, as in the daily one (decision 0175).
+    workflows = projects[kind] / ".github/workflows"
+    text = (workflows / branches.RELEASE_WORKFLOW).read_text(encoding="utf-8")
+    assert "workflow_dispatch" in triggers(text)
+    rebuild = step_named(
+        text, "Have the release pull request rebuilt on the current main"
+    )
+    assert '"$GITHUB_EVENT_NAME" == push' in rebuild["run"]
+    # The token of the branch bot's job may start it.
+    bot = job_in(
+        (workflows / "update-branches.yml").read_text(encoding="utf-8"), "update"
+    )
+    assert bot["permissions"]["actions"] == "write"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -11494,14 +11529,21 @@ def refresh_of(
 
 
 # The weekly refresh of the lock files of a package manager that keeps it to versions
-# at least a week old merges by itself; any other waits for the maintainer on a branch
-# of its own, which the check of the age leaves alone.
+# at least a week old merges by itself; so does that of Composer, which nothing dates
+# (decision 0174), on a branch of its own; any other waits for the maintainer on a
+# branch of its own, which the check of the age leaves alone.
 MERGES_BY_ITSELF = {
     "minimumReleaseAge": "7 days",
     "automerge": True,
     "updateNotScheduled": False,
     "additionalBranchPrefix": "",
     "statusCheckWhen": {"minimumReleaseAge": "never"},
+}
+COMPOSER = {
+    "minimumReleaseAge": None,
+    "automerge": True,
+    "updateNotScheduled": False,
+    "additionalBranchPrefix": "composer-",
 }
 WAITS = {
     "minimumReleaseAge": None,
@@ -11528,10 +11570,12 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     }
     # npm takes --before= from minimumReleaseAge, and blueprint.py compiles the lock
     # files of pip-compile again, both from versions a week old: their refresh merges
-    # by itself. Composer and any other package manager can't keep to that age, so
-    # theirs waits. Renovate builds a refresh anew only in its window, so that what
-    # merges is what the checks and the maintainer saw; the branch bot keeps it up to
-    # date with main, as Renovate does in its window.
+    # by itself. Composer can't keep to that age, and its refresh merges by itself
+    # all the same, with no week that would pretend to hold and on a branch of its
+    # own, so that it can't take the --before= of npm away in a shared one; any other
+    # package manager waits. Renovate builds a refresh anew only in its window, so
+    # that what merges is what the checks saw; the branch bot keeps it up to date
+    # with main, as Renovate does in its window.
     blueprint = "blueprint.py" if kind == "blueprint" else ".github/blueprint.py"
     for manager in ("npm", "pip-compile"):
         refresh = refresh_of(shared, own, manager)
@@ -11548,7 +11592,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
             else None
         )
     assert shared["rebaseWhen"] == "behind-base-branch"
-    for manager in ("composer", "poetry", "bundler"):
+    assert refresh_of(shared, own, "composer") == COMPOSER
+    for manager in ("poetry", "bundler", "gomod"):
         assert refresh_of(shared, own, manager) == WAITS, manager
     # The age of a refresh, and the command after it, are for the refresh alone: the
     # fix of a vulnerability still comes at once and merges on its own.
@@ -11573,7 +11618,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     assert not re.search(allowed[0], f"python3 {blueprint} locks --fix")
     # The check dependency-review holds a refresh that merges by itself when a version
     # younger than a week comes anyway, on the branches that Renovate names it, alone
-    # or in a group; one that waits begins with review- and stays out.
+    # or in a group, and names the versions of Composer that nothing dates; one that
+    # waits begins with review- and stays out.
     review = job_in(
         (root / ".github/workflows/quick-checks.yml").read_text(encoding="utf-8"),
         "dependency-review",
@@ -11583,6 +11629,7 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     assert branches == [
         "renovate/lock-file-maintenance",
         "renovate/pip-compile-refresh",
+        f"renovate/{COMPOSER['additionalBranchPrefix']}lock-file-maintenance",
     ]
     assert not any(
         f"renovate/{WAITS['additionalBranchPrefix']}".startswith(branch)
@@ -11616,8 +11663,10 @@ def test_the_mend_app_keeps_npm_alone_to_versions_a_week_old(tmp_path: Path) -> 
     )
     # The Mend Renovate app runs no command of the blueprint, so the refresh of
     # pip-compile waits for the maintainer; npm takes --before= from Renovate itself.
+    # Composer needs no command, so its refresh merges by itself there too.
     assert refresh_of(shared, own, "npm") == MERGES_BY_ITSELF
     assert refresh_of(shared, own, "pip-compile") == WAITS
+    assert refresh_of(shared, own, "composer") == COMPOSER
     assert "postUpgradeTasks" not in str(shared)
 
 
@@ -17228,12 +17277,12 @@ def test_the_bot_for_cancelled_checks_ends_with_a_notice_when_github_keeps_faili
     assert not any(call.startswith("run rerun") for call in done.commands)
 
 
-# The bots of the blueprint alone, which a project's bot-health bot leaves out.
+# The bots of the blueprint alone, which a project's bot-health bot leaves out. Next
+# runner, which keeps an issue of its own, starts the bot itself (decision 0176).
 BLUEPRINT_BOTS = {
     "Dashboard",
     "Docs pictures",
     "Issue assistant sync",
-    "Next runner",
     "Renovate",
     "Rollout",
     "Weekly report",
@@ -17279,11 +17328,11 @@ def test_the_bot_health_bot_watches_every_bot(
             "pull_request",
             "pull_request_target",
         }:
-            assert name in watched | {"Bot health"}, name
-    # And every bot of events and workflow that keeps an issue of its own, such as
-    # Diagrams, which run once more when Harden-Runner stopped them (decision 0141).
-    assert set(named) & (EVENT_BOTS | OWN_ISSUE) <= watched
-    assert {"Area labels", "Commands", "Dependabot maintenance", "Welcome"} <= watched
+            assert name in watched | {"Bot health"} | LAST_JOB, name
+    # Not the bots of events and the workflows that keep an issue of their own, such
+    # as Diagrams, whose last job starts the bot when a job of theirs failed at the
+    # first attempt (decisions 0141 and 0176).
+    assert not watched & LAST_JOB
     # Not the checks of pull requests, each of whose runs would start a run of the
     # bot that skips: the daily look covers their runs on the default branch, and
     # the bot after the checks runs them again when Harden-Runner stopped them.
@@ -17328,6 +17377,14 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
 def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     text = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     assert set(triggers(text)) == {"workflow_run", "schedule", "workflow_dispatch"}
+    # GitHub makes no run for the end of a run of a pull request, nor of a fork's
+    # branch of another name: the runs of main, and of the tag of a release published
+    # by hand, which is vX.Y.Z (decision 0176).
+    on = parse(text)["on"]
+    assert on["workflow_run"]["branches"] == ["main", "v*"]
+    assert on["workflow_run"]["types"] == ["completed"]
+    assert on["workflow_dispatch"]["inputs"]["run"]["default"] == ""
+    assert on["workflow_dispatch"]["inputs"]["run"]["type"] == "string"
     run = job_in(text, "run")
     condition = condition_of(run)
     for part in (
@@ -17358,19 +17415,18 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     )
     assert left
     assert set(json.loads(left[1])) == EVENT_BOTS | OWN_ISSUE
-    # None of them runs on pull_request: such a run is a fork's workflow of that name.
+    # None of them runs on pull_request: such a run is a fork's workflow of that name,
+    # which `bot-health stopped` leaves alone.
     named = names_of_workflows(ROOT)
     for name in EVENT_BOTS | OWN_ISSUE:
         assert "pull_request" not in triggers(named[name]), name
+    # Their last job starts it by hand with the run, which the job stopped takes.
     stopped = job_in(text, "stopped")
     taken = condition_of(stopped)
     assert taken == (
-        "github.event_name == 'workflow_run' && "
-        "!github.event.repository.fork && "
-        "github.event.workflow_run.event != 'pull_request' && "
-        f"contains(fromJSON('{left[1]}'), github.event.workflow_run.name) && "
-        "github.event.workflow_run.conclusion == 'failure' && "
-        "github.event.workflow_run.run_attempt == 1"
+        "github.event_name == 'workflow_dispatch' && "
+        "inputs.run != '' && "
+        "!github.event.repository.fork"
     )
     # It runs failed jobs again and reads their annotations, and writes nothing else.
     assert stopped["permissions"] == {
@@ -17379,17 +17435,24 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         "contents": "read",
     }
     assert stopped["concurrency"]["group"] == (
-        "${{ github.workflow }}-stopped-${{ github.event.workflow_run.id }}"
+        "${{ github.workflow }}-stopped-${{ inputs.run }}"
     )
+    # It waits up to four minutes for the end of the run.
+    assert stopped["timeout-minutes"] == 10
     [checkout] = steps_using(stopped, "actions/checkout")
     assert checkout["with"]["persist-credentials"] is False
     assert "ref" not in checkout["with"]
     [command] = [step for step in stopped["steps"] if "bot-health" in str(step)]
     assert 'bot-health stopped "$RUN"' in command["run"]
-    assert command["env"]["RUN"] == "${{ github.event.workflow_run.id }}"
+    assert command["env"]["RUN"] == "${{ inputs.run }}"
     # The step that stops a job says so in the words that the bot looks for.
     assert STOPPED in step_in(stopped, MAKE_SURE)["run"]
-    assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
+    # The nightly look, also when someone starts the bot by hand, but not for a start
+    # that names a run.
+    assert condition_of(job_in(text, "sweep")) == (
+        "github.event_name != 'workflow_run' && !inputs.run && "
+        "!github.event.repository.fork"
+    )
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.
     assert "concurrency" not in parse(text)
@@ -17406,6 +17469,65 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         assert job["permissions"]["issues"] == "write", name
     dangerous = accepted_dangerous_triggers()
     assert "bot-health.yml" in dangerous
+
+
+LAST_JOB_ID = "bot-health"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bots_that_bot_health_runs_again_start_it_after_a_failure(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The bots of events and the workflows with an issue of their own start the
+    # bot-health bot themselves, and only when a job of their first attempt failed,
+    # so that their end starts no run of it (decision 0176).
+    root = ROOT if project == "blueprint" else projects[project]
+    named = names_of_workflows(root)
+    watched = watched_by_bot_health(root)
+    bot = parse(named["Bot health"])
+    assert "run" in bot["on"]["workflow_dispatch"]["inputs"]
+    reference = job_in(names_of_workflows(ROOT)["Welcome"], LAST_JOB_ID)
+    with_the_job = set()
+    for name, text in named.items():
+        jobs = parse(text)["jobs"]
+        if name not in LAST_JOB:
+            assert LAST_JOB_ID not in jobs, name
+            continue
+        with_the_job.add(name)
+        assert name not in watched, name
+        last = jobs[LAST_JOB_ID]
+        # After every other job of the run, at its first attempt only: the job rerun
+        # of a second attempt runs it again, and it starts nothing then.
+        needs = last["needs"]
+        assert sorted([needs] if isinstance(needs, str) else needs) == sorted(
+            set(jobs) - {LAST_JOB_ID}
+        ), name
+        assert condition_of(last) == (
+            "failure() && github.run_attempt == 1 && !github.event.repository.fork"
+        ), name
+        # It may start a workflow, nothing else, reaches GitHub's API alone, and
+        # checks out nothing.
+        assert last["permissions"] == {"actions": "write"}, name
+        assert not steps_using(last, "actions/checkout"), name
+        [harden] = steps_using(last, "step-security/harden-runner")
+        assert harden["with"]["egress-policy"] == "block", name
+        assert harden["with"]["allowed-endpoints"].split() == ["api.github.com:443"]
+        assert STOPPED in step_in(last, MAKE_SURE)["run"], name
+        # The same job in every one of them, in the blueprint and in every kind.
+        assert {key: value for key, value in last.items() if key != "needs"} == {
+            key: value for key, value in reference.items() if key != "needs"
+        }, name
+    # Every one of them that the repository has, Welcome and Commands everywhere.
+    assert with_the_job == set(named) & LAST_JOB
+    assert {"Area labels", "Commands", "Dependabot maintenance", "Welcome"} <= (
+        with_the_job
+    )
+    if project == "blueprint":
+        assert with_the_job == LAST_JOB
+    start = step_in(reference, "Start the bot-health bot")
+    assert 'gh workflow run bot-health.yml --field run="$RUN"' in start["run"]
+    assert start["env"]["RUN"] == "${{ github.run_id }}"
+    assert start["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])

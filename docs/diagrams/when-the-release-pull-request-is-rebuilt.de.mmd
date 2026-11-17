@@ -1,0 +1,39 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wann der Release-Pull-Request neu gebaut wird
+    accDescr: Ein Merge in main startet den Release-Bot. Ein Merge, der die Notes des Release-Pull-Requests ändert, etwa ein feat, ein fix oder ein perf, lässt release-please ihn sofort neu auf main bauen. Ein Merge, der nichts an dem ändert, was er veröffentlicht, etwa docs, chore, ci oder test, baut ihn nur neu, wenn Auto-Merge für ihn an ist; sonst bleibt er hinter main zurück, was nichts aufhält. Sobald du Auto-Merge anschaltest, startet der Branch-Bot den Release-Bot, außer ein Lauf von ihm, der seitdem kam, läuft noch. Auch der tägliche Lauf, der für ein Release von Abhängigkeits-Updates Auto-Merge anschaltet, und ein Lauf von Hand bauen ihn neu. Neu auf main gebaut, laufen seine Prüfungen, und er merged, sobald sie grün sind. Der Branch-Bot aktualisiert seinen Branch nie.
+
+    merge["`Ein Merge in *main*`"]
+    notes{"Ändert er die Notes<br>des Release-Pull-Requests?"}
+    now["`release-please baut ihn<br>sofort neu auf main`"]
+    auto{"Ist Auto-Merge<br>für ihn an?"}
+    waits["`Er bleibt hinter main zurück,<br>was nichts aufhält`"]
+    turned["`Du schaltest Auto-Merge an`"]
+    start["`Der Branch-Bot startet den Release-Bot,<br>außer ein Lauf von ihm, der seitdem kam, läuft;<br>den Branch aktualisiert er nie selbst`"]
+    daily["`Der tägliche Lauf, der ein Release von<br>Abhängigkeits-Updates merged, oder ein Lauf von Hand`"]
+    rebuilt["`Der Release-Bot baut ihn neu auf main`"]
+    merged["`Seine Prüfungen laufen, und er merged,<br>sobald sie grün sind`"]
+
+    merge --> notes
+    notes -- "ja: feat, fix, perf" --> now
+    notes -- "nein: docs, chore, ci, test" --> auto
+    auto -- "ja" --> rebuilt
+    auto -- "nein" --> waits
+    waits --> turned
+    waits --> daily
+    turned --> start
+    start --> rebuilt
+    daily --> rebuilt
+    now --> merged
+    rebuilt --> merged
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge,now,start,daily,rebuilt bot
+    class turned you
+    class merged done

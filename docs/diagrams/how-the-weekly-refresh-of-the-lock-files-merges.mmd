@@ -5,12 +5,13 @@ config:
 ---
 flowchart TB
     accTitle: How the weekly refresh of the lock files merges
-    accDescr: On Mondays Renovate refreshes the lock files of every package manager. npm takes only versions released at least a week before. After Renovate, blueprint.py compiles the lock files of pip-compile again from uploads at least a week old, and keeps what main pins, such as the fix of a vulnerability. The check dependency-review asks PyPI and the registry of npm when each version that the refresh adds came out. Once every one is at least a week old and every check passes, the refresh merges on its own; a younger one holds it, and the check names it. The refresh of Composer and of any other package manager, which can't keep to that age, waits for the maintainer on a branch of its own.
+    accDescr: On Mondays Renovate refreshes the lock files of every package manager. npm takes only versions released at least a week before. After Renovate, blueprint.py compiles the lock files of pip-compile again from uploads at least a week old, and keeps what main pins, such as the fix of a vulnerability. The check dependency-review asks PyPI and the registry of npm when each version that the refresh adds came out. Once every one is at least a week old and every check passes, the refresh merges on its own; a younger one holds it, and the check names it. The refresh of Composer brings the newest versions, of any age, as nothing that their publisher can't set dates them: the check names each one, and the refresh merges on its own once every check passes. The refresh of any other package manager waits for the maintainer on a branch of its own.
 
     monday(["Renovate refreshes the lock files, on Mondays"])
     npm["npm: only versions<br>released a week before"]
     pip["pip-compile: blueprint.py compiles<br>them again from uploads a week<br>old, and keeps what main pins"]
-    other["Composer and any other:<br>the newest versions"]
+    composer["Composer: the newest versions,<br>of any age, which nothing dates"]
+    other["Any other package manager:<br>the newest versions"]
     age{"Is every version that the<br>refresh adds a week old?"}
     merge["Merges on its own<br>once every check passes"]
     held["Waits, and the check<br>names each younger one"]
@@ -18,6 +19,7 @@ flowchart TB
 
     monday --> npm --> age
     monday --> pip --> age
+    monday --> composer -- "the check names each one" --> merge
     monday --> other --> maintainer
     age -- "yes" --> merge
     age -- "no" --> held
@@ -25,6 +27,6 @@ flowchart TB
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class monday,npm,pip,other,age bot
+    class monday,npm,pip,composer,other,age bot
     class held,maintainer person
     class merge done
