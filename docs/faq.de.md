@@ -31,7 +31,7 @@ Setze die Repository-Variable [`BLUEPRINT_AUTOMERGE`](reference/variables.md#blu
 Die anderen Bots, die ihre eigenen Pull Requests mergen, haben eigene Schalter:
 
 - **Der Upstream-Bot einer Nextcloud-App** wartet, wenn [`UPSTREAM_AUTOMERGE`](reference/variables.md#upstream_automerge) auf `off` steht.
-- **Renovate** merged, was die Regeln von `.github/renovate.json5` erlauben; eine Regel mit `"automerge": false` stoppt das für die Pakete, die sie nennt. Die wöchentliche Auffrischung der Lock-Dateien merged sich nur aus Versionen selbst, die mindestens eine Woche alt sind, und die von Composer wartet auf dich.
+- **Renovate** merged, was die Regeln von `.github/renovate.json5` erlauben; eine Regel mit `"automerge": false` stoppt das für die Pakete, die sie nennt. Die wöchentliche Auffrischung der Lock-Dateien merged sich nur aus Versionen selbst, die mindestens eine Woche alt sind, und die von Composer merged sich mit Versionen jeden Alters selbst, da nichts sie datiert ([Entscheidung 0173](decisions/0173-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md)).
 
 ## Wie schnell kommt ein Release des Blueprints an?
 

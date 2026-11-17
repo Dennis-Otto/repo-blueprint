@@ -1,6 +1,6 @@
 # The weekly refresh of the lock files merges by itself, from versions a week old
 
-- Status: accepted, amended by [0172](0172-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a young version of `main` stays in the refresh of pip-compile and a refresh that takes one back holds until Renovate builds it anew
+- Status: accepted, amended by [0172](0172-a-young-version-of-main-stays-in-the-refresh-and-a-refresh-that-takes-one-back-holds.md), with which a young version of `main` stays in the refresh of pip-compile and a refresh that takes one back holds until Renovate builds it anew, and by [0173](0173-the-refresh-of-composer-merges-by-itself-with-versions-of-any-age.md), with which the refresh of Composer merges by itself with versions of any age
 - Date: 2026-11-09
 
 ## Context
@@ -35,7 +35,7 @@ The fix of a vulnerability comes at once, as before: neither `minimumReleaseAge`
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-weekly-refresh-of-the-lock-files-merges.dark.svg">
-  <img src="../images/diagrams/how-the-weekly-refresh-of-the-lock-files-merges.svg" alt="How the weekly refresh of the lock files merges: On Mondays Renovate refreshes the lock files of every package manager. npm takes only versions released at least a week before. After Renovate, blueprint.py compiles the lock files of pip-compile again from uploads at least a week old, and keeps what main pins, such as the fix of a vulnerability. The check dependency-review asks PyPI and the registry of npm when each version that the refresh adds came out. Once every one is at least a week old and every check passes, the refresh merges on its own; a younger one holds it, and the check names it. The refresh of Composer and of any other package manager, which can't keep to that age, waits for the maintainer on a branch of its own.">
+  <img src="../images/diagrams/how-the-weekly-refresh-of-the-lock-files-merges.svg" alt="How the weekly refresh of the lock files merges: On Mondays Renovate refreshes the lock files of every package manager. npm takes only versions released at least a week before. After Renovate, blueprint.py compiles the lock files of pip-compile again from uploads at least a week old, and keeps what main pins, such as the fix of a vulnerability. The check dependency-review asks PyPI and the registry of npm when each version that the refresh adds came out. Once every one is at least a week old and every check passes, the refresh merges on its own; a younger one holds it, and the check names it. The refresh of Composer brings the newest versions, of any age, as nothing that their publisher can't set dates them: the check names each one, and the refresh merges on its own once every check passes. The refresh of any other package manager waits for the maintainer on a branch of its own.">
 </picture>
 
 ## Consequences

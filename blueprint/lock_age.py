@@ -13,7 +13,12 @@ the registries set and no author can choose; a version that it can't date, or a
 changed file whose versions it can't read, holds the refresh as well. A version of
 main that the refresh replaces only with versions released before it, such as the fix
 of a vulnerability that npm's refresh resolves back, holds it for as long as it does,
-however old that version is."""
+however old that version is.
+
+The refresh of Composer merges by itself with versions of any age (decision 0173):
+Composer has no cooldown, and the time of a version in composer.lock comes from
+whoever published it, so nothing dates it. The check reads the versions that it adds
+to composer.lock and names them as versions that nothing dates, and lets them pass."""
 
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ from blueprint.diagrams import git
 from blueprint.locks import AGE, lock_files, read_pins
 
 NPM_LOCK = "package-lock.json"
+COMPOSER_LOCK = "composer.lock"
 NPM_REGISTRY = "https://registry.npmjs.org/"
 PYPI = "https://pypi.org/pypi/"
 TIMEOUT = 30
@@ -110,9 +116,36 @@ def npm_versions(text: str | None) -> set[tuple[str, str]] | None:
     return found
 
 
+def composer_versions(text: str | None) -> set[tuple[str, str]] | None:
+    """The packages and versions in composer.lock, those of the tests too; none for a
+    file that is no lock file of Composer."""
+    if text is None:
+        return set()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    found = set()
+    for section in ("packages", "packages-dev"):
+        entries = data.get(section, [])
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return None
+            name, version = entry.get("name"), entry.get("version")
+            if not isinstance(name, str) or not isinstance(version, str):
+                return None
+            found.add((name, version))
+    return found
+
+
 READERS: dict[str, Callable[[str | None], set[tuple[str, str]] | None]] = {
     "pip": pip_versions,
     "npm": npm_versions,
+    "composer": composer_versions,
 }
 
 
@@ -120,7 +153,8 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
     """The versions that HEAD adds to the lock files of base, those of base that it
     replaces with another version of the same package, and the problems of the files
     whose versions the check can't read: each file that the refresh changes is a lock
-    file of pip-compile or of npm, or the check can't date what it brings."""
+    file of pip-compile, of npm or of Composer, or the check can't tell what it
+    brings."""
     changed = sorted(
         filter(None, git(root, "diff", "--name-only", "-z", base, "HEAD").split("\0"))
     )
@@ -132,6 +166,8 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
             manager = "pip"
         elif PurePosixPath(name).name == NPM_LOCK:
             manager = "npm"
+        elif PurePosixPath(name).name == COMPOSER_LOCK:
+            manager = "composer"
         else:
             problems.append(
                 f"{name}: the refresh changes it, and the check can't date the "
@@ -147,10 +183,14 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
             Added(name, manager, package, version)
             for package, version in sorted(new - old)
         ]
+        if manager not in RELEASED:
+            continue
         # npm's refresh resolves each range anew from the versions a week old, and
         # takes back a young version that main got within the range, such as the fix
         # of a vulnerability: the refresh holds for as long as it does, also once
-        # that version is a week old, until Renovate builds the refresh anew.
+        # that version is a week old, until Renovate builds the refresh anew. Nothing
+        # dates a version of Composer, so nothing tells whether its refresh takes one
+        # back.
         staying = {package for package, _ in new}
         versions += [
             Added(name, manager, package, version, replaced=True)
@@ -318,10 +358,25 @@ def young(
     return [found for found in map(judge, unique) if found]
 
 
+@dataclass(frozen=True)
+class Found:
+    """What the check found in a refresh: how many versions that a registry dates it
+    adds, what holds it, and the versions that nothing dates, those of Composer."""
+
+    dated: int
+    problems: list[str]
+    undated: list[Added]
+
+
 def check(
     root: Path, base: str, now: datetime, opener: Callable[..., Any] | None = None
-) -> tuple[int, list[str]]:
-    """How many versions the refresh in HEAD adds to base, and what holds it."""
+) -> Found:
+    """What the refresh in HEAD adds to base: the versions that a registry dates, what
+    holds the refresh, and the versions that nothing dates."""
     versions, problems = added(root, base)
-    count = sum(not version.replaced for version in versions)
-    return count, problems + young(versions, now, opener)
+    dated = [version for version in versions if version.manager in RELEASED]
+    return Found(
+        dated=sum(not version.replaced for version in dated),
+        problems=problems + young(dated, now, opener),
+        undated=[version for version in versions if version.manager not in RELEASED],
+    )
