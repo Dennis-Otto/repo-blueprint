@@ -40,6 +40,7 @@ from blueprint.checklist import (
     social_preview_uploaded,
 )
 from blueprint.github import Api, GitHubError, Response, current_repo
+from blueprint.outage import CHECK_UNAVAILABLE
 from blueprint.settings import (
     BATCH,
     MAIN_ONLY,
@@ -2304,6 +2305,24 @@ def test_an_action_whose_file_github_refuses_keeps_the_list_as_it_is(
     assert github.permissions["sha_pinning_required"] is True
 
 
+def test_a_github_that_keeps_failing_keeps_the_list_as_it_is(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.permissions["allowed_actions"] = "all"
+    github.fail[("POST", "graphql")] = 502
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    # One finding for all, not one for each action.
+    assert out.count("actions.selected.patterns_allowed unknown") == 1
+    assert f"(GitHub answered 502: simulated failure), {CHECK_UNAVAILABLE}" in out
+    assert "the list of the allowed actions on GitHub only grows until it does" in out
+    assert github.permissions["allowed_actions"] == "all"
+    assert github.permissions["sha_pinning_required"] is True
+
+
 # A composite action whose update runs an action that the list lacks, in turn.
 COMPOSITE = {
     "vendor/composite/action.yml@abc": (
@@ -2453,23 +2472,83 @@ def test_the_lint_fails_when_github_refuses_the_file_of_an_action(
     assert "so what it runs in turn is unknown: run the check again\n" in out
 
 
-def test_the_lint_fails_when_github_answers_no_query(
-    github: FakeGitHub,
-    root: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_lint_names_each_action_when_github_refuses_the_request(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    # A refusal of the request itself, such as a token without the right, is no
+    # outage of GitHub: the error of each action names it.
     with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
-    github.fail[("POST", "graphql")] = 502
+    github.fail[("POST", "graphql")] = 401
 
     assert run(github, root, "settings", "actions") == 1
 
     out = capsys.readouterr().out
-    # Each action of the query, which a gateway timed out every time: a query only
-    # reads, so it is asked again, three times.
-    assert out.count("refused its file (GitHub answered 502: simulated failure)") == 3
+    assert github.calls == [("POST", "graphql")]
+    assert "refused its file (GitHub answered 401: simulated failure)" in out
+    assert CHECK_UNAVAILABLE not in out
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # A gateway that timed out every time.
+        502,
+        # No answer at all, as from the runner of Dennis-Otto/repo-blueprint#970, whose
+        # network didn't reach api.github.com for minutes.
+        (
+            0,
+            'Post "https://api.github.com/graphql": dial tcp 20.29.134.17:443:'
+            " i/o timeout",
+        ),
+    ],
+    ids=["gateway", "no answer"],
+)
+def test_the_lint_fails_once_and_plainly_when_github_keeps_failing(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: int | tuple[int, str],
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.fail[("POST", "graphql")] = failure
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    # A query only reads, so it is asked again, three times.
     assert github.calls == [("POST", "graphql")] * 4
+    # Nothing that the repository could change: no action that GitHub would refuse to
+    # start, and no error of each action, but one error that the flaky-test bot knows.
+    assert "GitHub won't start" not in out
+    assert "refused its file" not in out
+    assert out.count(CHECK_UNAVAILABLE) == 2
+    assert (
+        "::error file=.github/repository.toml,title=Allowed actions::GitHub kept"
+        " failing (GitHub answered" in out
+    )
+    assert (
+        f"{CHECK_UNAVAILABLE}, so the check couldn't read what the actions of the"
+        " workflows run in turn: nothing in the repository causes it; run the check"
+        " again\n" in out
+    )
+
+
+def test_the_lint_reads_no_more_after_github_kept_failing(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The query fails after every try; what the action runs in turn is unknown, and
+    # it is no file that GitHub refused.
+    github.fail[("POST", "graphql")] = 503
+
+    runs = actions_that_run(Api(github), {"vendor/composite@abc": "ci.yml"})
+
+    assert github.calls == [("POST", "graphql")] * 4
+    assert runs.refused == {}
+    assert runs.unavailable is not None
+    assert runs.unavailable.status == 503
+    assert runs.found == {"vendor/composite@abc": "ci.yml"}
 
 
 # --------------------------------------------------------------------------- policies
