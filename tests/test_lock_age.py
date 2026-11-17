@@ -623,7 +623,7 @@ def test_the_check_reads_what_the_refresh_adds_to_composer_lock(
         },
     )
 
-    assert lock_age.added(root, "HEAD~1") == (
+    assert lock_age.added(root, "HEAD~1", composer=True) == (
         [
             Added("composer.lock", "composer", "guzzlehttp/psr7", "2.7.1"),
             Added("composer.lock", "composer", "psr/log", "3.0.2"),
@@ -656,10 +656,43 @@ def test_a_composer_lock_that_the_check_cant_read_holds_the_refresh(
         {"composer.lock": text},
     )
 
-    assert lock_age.added(root, "HEAD~1") == (
+    assert lock_age.added(root, "HEAD~1", composer=True) == (
         [],
         ["composer.lock: the check can't read its versions."],
     )
+
+
+@pytest.mark.parametrize(
+    "branch", ["renovate/lock-file-maintenance", "renovate/pip-compile-refresh", ""]
+)
+def test_a_composer_lock_in_another_refresh_holds_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    branch: str,
+) -> None:
+    # Only the refresh of Composer, on a branch of its own, brings versions that
+    # nothing dates (decision 0173): in npm's refresh, such as one that a project
+    # groups with Composer, composer.lock holds it, as before.
+    root = refresh(
+        tmp_path,
+        {"composer.lock": composer_lock(("psr/log", "3.0.0"))},
+        {"composer.lock": composer_lock(("psr/log", "3.0.2"))},
+    )
+    registries = Registries({})
+    opened_by_urllib(monkeypatch, registries)
+    monkeypatch.setenv("GITHUB_HEAD_REF", branch)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    assert main(["locks", "--age", "HEAD~1"], root=root) == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == (
+        "composer.lock: the refresh changes it, and the check can't date the "
+        "versions of such a file."
+    )
+    assert not any("nothing dates it" in line for line in lines)
+    assert registries.asked == []
 
 
 def test_a_refresh_of_composer_passes_and_names_what_nothing_dates(
@@ -678,6 +711,7 @@ def test_a_refresh_of_composer_passes_and_names_what_nothing_dates(
     opened_by_urllib(monkeypatch, registries)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
 
     assert main(["locks", "--age", "HEAD~1"], root=root) == 0
 
@@ -732,6 +766,7 @@ def test_a_young_version_of_npm_holds_a_refresh_beside_composer(
         ),
     )
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
 
     assert main(["locks", "--age", "HEAD~1"], root=root) == 1
 
@@ -773,6 +808,7 @@ def test_a_refresh_with_versions_of_both_counts_those_that_a_registry_dates(
         ),
     )
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setenv("GITHUB_HEAD_REF", lock_age.COMPOSER_BRANCH)
 
     assert main(["locks", "--age", "HEAD~1"], root=root) == 0
 

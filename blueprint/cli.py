@@ -1366,8 +1366,11 @@ def locks_refresh_command(root: Path) -> int:
 def locks_age_command(base: str, root: Path) -> int:
     """Whether each version that the refresh in HEAD adds to the lock files of base
     is at least a week old, as the refresh merges by itself only then; the versions
-    of Composer, which nothing dates, pass, and the summary names them."""
-    found = lock_age.check(root, base, datetime.now(UTC))
+    of Composer, which nothing dates, pass on the branch of its refresh, and the
+    summary names them."""
+    found = lock_age.check(
+        root, base, datetime.now(UTC), branch=os.environ.get("GITHUB_HEAD_REF", "")
+    )
     if found.undated:
         undated = [f"{version}: nothing dates it." for version in found.undated]
         note = (

@@ -18,7 +18,9 @@ however old that version is.
 The refresh of Composer merges by itself with versions of any age (decision 0173):
 Composer has no cooldown, and the time of a version in composer.lock comes from
 whoever published it, so nothing dates it. The check reads the versions that it adds
-to composer.lock and names them as versions that nothing dates, and lets them pass."""
+to composer.lock and names them as versions that nothing dates, and lets them pass,
+on the branch of that refresh alone: a composer.lock that another refresh changes
+holds it, as a lock file whose versions the check can't date."""
 
 from __future__ import annotations
 
@@ -41,6 +43,8 @@ from blueprint.locks import AGE, lock_files, read_pins
 
 NPM_LOCK = "package-lock.json"
 COMPOSER_LOCK = "composer.lock"
+# The branch of the refresh of Composer, by the rule of .github/renovate-blueprint.json5.
+COMPOSER_BRANCH = "renovate/composer-lock-file-maintenance"
 NPM_REGISTRY = "https://registry.npmjs.org/"
 PYPI = "https://pypi.org/pypi/"
 TIMEOUT = 30
@@ -149,12 +153,14 @@ READERS: dict[str, Callable[[str | None], set[tuple[str, str]] | None]] = {
 }
 
 
-def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
+def added(
+    root: Path, base: str, composer: bool = False
+) -> tuple[list[Added], list[str]]:
     """The versions that HEAD adds to the lock files of base, those of base that it
     replaces with another version of the same package, and the problems of the files
     whose versions the check can't read: each file that the refresh changes is a lock
-    file of pip-compile, of npm or of Composer, or the check can't tell what it
-    brings."""
+    file of pip-compile, of npm or, in the refresh of Composer, of Composer, or the
+    check can't tell what it brings."""
     changed = sorted(
         filter(None, git(root, "diff", "--name-only", "-z", base, "HEAD").split("\0"))
     )
@@ -166,7 +172,7 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
             manager = "pip"
         elif PurePosixPath(name).name == NPM_LOCK:
             manager = "npm"
-        elif PurePosixPath(name).name == COMPOSER_LOCK:
+        elif composer and PurePosixPath(name).name == COMPOSER_LOCK:
             manager = "composer"
         else:
             problems.append(
@@ -369,11 +375,16 @@ class Found:
 
 
 def check(
-    root: Path, base: str, now: datetime, opener: Callable[..., Any] | None = None
+    root: Path,
+    base: str,
+    now: datetime,
+    opener: Callable[..., Any] | None = None,
+    branch: str = "",
 ) -> Found:
-    """What the refresh in HEAD adds to base: the versions that a registry dates, what
-    holds the refresh, and the versions that nothing dates."""
-    versions, problems = added(root, base)
+    """What the refresh in HEAD, on this branch, adds to base: the versions that a
+    registry dates, what holds the refresh, and the versions that nothing dates, which
+    only the refresh of Composer, on a branch of its own, may bring."""
+    versions, problems = added(root, base, branch.startswith(COMPOSER_BRANCH))
     dated = [version for version in versions if version.manager in RELEASED]
     return Found(
         dated=sum(not version.replaced for version in dated),
