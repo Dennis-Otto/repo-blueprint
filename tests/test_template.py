@@ -7400,7 +7400,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     )
     package = b"the package of krankerl\n"
     temp = tmp_path / "temp"
-    deb = temp / f"krankerl/krankerl_{version}_amd64.deb"
+    deb = temp / f"krankerl/krankerl_{version}-1_amd64.deb"
     if cache != "empty":
         deb.parent.mkdir(parents=True)
         deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
@@ -7441,7 +7441,7 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     assert downloads == (
         [
             f"download.sh ChristophWurst/krankerl v{version}"
-            f" krankerl_{version}_amd64.deb {deb.as_posix()} {sha256}"
+            f" krankerl_{version}-1_amd64.deb {deb.as_posix()} {sha256}"
         ]
         if cache == "empty"
         else []
