@@ -7,6 +7,22 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.21.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.6...v1.21.0) (2026-11-17)
+
+
+### Features
+
+* scripts/check.sh warns of a diagram source changed without its pictures ([#1013](https://github.com/Dennis-Otto/repo-blueprint/issues/1013)) ([a162eea](https://github.com/Dennis-Otto/repo-blueprint/commit/a162eea1af0f8e698b67968b98aa140ed780ef73))
+
+
+### Bug fixes
+
+* **advisories:** accept the advisory of picomatch that no version fixes ([#1021](https://github.com/Dennis-Otto/repo-blueprint/issues/1021)) ([e387ce4](https://github.com/Dennis-Otto/repo-blueprint/commit/e387ce44a5f480194c64bc8997a3330eba14b3ee))
+* **deps:** a young version of main no longer breaks the weekly lock refresh ([#1015](https://github.com/Dennis-Otto/repo-blueprint/issues/1015)) ([1370dae](https://github.com/Dennis-Otto/repo-blueprint/commit/1370dae234c8002cef2115a570527bfec1a06ce2))
+* **deps:** an update of Playwright no longer warns that npm's --before failed ([#1017](https://github.com/Dennis-Otto/repo-blueprint/issues/1017)) ([08f2c1c](https://github.com/Dennis-Otto/repo-blueprint/commit/08f2c1c445ffd5735de3f37d007e921b9ab79343))
+* **deps:** lock file maintenance ([#983](https://github.com/Dennis-Otto/repo-blueprint/issues/983)) ([5cb9952](https://github.com/Dennis-Otto/repo-blueprint/commit/5cb995205aae52069a7ef95b0115d3de5fc72ecc))
+* **harden-runner:** a job that one failed lookup stopped names the host ([#1014](https://github.com/Dennis-Otto/repo-blueprint/issues/1014)) ([29e02bd](https://github.com/Dennis-Otto/repo-blueprint/commit/29e02bd3ad349a7d03a1901701b94adcf98ec883))
+
 ## [1.20.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.5...v1.20.6) (2026-11-17)
 
 ### Bug fixes
