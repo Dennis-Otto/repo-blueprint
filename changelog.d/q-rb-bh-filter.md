@@ -1,3 +1,0 @@
-### Features
-
-- The bot-health bot no longer starts after every end of a bot of events and of a run of a pull request, about 8,700 runs a week that had nothing to do and buried a real failure in the list of its runs. Area labels, Commands, Dependabot maintenance, Welcome, Diagrams, Newest Node, Newest Python and the Next runner start it themselves with a last job, and only when one of their jobs failed at the first attempt; it still runs them once more within seconds when Harden-Runner stopped them. The other watched workflows start it only for their runs of `main` and of the tags of releases. When the last job can't start it, as for a run of Dependabot whose token may only read, its nightly look gives the second try instead.
