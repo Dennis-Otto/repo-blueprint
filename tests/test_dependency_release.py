@@ -6,21 +6,36 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from shared import ROOT
 
 from blueprint import cli
 from blueprint.dependency_release import (
+    BY_HAND,
+    DAILY_NOW,
     FIRST,
     HELD,
     LATER,
+    NOTICE,
     NOW,
+    SECURITY_NOW,
+    TIME,
+    TODAY,
+    TODAY_AT,
+    WAITS,
+    WAITS_AT,
     Verdict,
+    daily,
     decide,
     dependency_release,
     holds_back,
+    notice,
+    same_day,
+    schedule_time,
 )
 from blueprint.github import Api
 
@@ -178,3 +193,239 @@ def test_the_command_writes_the_verdict_for_the_step(
     assert code == 0
     assert output.read_text(encoding="utf-8") == f"{line}\n"
     assert capsys.readouterr().out.startswith(said)
+
+
+# The daily release of decision 0180, where the variable RELEASE_MERGE is daily.
+MORNING = datetime(2026, 11, 18, 2, 31, tzinfo=UTC)
+DARK_MODE = commit("feat: a dark mode (#5)", PERSON)
+
+
+def test_the_daily_run_merges_every_release_with_a_change_of_a_person() -> None:
+    commits = [commit(UPDATE), DARK_MODE, commit("docs: the guide (#12)", PERSON)]
+
+    assert daily(commits, "schedule", today=False) == Verdict(True, DAILY_NOW)
+
+
+@pytest.mark.parametrize("commits", [[DARK_MODE], [commit(UPDATE)]])
+def test_a_merge_leaves_the_release_to_the_daily_run(
+    commits: list[dict[str, Any]],
+) -> None:
+    # Neither a person's change nor a routine update merges with its own push.
+    assert daily(commits, "push", today=False) == Verdict(False, WAITS)
+    assert TIME in WAITS
+
+
+@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+@pytest.mark.parametrize("today", [True, False])
+def test_the_fix_of_a_vulnerability_goes_at_once(event: str, today: bool) -> None:
+    commits = [DARK_MODE, commit("fix(deps): update pillow [security] (#9)\n\nBody.")]
+
+    assert daily(commits, event, today=today) == Verdict(True, SECURITY_NOW)
+
+
+def test_a_vulnerability_named_only_in_the_body_waits() -> None:
+    commits = [commit("fix(deps): update ruff (#7)\n\nNot [security] here.")]
+
+    assert daily(commits, "push", today=False) == Verdict(False, WAITS)
+
+
+@pytest.mark.parametrize("today", [True, False])
+def test_a_run_started_by_hand_releases_at_once(today: bool) -> None:
+    # The way for a fix that can't wait, and the run that bot health starts for a
+    # daily run that GitHub missed.
+    assert daily([DARK_MODE], "workflow_dispatch", today=today) == Verdict(
+        True, BY_HAND
+    )
+
+
+@pytest.mark.parametrize(
+    "actor", ["github-actions[bot]", "dennis-otto-release-automation[bot]"]
+)
+def test_a_run_that_a_bot_started_keeps_to_the_day(actor: str) -> None:
+    # Bot health starts the release bot for a run that GitHub missed or that failed,
+    # and the branch bot to build the release anew: neither makes a second release.
+    assert daily([DARK_MODE], "workflow_dispatch", today=True, actor=actor) == Verdict(
+        False, TODAY
+    )
+    assert daily([DARK_MODE], "workflow_dispatch", today=False, actor=actor) == Verdict(
+        True, DAILY_NOW
+    )
+    # A person's start goes at once on any day.
+    assert daily(
+        [DARK_MODE], "workflow_dispatch", today=True, actor="Dennis-Otto"
+    ) == Verdict(True, BY_HAND)
+
+
+def test_the_daily_run_makes_no_second_release_on_a_day() -> None:
+    assert daily([DARK_MODE], "schedule", today=True) == Verdict(False, TODAY)
+
+
+@pytest.mark.parametrize(
+    ("published", "today"),
+    [
+        ("2026-11-18T00:04:00Z", True),
+        ("2026-11-18T02:30:59Z", True),
+        ("2026-11-18T01:30:00+01:00", True),
+        ("2026-11-17T23:59:59Z", False),
+        ("2026-11-18T00:30:00+01:00", False),
+        (None, False),
+        ("", False),
+    ],
+)
+def test_the_day_of_the_last_release_is_that_of_utc(
+    published: object, today: bool
+) -> None:
+    assert same_day(published, MORNING) is today
+
+
+def test_the_notice_says_when_the_release_goes_and_how_it_goes_at_once() -> None:
+    text = notice()
+
+    assert text.startswith(f"{NOTICE}\n")
+    assert TIME in text
+    assert "`gh workflow run release.yml`" in text
+    assert "[security]" in text
+
+
+def test_the_time_of_the_notice_is_that_of_the_schedule() -> None:
+    workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    hours, minutes = TIME.removesuffix(" UTC").split(":")
+
+    assert f'    - cron: "{int(minutes)} {int(hours)} * * *"\n' in workflow
+    assert schedule_time(workflow) == TIME
+
+
+@pytest.mark.parametrize(
+    ("workflow", "time"),
+    [
+        # A repository made from the blueprint runs some minutes later (decision 0083).
+        ('on:\n  schedule:\n    - cron: "33 2 * * *"\n', "02:33 UTC"),
+        ('    - cron: "5 14 * * *"\n', "14:05 UTC"),
+        # Without a daily schedule that can be read, the time of the blueprint.
+        ('    - cron: "5 14 * * 1"\n', TIME),
+        ("", TIME),
+    ],
+)
+def test_the_time_is_read_from_the_schedule_of_the_repository(
+    workflow: str, time: str
+) -> None:
+    assert schedule_time(workflow) == time
+
+
+def test_the_texts_name_the_time_of_the_repository() -> None:
+    commits = [DARK_MODE]
+
+    assert daily(commits, "push", today=False, time="02:33 UTC") == Verdict(
+        False, WAITS_AT.format(time="02:33 UTC")
+    )
+    assert daily(commits, "schedule", today=True, time="02:33 UTC") == Verdict(
+        False, TODAY_AT.format(time="02:33 UTC")
+    )
+    assert "at 02:33 UTC," in notice("02:33 UTC")
+
+
+class DailyGitHub(FakeGitHub):
+    """GitHub with a latest release published at a time of its own."""
+
+    def __init__(self, commits: Sequence[dict[str, Any]], published: str):
+        super().__init__(commits)
+        self.published = published
+
+    def route(self, method: str, path: str) -> tuple[int, Any]:
+        code, data = super().route(method, path)
+        if path.endswith("/releases/latest"):
+            data = {**data, "published_at": self.published}
+        return code, data
+
+
+@pytest.mark.parametrize(
+    ("published", "verdict"),
+    [
+        ("2026-11-17T02:44:00Z", Verdict(True, DAILY_NOW)),
+        ("2026-11-18T00:10:00Z", Verdict(False, TODAY)),
+    ],
+)
+def test_the_variable_daily_decides_by_the_day_of_the_latest_release(
+    published: str, verdict: Verdict
+) -> None:
+    github = DailyGitHub([DARK_MODE], published)
+
+    assert (
+        dependency_release(Api(github), REPO, "schedule", " daily ", MORNING) == verdict
+    )
+    # Any other value leaves a change of a person to the maintainer, as before.
+    for merge in ("", "maintainer", "Daily"):
+        held = dependency_release(Api(github), REPO, "schedule", merge, MORNING)
+        assert held == Verdict(False, f"{HELD}\nfeat: a dark mode (#5)")
+
+
+def test_the_first_release_waits_also_where_it_is_daily() -> None:
+    github = FakeGitHub([DARK_MODE], released=False)
+
+    assert dependency_release(Api(github), REPO, "schedule", "daily") == Verdict(
+        False, FIRST
+    )
+
+
+def test_the_day_is_that_of_the_run_when_none_is_given() -> None:
+    # A release published long before today leaves the daily run free to merge.
+    github = DailyGitHub([DARK_MODE], "2020-01-01T00:00:00Z")
+
+    assert dependency_release(Api(github), REPO, "schedule", "daily") == Verdict(
+        True, DAILY_NOW
+    )
+
+
+@pytest.mark.parametrize(("merge", "notes"), [("daily", True), ("maintainer", False)])
+def test_the_command_writes_the_notice_where_the_release_is_daily(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], merge: str, notes: bool
+) -> None:
+    # Run in a folder without release.yml: the time of the blueprint.
+    output = tmp_path / "dependency-only"
+    written = tmp_path / "notice.md"
+    argv = ["--repo", REPO, "release", "dependency-only", "--event", "push"]
+    github = DailyGitHub([DARK_MODE], "2026-11-17T02:44:00Z")
+
+    code = cli.main(
+        [*argv, "--merge", merge, "--output", str(output), "--notice", str(written)],
+        api=Api(github),
+        root=tmp_path,
+    )
+
+    assert code == 0
+    assert output.read_text(encoding="utf-8") == "merge=false\n"
+    assert written.read_text(encoding="utf-8") == (f"{notice()}\n" if notes else "")
+    said = capsys.readouterr().out
+    assert said.startswith(WAITS if notes else HELD)
+
+
+def test_the_command_reads_the_time_and_the_actor_of_the_repository(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text(
+        '  schedule:\n    - cron: "33 2 * * *"\n', encoding="utf-8"
+    )
+    output = tmp_path / "dependency-only"
+    written = tmp_path / "notice.md"
+    # A release went out today, as the command takes the day of its own run.
+    published = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    github = DailyGitHub([DARK_MODE], published)
+    argv = ["--repo", REPO, "release", "dependency-only", "--event"]
+
+    code = cli.main(
+        [
+            *argv,
+            *("workflow_dispatch", "--actor", "github-actions[bot]", "--merge"),
+            *("daily", "--output", str(output), "--notice", str(written)),
+        ],
+        api=Api(github),
+        root=tmp_path,
+    )
+
+    assert code == 0
+    # Bot health's start on a day with a release waits, with the repository's time.
+    assert output.read_text(encoding="utf-8") == "merge=false\n"
+    assert written.read_text(encoding="utf-8") == f"{notice('02:33 UTC')}\n"
+    assert capsys.readouterr().out.startswith(TODAY_AT.format(time="02:33 UTC"))

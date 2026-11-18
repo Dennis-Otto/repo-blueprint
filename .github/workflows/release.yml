@@ -20,7 +20,9 @@ name: Release
 # GitHub, or none. Then verify-release.yml checks the release as its users can, and
 # once the run passed, it starts the bots that follow a release, Issue lifecycle and
 # Screenshots. A release that only updates dependencies merges itself once its checks
-# pass, once a day, or at once with a fix of a vulnerability. Beside the release bot, the
+# pass, once a day, or at once with a fix of a vulnerability; where the variable
+# RELEASE_MERGE is daily, as in the blueprint, every release does, at most one a day,
+# and at once when the workflow is started by hand (decision 0180). Beside the release bot, the
 # Dependabot alert bot closes each Dependabot alert that an osv-scanner.toml accepts,
 # with its reason and its end, opens again each one that it closed once the acceptance
 # is gone, and warns of each acceptance that ends within two weeks.
@@ -33,10 +35,14 @@ on:
   # the release bot at once. The schedule is only a safety net, for a push that GitHub
   # lost and a tag that a failed run left to sign: GitHub runs schedules as it can,
   # often hours late, and the bot-health bot starts a run that it missed. It is also
-  # the daily run that merges a release of dependency updates, and the one that
-  # closes the Dependabot alerts of advisories published since the last push.
+  # the daily run that merges a release of dependency updates, or every release where
+  # RELEASE_MERGE is daily, and the one that closes the Dependabot alerts of advisories
+  # published since the last push. At 02:25 UTC, in the night of Europe, the Rollout
+  # and the checks of every repository that it updates run before the weekly scans of
+  # the repositories from 03:20 on, and nobody waits for them (decision 0180).
   schedule:
-    - cron: "25 5 * * *"
+    - cron: "25 2 * * *"
+  # By hand, it releases at once: the way for a fix that can't wait for the daily run.
   workflow_dispatch:
 
 permissions: {}
@@ -436,13 +442,19 @@ jobs:
       # blueprint would bring to every repository (decision 0087). A release with the
       # fix of a vulnerability, which Renovate marks with [security], merges at once. A
       # commit of a bot that release-please makes nothing of, such as new pictures,
-      # doesn't hold it back; a change of a person waits for the maintainer.
+      # doesn't hold it back; a change of a person waits for the maintainer. Where the
+      # variable RELEASE_MERGE is daily, as in the blueprint, every release merges in
+      # the daily run, at most one a day, and at once in a run started by hand or with
+      # the fix of a vulnerability; the pull request says so in a comment (decision 0180).
       - name: Merge a release of dependency updates once its checks pass
         if: steps.app.outputs.token != '' && steps.release.outputs.release_created != 'true'
         env:
           # Merged by the app, the release starts this workflow again and is created.
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          # The comment comes from the job's token, whose events start no workflow.
+          COMMENT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ steps.release.outputs.pr }}
+          RELEASE_MERGE: ${{ vars.RELEASE_MERGE }}
         run: |
           set -euo pipefail
           # The pull request that release-please has just updated, or else the open one,
@@ -459,10 +471,26 @@ jobs:
           # blueprint.py decides by the commits since the last release: every one that
           # release-please puts into the release is a dependency update, and every other
           # one a bot made, such as `docs: renew the pictures`; the first release waits.
+          # With RELEASE_MERGE daily, by the event of the run, who started it and the
+          # day of the last release: a run that a bot started by hand, such as bot
+          # health, keeps to the day as the daily run does; one of a person goes at once.
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" --repo "$GITHUB_REPOSITORY" release dependency-only \
-            --event "$GITHUB_EVENT_NAME" --output "$RUNNER_TEMP/dependency-only" | tee -a "$GITHUB_STEP_SUMMARY"
+            --event "$GITHUB_EVENT_NAME" --actor "$GITHUB_TRIGGERING_ACTOR" \
+            --merge "$RELEASE_MERGE" --output "$RUNNER_TEMP/dependency-only" \
+            --notice "$RUNNER_TEMP/notice.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          # The comment that says when the release goes, once in each pull request. The
+          # comments are read first, so that a failure to read them fails the step
+          # rather than posting the comment a second time.
+          if [[ -s "$RUNNER_TEMP/notice.md" ]]; then
+            marker="$(head -n 1 "$RUNNER_TEMP/notice.md")"
+            bodies="$(GH_TOKEN="$COMMENT_TOKEN" gh api --header "$API_VERSION_HEADER" --paginate \
+              "repos/$GITHUB_REPOSITORY/issues/$number/comments" --jq '.[].body')"
+            if ! grep -qF "$marker" <<<"$bodies"; then
+              GH_TOKEN="$COMMENT_TOKEN" gh pr comment --repo "$GITHUB_REPOSITORY" "$number" --body-file "$RUNNER_TEMP/notice.md"
+            fi
+          fi
           if [[ "$(cat "$RUNNER_TEMP/dependency-only")" != merge=true ]]; then
             exit 0
           fi

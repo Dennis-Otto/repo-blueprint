@@ -179,6 +179,11 @@ RELEASE_APP = "dennis-otto-release-automation"
 RELEASE_AUTOMATION_CLIENT_ID = "Iv23liP9PIEHOV74AiIA"
 # Its App ID: only this app may create release tags, which the release workflow signs.
 RELEASE_AUTOMATION_APP_ID = "4739928"
+# The release bot merges every release once a day, at 02:25 UTC, so that each release
+# of a day doesn't cost every repository an update pull request, and at once when the
+# workflow Release is started by hand (decision 0180). A new repository starts with
+# "maintainer": its maintainer merges the release pull request.
+RELEASE_MERGE = "daily"
 
 # GitHub Pages, which publishes the website that the Docs workflow builds from
 # mkdocs.yml and docs/.

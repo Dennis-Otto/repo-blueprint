@@ -1,0 +1,36 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When the release pull request merges
+    accDescr: Where the variable RELEASE_MERGE is daily, as in the blueprint, the release bot merges every release by itself. The run of a merge into main only keeps the release pull request current, unless the merge fixes a vulnerability, which merges at once. The daily run at 02:25 UTC merges it once its checks pass, unless a release went out that day already. A run of Release that you start by hand releases at once, for a fix that can't wait. With maintainer, the default of a new repository, you merge it, and only a release of dependency updates merges itself, once a day. The Rollout then brings the release to every repository that follows the blueprint.
+
+    pr["`The release pull request collects<br>what merged since the last release`"]
+    setting{"`RELEASE_MERGE`"}
+    you["`You merge it; a release of dependency<br>updates merges itself once a day`"]
+    event{"Which run of<br>the release bot?"}
+    push["`A merge into *main*: it waits,<br>unless it fixes a vulnerability`"]
+    daily["`The daily run at 02:25 UTC, unless<br>a release went out that day already`"]
+    hand["`You start Release by hand,<br>for a fix that can't wait`"]
+    merged["`It merges once its checks pass`"]
+    rollout["`The Rollout brings it to every repository`"]
+
+    pr --> setting
+    setting -- "maintainer" --> you
+    setting -- "daily" --> event
+    event --> push
+    event --> daily
+    event --> hand
+    daily --> merged
+    hand --> merged
+    you --> merged
+    merged --> rollout
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class pr,push,daily bot
+    class you,hand you
+    class merged,rollout done

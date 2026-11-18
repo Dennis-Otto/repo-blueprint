@@ -247,6 +247,16 @@ ABOUT: dict[str, str] = {
         " exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it"
         " from the file that the settings page of the app generates."
     ),
+    "RELEASE_MERGE": (
+        "Who merges the release pull request. `maintainer`, the default of a new"
+        " repository: the maintainer does, and a release of nothing but dependency"
+        " updates merges itself once a day, or at once with the fix of a"
+        " vulnerability. `daily`, as in the blueprint: the release bot merges every"
+        " release in its daily run once its checks pass, at most one a day, and at"
+        " once in a run started by hand or with the fix of a vulnerability; a comment"
+        " in the release pull request says when it goes. A project sets it under"
+        " `[variables]` of `.github/repository.project.toml`."
+    ),
     "REVIEWS_OF_MAIN": (
         "`on` where `required_approvals` or `code_owner_review` of `[branch]` want a"
         " review of every change, in the ruleset *Reviews of main*: then a check that"
