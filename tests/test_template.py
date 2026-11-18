@@ -13,6 +13,7 @@ import glob
 import hashlib
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
@@ -6602,6 +6603,152 @@ def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
         assert remapped(url) == url
 
 
+def remaps_of_the_link_check(
+    tmp_path: Path, event: str, base: str = "main"
+) -> Callable[[str], str]:
+    """Runs the step of the link check that calls lychee, for the event, with a
+    stand-in for .github/lychee.sh that writes its arguments down, and returns the
+    remaps that lychee applies then: those of its arguments before those of
+    lychee.toml, of which the first rule that matches a link changes it."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/lychee.sh").write_text(
+        'printf "%s\\n" "$@" > "$RUNNER_TEMP/arguments"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    source = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    (tmp_path / "step.sh").write_text(
+        script_of(source, "Check the links of the documentation"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "EVENT": event,
+            "FILES": "'./README.md' ",
+            "EVERY": "",
+            "REPOSITORY": "Dennis-Otto/repo.blueprint",
+            "SHA": "0123abcd",
+            "BASE_REF": base if event == "pull_request" else "",
+            "RUNNER_TEMP": tmp_path.as_posix(),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+    arguments = (tmp_path / "arguments").read_text(encoding="utf-8").splitlines()
+    report = arguments.index(f"{tmp_path.as_posix()}/links.md")
+    assert arguments[report + 1 : report + 3] == ["--config", "lychee.toml"]
+    assert arguments[-1] == "./README.md"
+    rules = []
+    for option, rule in itertools.pairwise(arguments):
+        if option == "--remap":
+            pattern, replacement = rule.split()
+            rules.append(
+                (re.compile(pattern), re.sub(r"\$(\d)", r"\\g<\1>", replacement))
+            )
+    configured = remapper(ROOT)
+
+    def remapped(url: str) -> str:
+        for pattern, replacement in rules:
+            if pattern.search(url):
+                return pattern.sub(replacement, url)
+        return configured(url)
+
+    return remapped
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_link_check_of_a_pull_request_reads_this_repository_at_its_merge_commit(
+    tmp_path: Path,
+) -> None:
+    # A link to a file, a folder or a heading that the pull request adds is checked at
+    # its merge commit, where it is, and not on main, where it is missing until the
+    # merge (#1047): GitHub answered 404 for a workflow that the pull request added.
+    # A link to a file that the pull request deletes is missing there as well.
+    remapped = remaps_of_the_link_check(tmp_path, "pull_request")
+    raw = "https://raw.githubusercontent.com/Dennis-Otto/repo.blueprint"
+    github = "https://github.com/Dennis-Otto/repo.blueprint"
+    for url, checked in (
+        # Straight to raw.githubusercontent.com, as lychee.toml leads every file there.
+        (
+            f"{github}/blob/main/.github/workflows/quick-checks.yml",
+            f"{raw}/0123abcd/.github/workflows/quick-checks.yml",
+        ),
+        (f"{github}/blob/main/docs/e2e.md#setup", f"{raw}/0123abcd/docs/e2e.md#setup"),
+        (f"{raw}/main/docs/guide.md", f"{raw}/0123abcd/docs/guide.md"),
+        (f"{github}/tree/main/demo#readme", f"{github}/tree/0123abcd/demo#readme"),
+        (f"{github}/tree/main", f"{github}/tree/0123abcd"),
+        (f"{github}/tree/main#readme", f"{github}/tree/0123abcd#readme"),
+        # GitHub reads the name of the owner and of the repository in any case.
+        (
+            "https://github.com/dennis-otto/Repo.Blueprint/blob/main/README.md",
+            f"{raw}/0123abcd/README.md",
+        ),
+    ):
+        assert remapped(url) == checked, url
+    # Another repository, branch or tag, as lychee.toml has it; the dot of the name is
+    # no wildcard.
+    other = "https://raw.githubusercontent.com/Dennis-Otto"
+    for url, checked in (
+        (
+            "https://github.com/Dennis-Otto/other/blob/main/README.md",
+            f"{other}/other/main/README.md",
+        ),
+        (
+            "https://github.com/Dennis-Otto/repoXblueprint/blob/main/README.md",
+            f"{other}/repoXblueprint/main/README.md",
+        ),
+        (
+            f"{github}-extra/blob/main/README.md",
+            f"{other}/repo.blueprint-extra/main/README.md",
+        ),
+        (f"{github}/blob/v1.0.0/LICENSE", f"{raw}/v1.0.0/LICENSE"),
+        (f"{github}/blob/mainline/README.md", f"{raw}/mainline/README.md"),
+        (f"{github}/tree/mainline", f"{github}/tree/mainline"),
+        (f"{github}/tree/v1.0.0/docs", f"{github}/tree/v1.0.0/docs"),
+        (f"{raw}/v1.0.0/README.md", f"{raw}/v1.0.0/README.md"),
+        (f"{github}/issues/1", f"{github}/issues/1"),
+        (f"{github}#readme", github),
+    ):
+        assert remapped(url) == checked, url
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_link_check_reads_the_base_branch_of_a_pull_request_at_its_merge_commit(
+    tmp_path: Path,
+) -> None:
+    # A pull request into another branch checks the links to that branch at its merge
+    # commit, and those to main as main has them.
+    remapped = remaps_of_the_link_check(tmp_path, "pull_request", "release/1.x")
+    raw = "https://raw.githubusercontent.com/Dennis-Otto/repo.blueprint"
+    github = "https://github.com/Dennis-Otto/repo.blueprint"
+    assert remapped(f"{github}/blob/release/1.x/README.md") == (
+        f"{raw}/0123abcd/README.md"
+    )
+    assert remapped(f"{github}/blob/release/1x/README.md") == (
+        f"{raw}/release/1x/README.md"
+    )
+    assert remapped(f"{github}/blob/main/README.md") == f"{raw}/main/README.md"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+def test_the_link_check_of_main_reads_this_repository_on_main(
+    tmp_path: Path, event: str
+) -> None:
+    remapped = remaps_of_the_link_check(tmp_path, event)
+    raw = "https://raw.githubusercontent.com/Dennis-Otto/repo.blueprint"
+    github = "https://github.com/Dennis-Otto/repo.blueprint"
+    assert remapped(f"{github}/blob/main/README.md") == f"{raw}/main/README.md"
+    assert remapped(f"{raw}/main/README.md") == f"{raw}/main/README.md"
+    assert remapped(f"{github}/tree/main/demo") == f"{github}/tree/main/demo"
+
+
 class PullRequest(NamedTuple):
     """A repository as the checkout of a pull request leaves it."""
 
@@ -7089,12 +7236,16 @@ def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
         "EVENT": "${{ github.event_name }}",
         "FILES": "${{ steps.documents.outputs.files }}",
         "EVERY": "${{ steps.documents.outputs.every }}",
+        # The links of a pull request to this repository, at its merge commit.
+        "REPOSITORY": "${{ github.repository }}",
+        "SHA": "${{ github.sha }}",
+        "BASE_REF": "${{ github.event.pull_request.base.ref }}",
     }
     assert "working-directory" not in check
     assert (
         'bash .github/lychee.sh "${options[@]}" "$RUNNER_TEMP/links.md" \\\n'
-        "  --config lychee.toml --no-progress --cache --max-cache-age 1d"
-        ' "${documents[@]}"'
+        '  --config lychee.toml "${remaps[@]}" --no-progress --cache'
+        ' --max-cache-age 1d \\\n  "${documents[@]}"'
     ) in check["run"]
     # Without a document to check, neither runs; a changed document may have no link.
     for step in (cache, check):
