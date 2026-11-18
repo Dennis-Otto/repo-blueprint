@@ -5,13 +5,14 @@ config:
 ---
 flowchart TB
     accTitle: When a check fails or stops
-    accDescr: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. A job of another check that ran out of time at the first attempt runs once more. The release of a merge that failed runs its failed jobs once more, where they stopped.
+    accDescr: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless each of them failed in a step of scripts/check.sh that can't pass without a change, or the same jobs broke for the commit before, which leaves them red and moves the line of the branch bot on; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. A job of another check that ran out of time at the first attempt runs once more. The release of a merge that failed runs its failed jobs once more, where they stopped.
 
     run["A run of the checks<br>or of the release ends"]
     tests["Tests failed or ran out of time<br>at the first attempt"]
     raced["A required check cancelled<br>by a late run for an older commit"]
     release["The release of a merge failed"]
     late["A job of another check ran out of time,<br>at the first attempt"]
+    step{"Each failed in a step that<br>can't pass without a change?"}
     before{"The same jobs broke<br>for the commit before?"}
     again["The failed jobs run once more"]
     flaky["`Issue *Flaky tests*<br>job · step · test · error`"]
@@ -24,7 +25,9 @@ flowchart TB
     run --> raced
     run --> release
     run --> late
-    tests --> before
+    tests --> step
+    step -- "no" --> before
+    step -- "yes" --> red
     before -- "no" --> again
     before -- "yes" --> red
     again -- "passes" --> flaky

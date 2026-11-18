@@ -18,7 +18,13 @@ name: After the checks
 # check that GitHub kept failing, which says so, or a job that only sums up the jobs
 # that it needs, as variants does: the one that failed has its own row. A job that
 # fails again is a real failure and stays red, and so does one that failed the same
-# way for the commit before: running it again would only keep a runner busy. Only the
+# way for the commit before, and one that failed in a step of scripts/check.sh that
+# can't pass without a change, such as Psalm or Files of the project, which the PR coach
+# names in the title of its annotation and whose explanation in .github/checks.toml or
+# .github/checks.project.toml of the default branch says rerun = false: running it
+# again would only keep a runner busy. The bot leaves the run alone only when every job
+# that broke failed in such a step, and starts the branch bot then, as the failure
+# stays (decision 0181). Only the
 # run of the head of its pull request, or of its branch, runs again: just before the
 # rerun, the bot asks GitHub for the head, as a run of a commit that a newer push
 # replaced shares the concurrency group of the run for the head and would cancel it,
@@ -212,7 +218,8 @@ jobs:
   rerun:
     name: run the failed jobs again
     # The tests only; the other checks fail the same way again, and the release has
-    # a bot of its own.
+    # a bot of its own. Of the tests, a job that failed in a step that can't pass
+    # without a change fails the same way again too.
     if: >-
       !github.event.repository.fork &&
       !contains(fromJSON('["CodeQL", "Docs", "Lint", "Pull request title", "Quick checks", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
@@ -229,7 +236,7 @@ jobs:
     permissions:
       actions: write
       checks: read
-      contents: read # the head of a branch
+      contents: read # the head of a branch, and the explanations of the checks
       pull-requests: read # the head of a pull request
     steps:
       - name: Block every host that the job doesn't need
@@ -239,6 +246,7 @@ jobs:
           disable-sudo-and-containers: true
           allowed-endpoints: >-
             api.github.com:443
+            github.com:443
       - name: Make sure that Harden-Runner blocks
         id: blocks
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
@@ -295,6 +303,7 @@ jobs:
         env:
           HOSTS: >-
             api.github.com:443
+            github.com:443
         run: |
           deadline=$(($(date +%s) + 120))
           for endpoint in $HOSTS; do
@@ -323,6 +332,28 @@ jobs:
               sleep 3
             done
           done
+      # The default branch, for blueprint.py and the explanations of the checks, never
+      # the code of the run, which comes only from the API. A checkout that fails leaves
+      # the steps unread, and every failed job runs once more, as before.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        continue-on-error: true
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      - name: Read the steps that can't pass when they run again
+        if: steps.checkout.outcome == 'success'
+        # The steps of scripts/check.sh whose explanation says rerun = false, one on
+        # each line, from the catalogs of the default branch (decision 0181).
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          if ! python3 "$script" coach final-steps > "$RUNNER_TEMP/final-steps"; then
+            rm -f "$RUNNER_TEMP/final-steps"
+            echo "::warning::The explanations of the checks of the default branch can't be read, so every failed job runs once more."
+          fi
       - name: Run the failed jobs once more
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -390,6 +421,65 @@ jobs:
             echo "No job of $NAME failed or ran out of time; a newer run or a person cancelled it." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # A failure that the bot doesn't run again failed for good at once: for a
+          # pull request, the bot starts the branch bot, which moves its line on, as the
+          # job branches does after the second attempt, which never comes now. Not for
+          # a check of a fork that runs on pull_request_target, as that job neither
+          # (decision 0151).
+          for_good() {
+            if [[ "$EVENT" != pull_request && ("$EVENT" != pull_request_target || "$HEAD_REPO" != "$GH_REPO") ]]; then
+              return 0
+            fi
+            if ! tried gh workflow run update-branches.yml --field after="$RUN" --field attempt=1 >/dev/null; then
+              echo "::error title=The branch bot didn't start::GitHub didn't start Update branches after $NAME failed for good; its next run, after a merge or on its schedule, moves the line on."
+              exit 1
+            fi
+            echo "$NAME failed for good, so the branch bot moves its line on." >> "$GITHUB_STEP_SUMMARY"
+          }
+          # A job that failed in a step of scripts/check.sh that can't pass without a
+          # change, such as Psalm or Files of the project, would only fail the same way
+          # again (decision 0181). The PR coach names that step in the title of its
+          # annotation, and the catalogs of the default branch say which steps can't
+          # pass when they run again. Only when every job that broke failed in such a
+          # step does the run stay as it is: one that ran out of time, one that
+          # Harden-Runner stopped, and one that failed in a test, a download or
+          # anywhere else for which the coach names no such step runs again with the
+          # others, as does every job when the steps couldn't be read.
+          settled() {
+            local jobs id conclusion name titles title step steps found=""
+            [[ -s "$RUNNER_TEMP/final-steps" ]] || return 1
+            jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .name] | @tsv')" ||
+              return 1
+            while IFS=$'\t' read -r -u 8 id conclusion name; do
+              if [[ -z "$id" ]] || ! grep -Fxq -- "$name" <<<"$now"; then
+                continue
+              fi
+              [[ "$conclusion" == failure ]] || return 1
+              titles="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate \
+                --jq '.[] | (.title // "") | select(startswith("PR coach: ") and endswith(" (scripts/check.sh)"))')" ||
+                return 1
+              [[ -n "$titles" ]] || return 1
+              steps=""
+              while read -r title; do
+                step="${title#PR coach: }"
+                step="${step% (scripts/check.sh)}"
+                grep -Fxq -- "$step" "$RUNNER_TEMP/final-steps" || return 1
+                steps+="${steps:+, }$step"
+              done <<<"$titles"
+              found+="$name, in $steps"$'\n'
+            done 8<<<"$jobs"
+            printf '%s' "$found"
+          }
+          if settled="$(settled)" && [[ -n "$settled" ]]; then
+            mapfile -t jobs <<<"$settled"
+            {
+              echo "Each job of $NAME that broke failed in a step of scripts/check.sh that can't pass when it runs again without a change, so they don't run again:"
+              printf -- '- %s\n' "${jobs[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            for_good
+            exit 0
+          fi
           # A failure that the commit before ended with as well is a real one: the same
           # jobs broke in the last attempt of the run for the previous commit of the
           # branch, after the bot had run them once more. A run that a newer push
@@ -449,6 +539,7 @@ jobs:
               echo "The same jobs of $NAME broke for the commit before, so they don't run again:"
               printf -- '- %s\n' "${jobs[@]}"
             } >> "$GITHUB_STEP_SUMMARY"
+            for_good
             exit 0
           fi
           # Run again, the run of a commit that a newer push replaced would share the

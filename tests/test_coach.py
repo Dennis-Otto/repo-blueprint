@@ -45,6 +45,7 @@ from blueprint.coach import (
     escape_data,
     escape_property,
     fence,
+    final_steps,
     html_code,
     link,
     missing,
@@ -87,6 +88,8 @@ why = "It matters."
 fix = "Mend it."
 autofix = "Only a person mends it."
 """
+# A step of the blueprint's catalog says whether it can pass when it runs again.
+STEP = f"{ENTRY}rerun = false\n"
 
 
 # ---------------------------------------------------------------- the explanations
@@ -146,7 +149,7 @@ def test_every_explanation_says_what_why_and_how(
 def test_a_check_and_a_step_without_an_explanation_fail_the_verification(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    write(tmp_path, ".github/checks.toml", f'[check.lint]{ENTRY}[step."Ruff"]{ENTRY}')
+    write(tmp_path, ".github/checks.toml", f'[check.lint]{ENTRY}[step."Ruff"]{STEP}')
     write(tmp_path, ".github/repository.toml", '[branch]\nrequired_checks = ["lint"]\n')
     write(
         tmp_path,
@@ -176,7 +179,7 @@ def test_a_check_and_a_step_without_an_explanation_fail_the_verification(
 def test_a_step_within_an_if_needs_its_explanation_too(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    write(tmp_path, ".github/checks.toml", f"[step.Ruff]{ENTRY}")
+    write(tmp_path, ".github/checks.toml", f"[step.Ruff]{STEP}")
     # As scripts/check.sh runs the checks of a project: indented, by blanks or a tab.
     write(
         tmp_path,
@@ -297,6 +300,13 @@ def test_an_explanation_names_the_paths_that_its_fixes_write(tmp_path: Path) -> 
             (f"[check.lint]{ENTRY}writes = ['{glob}']\n", "a writes that is no list")
             for glob in ("/etc/x", "docs/", "../x", "docs/./x", "a\\b", "a//b", "")
         ),
+        # Only a step says whether it can pass when it runs again, true or false.
+        (
+            f"[check.lint]{ENTRY}rerun = false\n",
+            "has a rerun that is not true or false",
+        ),
+        (f"[step.Ruff]{ENTRY}rerun = 'no'\n", "has a rerun that is not true or false"),
+        (f"[step.Ruff]{ENTRY}rerun = 0\n", "of a step of scripts/check.sh"),
         ("[check.lint\n", ".github/checks.toml: "),
     ],
 )
@@ -425,7 +435,7 @@ def test_an_explanation_without_its_autofix_fails_the_verification(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     silent = ENTRY.replace('autofix = "Only a person mends it."\n', "")
-    write(tmp_path, ".github/checks.toml", f"[check.lint]{silent}[step.Ruff]{ENTRY}")
+    write(tmp_path, ".github/checks.toml", f"[check.lint]{silent}[step.Ruff]{STEP}")
     write(tmp_path, "scripts/check.sh", 'step "Ruff"\n')
 
     assert undeclared(Catalog.load(tmp_path)) == ["the check lint"]
@@ -438,6 +448,91 @@ def test_an_explanation_without_its_autofix_fails_the_verification(
     assert undeclared(Catalog.load(tmp_path)) == ["the check lint"]
     write(tmp_path, ".github/checks.toml", f"[step.Mypy]{silent}")
     assert undeclared(Catalog.load(tmp_path)) == ["the step Mypy of scripts/check.sh"]
+
+
+def test_each_step_of_the_blueprint_says_whether_it_can_pass_when_it_runs_again() -> (
+    None
+):
+    explained = catalog()
+
+    # A new step of .github/checks.toml can't slip past the flaky-test bot.
+    assert explained.unmarked == ()
+    final = final_steps(explained)
+    # The steps of the runs that ran again in vain from 10 to 17 November 2026, and
+    # others that only read the files of the commit.
+    for step in (
+        "Text files",
+        "Files of the project",
+        "Psalm",
+        "Ruff",
+        "Mypy",
+        "Lock files",
+        "Changelog fragments",
+        "Explanations of the checks",
+    ):
+        assert step in final, step
+    # What downloads, starts a browser or runs tests can pass when it runs again: an
+    # outage of Packagist (curl error 28) or of PyPI for uv, or a flaky test.
+    for step in (
+        "Composer",
+        "Lock files match their sources",
+        "Package lock",
+        "App metadata",
+        "Markdown",
+        "Image",
+        "Accessibility check",
+        "Website",
+        "Tests, with every line and branch covered",
+        "Tests, with every line covered",
+        "Tests, with every line, branch and function covered",
+        "Checks of this project",
+    ):
+        assert step not in final, step
+
+
+def test_a_step_of_the_project_may_leave_out_whether_it_can_pass_again(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(
+        tmp_path,
+        ".github/checks.toml",
+        f"[step.Ruff]{STEP}[step.Tests]{ENTRY}rerun = true\n[step.Psalm]{STEP}",
+    )
+    # The project's explanation of Psalm wins, and says nothing: Psalm runs again.
+    write(
+        tmp_path,
+        ".github/checks.project.toml",
+        f"[step.Psalm]{ENTRY}[step.Demo]{ENTRY}",
+    )
+    write(tmp_path, "scripts/check.sh", 'step "Ruff"\nstep "Tests"\nstep "Demo"\n')
+
+    explained = Catalog.load(tmp_path)
+
+    assert explained.unmarked == ()
+    assert final_steps(explained) == ["Ruff"]
+    assert cli.main(["coach", "verify"], root=tmp_path) == 0
+    capsys.readouterr()
+    assert cli.main(["coach", "final-steps"], root=tmp_path) == 0
+    assert capsys.readouterr().out == "Ruff\n"
+
+
+def test_a_step_of_the_blueprint_that_doesnt_say_fails_the_verification(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(tmp_path, ".github/checks.toml", f"[step.Ruff]{STEP}[step.Mypy]{ENTRY}")
+    write(tmp_path, "scripts/check.sh", 'step "Ruff"\nstep "Mypy"\n')
+
+    assert Catalog.load(tmp_path).unmarked == ("Mypy",)
+    assert cli.main(["coach", "verify"], root=tmp_path) == 1
+    assert capsys.readouterr().err == (
+        "blueprint.py: the step Mypy of .github/checks.toml doesn't say in rerun "
+        "whether it can pass when it runs again without a change: true for one that "
+        "downloads or runs tests, false for one that can't\n"
+    )
+    # A catalog that can't be read names no step, and fails.
+    write(tmp_path, ".github/checks.toml", "[step.Ruff\n")
+    assert cli.main(["coach", "final-steps"], root=tmp_path) == 2
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize(
