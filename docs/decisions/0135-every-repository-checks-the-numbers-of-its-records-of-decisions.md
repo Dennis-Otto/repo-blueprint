@@ -1,6 +1,6 @@
 # Every repository checks the numbers of its records of decisions
 
-- Status: accepted
+- Status: accepted, amended by [1033](1033-a-new-record-takes-the-number-of-its-pull-request.md), with which a new record takes the number of its pull request or of the issue that it fixes, and the release writes the index
 - Date: 2026-11-09
 
 ## Context

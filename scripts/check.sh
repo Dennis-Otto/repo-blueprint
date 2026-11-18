@@ -244,11 +244,13 @@ else
 fi
 
 step "Records of decisions"
-# Each record of docs/decisions/ with a number of its own, the next one after the last,
-# and one row for each in its index, in order: two pull requests that took the same
-# number merge without a conflict of git, and the second one fails here once main is
-# merged into it. decisions --fix fixes the index; the fix bot commits that. The Python
-# and blueprint.py of the step Pages in one column.
+# Each record of docs/decisions/ with a number of its own, a new one that of its pull
+# request or of an issue that it fixes, which the CI of the pull request checks, and
+# at most one row for each in its index, in order. Pull requests leave the index to
+# the release, so two that each add a record merge without a conflict of git, and a
+# clash of numbers fails here once main is merged. decisions --fix fixes the index;
+# the fix bot commits that. The Python and blueprint.py of the step Pages in one
+# column.
 if [[ -n "$python" ]]; then
   "$python" "$tool" decisions
 elif [[ -n "${CI:-}" ]]; then
