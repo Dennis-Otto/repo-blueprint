@@ -14872,6 +14872,15 @@ ISSUE_ASSISTANT_TOP = (
     "# This file belongs to the blueprint, whose updates change it: the hosts and the "
     "files\n# of this project go into config.project.toml, which adds to them.\n"
 )
+# The key at the end of config.toml with which install writes Issue lifecycle without
+# its start after every run of Release, as the release starts the sweep itself
+# (decision 0182); it came after 1.18.3 as well.
+ISSUE_ASSISTANT_SWEEP = (
+    "# The last job of Release starts the sweep that closes them once a run published a\n"
+    "# release, so Issue lifecycle doesn't follow the end of every run of Release, most\n"
+    "# of which publish nothing (decision 0182 of the blueprint).\n"
+    "sweep_after_release_workflow = false\n"
+)
 # The repositories that follow the blueprint and added hosts or files of the issue
 # assistant to its config.toml, as each had it at release 1.18.3, by their kind.
 ADDED_TO_THE_ISSUE_ASSISTANT = {
@@ -14893,12 +14902,14 @@ def test_the_move_gives_a_real_repository_the_config_of_the_template_again(
     )
     shutil.copy(projects[kind] / ".copier-answers.yml", tmp_path)
     assert migrate(tmp_path, True)
-    # What the template renders, but for the lines at the top that came after 1.18.3:
-    # the update brings them without a conflict, and the next one changes the lists.
+    # What the template renders, but for the lines at the top and the key at the end
+    # that came after 1.18.3: the update brings them without a conflict, and the next
+    # one changes the lists.
     rendered = (projects[kind] / ISSUE_ASSISTANT).read_text(encoding="utf-8")
+    assert rendered.endswith(ISSUE_ASSISTANT_SWEEP)
     assert (tmp_path / ISSUE_ASSISTANT).read_text(encoding="utf-8") == rendered.replace(
         ISSUE_ASSISTANT_TOP, ""
-    )
+    ).removesuffix(ISSUE_ASSISTANT_SWEEP)
 
 
 # The badge that the README of the issue assistant offers to a repository that uses
@@ -25045,15 +25056,37 @@ def test_only_a_run_of_release_that_published_a_release_starts_its_followers() -
     assert "::warning title=$name didn't start::" in script
     assert "exit 1" not in script
     # The bots that follow: Screenshots by hand alone, its plan for main and its
-    # week. Issue lifecycle keeps the trigger of the issue assistant's template,
-    # which its check compares, until a key of its config.toml lets the blueprint
-    # leave it out; till then a release sweeps twice, one sweep after the other.
+    # week, and Issue lifecycle by hand, its morning sweep, merges and releases that
+    # a person publishes. The key of the issue assistant's config.toml leaves out its
+    # start after every run of Release, so install writes, and the check of Lint
+    # expects, the workflow without it, and a release sweeps once (decision 0182).
     flows = workflows(ROOT)
     assert "workflow_run" not in parse(flows["screenshot-bot.yml"])["on"]
     lifecycle = parse(flows["issue-lifecycle.yml"])["on"]
-    assert lifecycle["workflow_run"]["workflows"] == ["Release"]
+    assert set(lifecycle) == {
+        "schedule",
+        "pull_request_target",
+        "release",
+        "workflow_dispatch",
+    }
     assert lifecycle["workflow_dispatch"]["inputs"]["dry_run"]["type"] == "boolean"
-    assert {"schedule", "workflow_dispatch"} <= set(lifecycle)
+    assert lifecycle["schedule"] == [{"cron": "41 6 * * *"}]
+    assert lifecycle["release"] == {"types": ["published"]}
+    assert "sweep_after_release_workflow = false" in flows["issue-lifecycle.yml"]
+    config = tomllib.loads(
+        (ROOT / ".github/issue-assistant/config.toml").read_text(encoding="utf-8")
+    )
+    assert config["releases"] == {
+        "close_with_release": True,
+        "sweep_after_release_workflow": False,
+    }
+    # The sweep that the job starts is the one that closes the fixed issues: not a
+    # dry run, and only after a final release, as the issue assistant closes none
+    # with a prerelease.
+    assert '[[ "$VERSION" == *-* ]]' in script
+    assert script.index('[[ "$VERSION" == *-* ]]') < script.index(
+        "start issue-lifecycle.yml "
+    )
     assert "Issue lifecycle" in watched_after_the_checks(flows["bot-health.yml"])
     # After the checks still follows Release, to run a failed release once more,
     # and the bot-health bot still watches it and gives it its second try.
@@ -25074,6 +25107,16 @@ def test_every_kind_starts_the_followers_of_a_release_alike(
     assert job_in(rendered["release.yml"], "followers") == job_in(own, "followers")
     assert "workflow_run" not in parse(rendered["screenshot-bot.yml"])["on"]
     assert (project / "scripts/screenshots.sh").is_file()
+    # Its Issue lifecycle is the blueprint's, without the start after every run of
+    # Release, and its config.toml has the key that makes install write it so and
+    # the check of its Lint expect it.
+    lifecycle = rendered["issue-lifecycle.yml"]
+    assert lifecycle == workflows(ROOT)["issue-lifecycle.yml"]
+    assert "workflow_run" not in parse(lifecycle)["on"]
+    config = tomllib.loads(
+        (project / ".github/issue-assistant/config.toml").read_text("utf-8")
+    )
+    assert config["releases"]["sweep_after_release_workflow"] is False
 
 
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:

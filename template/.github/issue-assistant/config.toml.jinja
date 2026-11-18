@@ -36,3 +36,7 @@ files = [][% endif %]
 # A merged pull request that fixes an issue labels it fixed-in-next-release; the
 # issue closes with a link to the first release that ships the fix.
 close_with_release = true
+# The last job of Release starts the sweep that closes them once a run published a
+# release, so Issue lifecycle doesn't follow the end of every run of Release, most
+# of which publish nothing (decision 0182 of the blueprint).
+sweep_after_release_workflow = false
