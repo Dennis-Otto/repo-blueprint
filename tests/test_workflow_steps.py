@@ -1206,6 +1206,7 @@ def run_the_merge_of_dependency_updates(
     script: str = ".github/blueprint.py",
     merge: str = "maintainer",
     notice: str = "",
+    code: int = 0,
 ) -> StepResult:
     done = run_step(
         tmp_path,
@@ -1218,12 +1219,13 @@ def run_the_merge_of_dependency_updates(
             "COMMENT_TOKEN": "job-token",
             "PR": pr,
             "GITHUB_EVENT_NAME": event,
+            "GITHUB_TRIGGERING_ACTOR": "dennis-otto-release-automation[bot]",
             "RELEASE_MERGE": merge,
         },
         stubs={"python3": decides(verdict, notice)},
         files={script: ""},
     )
-    assert done.returncode == 0, done.stderr
+    assert done.returncode == code, done.stderr
     return done
 
 
@@ -1253,6 +1255,7 @@ def test_blueprint_py_decides_whether_the_release_merges_itself(
     runner = (tmp_path / "runner").as_posix()
     assert done.stubbed == [
         f"python3 {script} --repo o/r release dependency-only --event {event} "
+        "--actor dennis-otto-release-automation[bot] "
         f"--merge maintainer --output {runner}/dependency-only "
         f"--notice {runner}/notice.md"
     ]
@@ -1309,6 +1312,51 @@ def test_the_daily_release_says_when_it_goes_once_in_each_pull_request(
 
     assert again.called("api") == [COMMENTS]
     assert again.called("pr comment") == []
+
+
+@WITH_JQ
+def test_comments_that_can_not_be_read_fail_the_step_without_a_second_notice(
+    tmp_path: Path,
+) -> None:
+    # Taken for "no notice yet", a failed read would post the notice once more.
+    done = run_the_merge_of_dependency_updates(
+        tmp_path,
+        Answer(re.escape(COMMENTS), err="HTTP 502", code=1),
+        Answer(r"pr comment --repo o/r 21 --body-file .*"),
+        event="push",
+        merge="daily",
+        notice=NOTICE,
+        code=1,
+    )
+
+    assert done.called("pr comment") == []
+    assert done.called("pr merge") == []
+
+
+@WITH_JQ
+def test_a_notice_found_among_many_comments_is_not_posted_again(
+    tmp_path: Path,
+) -> None:
+    # grep finds the marker before the last comment, which grep -q in a pipe could
+    # cut off with SIGPIPE and take for none.
+    many = [{"body": NOTICE}, *({"body": f"Comment {n}."} for n in range(5000))]
+    done = run_the_merge_of_dependency_updates(
+        tmp_path,
+        Answer(re.escape(COMMENTS), json=many),
+        Answer(r"pr comment --repo o/r 21 --body-file .*"),
+        event="push",
+        merge="daily",
+        notice=NOTICE,
+    )
+
+    assert done.called("pr comment") == []
+
+
+def test_the_release_bot_learns_who_started_its_run() -> None:
+    merge = step("release.yml", "release-please", MERGE_STEP)
+
+    # A run that a bot started by hand keeps to the day (decision 0179).
+    assert '--actor "$GITHUB_TRIGGERING_ACTOR"' in merge["run"]
 
 
 def test_the_comment_of_the_daily_release_starts_no_workflow() -> None:
@@ -1378,6 +1426,7 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
             "COMMENT_TOKEN": "job-token",
             "PR": RELEASE_PR,
             "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_TRIGGERING_ACTOR": "github-actions[bot]",
             "RELEASE_MERGE": "",
         },
         stubs={"python3": decides("true")},

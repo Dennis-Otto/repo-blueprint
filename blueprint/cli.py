@@ -70,7 +70,7 @@ from blueprint.coach import (
 from blueprint.coach import annotation as coach_annotation
 from blueprint.coach import report as coach_report
 from blueprint.coverage_comment import Coverage, coverage_comment
-from blueprint.dependency_release import DAILY, dependency_release
+from blueprint.dependency_release import DAILY, dependency_release, schedule_time
 from blueprint.dependency_release import notice as release_notice
 from blueprint.diagrams import (
     SOURCES,
@@ -2038,6 +2038,12 @@ def add_changelog_parsers(
         "(decision 0179); any other value leaves it to the maintainer",
     )
     dependency_parser.add_argument(
+        "--actor",
+        default="",
+        help="who started the run, GITHUB_TRIGGERING_ACTOR: a run that a bot started "
+        "by hand keeps to the day, as the daily run does",
+    )
+    dependency_parser.add_argument(
         "--notice",
         help="the file to write the comment into that says in the release pull "
         "request when it goes, with RELEASE_MERGE daily; empty otherwise",
@@ -3347,14 +3353,25 @@ def main(
             print(write_overrides(api, repo), end="")
             return 0
         if arguments.command == "release":
-            verdict = dependency_release(api, repo, arguments.event, arguments.merge)
+            workflow = root / ".github/workflows/release.yml"
+            time = schedule_time(
+                workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
+            )
+            verdict = dependency_release(
+                api,
+                repo,
+                arguments.event,
+                arguments.merge,
+                actor=arguments.actor,
+                time=time,
+            )
             Path(arguments.output).write_text(
                 f"merge={'true' if verdict.merge else 'false'}\n", encoding="utf-8"
             )
             if arguments.notice:
                 daily = arguments.merge.strip() == DAILY
                 Path(arguments.notice).write_text(
-                    f"{release_notice()}\n" if daily else "", encoding="utf-8"
+                    f"{release_notice(time)}\n" if daily else "", encoding="utf-8"
                 )
             print(verdict.text)
             return 0

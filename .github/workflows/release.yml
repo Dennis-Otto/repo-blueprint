@@ -461,7 +461,8 @@ jobs:
           # which a run of the schedule finds unchanged.
           number="$(jq -r '.number // empty' <<<"${PR:-null}")"
           if [[ -z "$number" ]]; then
-            number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label "autorelease: pending"               --json number --jq '.[0].number // ""')"
+            number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label "autorelease: pending" \
+              --json number --jq '.[0].number // ""')"
           fi
           if [[ -z "$number" ]]; then
             echo "No release pull request is open."
@@ -470,15 +471,23 @@ jobs:
           # blueprint.py decides by the commits since the last release: every one that
           # release-please puts into the release is a dependency update, and every other
           # one a bot made, such as `docs: renew the pictures`; the first release waits.
-          # With RELEASE_MERGE daily, by the event of the run and the day of the last
-          # release.
+          # With RELEASE_MERGE daily, by the event of the run, who started it and the
+          # day of the last release: a run that a bot started by hand, such as bot
+          # health, keeps to the day as the daily run does; one of a person goes at once.
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" --repo "$GITHUB_REPOSITORY" release dependency-only             --event "$GITHUB_EVENT_NAME" --merge "$RELEASE_MERGE"             --output "$RUNNER_TEMP/dependency-only" --notice "$RUNNER_TEMP/notice.md" | tee -a "$GITHUB_STEP_SUMMARY"
-          # The comment that says when the release goes, once in each pull request.
+          python3 "$script" --repo "$GITHUB_REPOSITORY" release dependency-only \
+            --event "$GITHUB_EVENT_NAME" --actor "$GITHUB_TRIGGERING_ACTOR" \
+            --merge "$RELEASE_MERGE" --output "$RUNNER_TEMP/dependency-only" \
+            --notice "$RUNNER_TEMP/notice.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          # The comment that says when the release goes, once in each pull request. The
+          # comments are read first, so that a failure to read them fails the step
+          # rather than posting the comment a second time.
           if [[ -s "$RUNNER_TEMP/notice.md" ]]; then
             marker="$(head -n 1 "$RUNNER_TEMP/notice.md")"
-            if ! GH_TOKEN="$COMMENT_TOKEN" gh api --header "$API_VERSION_HEADER" --paginate               "repos/$GITHUB_REPOSITORY/issues/$number/comments" --jq '.[].body' | grep -qF "$marker"; then
+            bodies="$(GH_TOKEN="$COMMENT_TOKEN" gh api --header "$API_VERSION_HEADER" --paginate \
+              "repos/$GITHUB_REPOSITORY/issues/$number/comments" --jq '.[].body')"
+            if ! grep -qF "$marker" <<<"$bodies"; then
               GH_TOKEN="$COMMENT_TOKEN" gh pr comment --repo "$GITHUB_REPOSITORY" "$number" --body-file "$RUNNER_TEMP/notice.md"
             fi
           fi
