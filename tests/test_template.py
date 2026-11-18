@@ -29339,6 +29339,51 @@ def test_the_release_warns_about_records_that_need_a_person_and_goes_on(
     assert "| [1040](1040-another-way.md) | Another way |  |\n" in written
 
 
+# Linux takes no single argument of a command longer than 128 KiB (MAX_ARG_STRLEN),
+# Windows no command line longer than 32 KiB.
+ARGUMENT_LIMIT = 128 * 1024
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@WITH_JQ
+def test_the_release_writes_a_changelog_and_an_index_longer_than_an_argument(
+    tmp_path: Path,
+) -> None:
+    # As long as those of the blueprint: a changelog of many releases and an index
+    # of 183 records, which a command can't take as one argument in Base64, whereas
+    # the release reads them from files.
+    checkout = a_checkout_with_records(tmp_path, MAIN_INDEX)
+    older = "".join(
+        f"## 1.1.{number}\n\n### Bug fixes\n\n- **Fix {number}:** {'words ' * 20}\n\n"
+        for number in range(800, 0, -1)
+    )
+    main = f"{MAIN_CHANGELOG}\n{older}"
+    (checkout / "CHANGELOG.md").write_text(main, encoding="utf-8", newline="\n")
+    for number in range(3, 186):
+        slug = f"{number:04d}-{'-'.join(['a-long-name-of-a-record'] * 4)}"
+        title = f"Record {number}: {'a decision that shapes the blueprint ' * 3}"
+        record = checkout / "docs/decisions" / f"{slug}.md"
+        record.write_text(f"# {title}\n\n- Status: accepted\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--all"], cwd=checkout, check=True)
+    answers = release_please_answers(release_branch_changelog(main), [])
+    answers["repos/o/r/contents/docs/decisions/README.md?ref=abc123"] = MAIN_INDEX
+
+    step = run_a_step_with_the_fake_gh(tmp_path, RELEASE_CHANGELOG, answers, PR="")
+
+    assert step.result.returncode == 0, step.result.stderr
+    mutation = json.loads(step.written["input"])["variables"]["input"]
+    changelog, index = mutation["fileChanges"]["additions"]
+    assert len(changelog["contents"]) + len(index["contents"]) > 1.5 * ARGUMENT_LIMIT
+    assert len(index["contents"]) > ARGUMENT_LIMIT / 3
+    written = base64.b64decode(changelog["contents"]).decode("utf-8")
+    assert written.startswith("# Changelog\n\n## Unreleased\n\n## [1.3.0]")
+    assert written.endswith(older.rstrip("\n") + "\n")
+    rows = base64.b64decode(index["contents"]).decode("utf-8").splitlines()
+    assert len([row for row in rows if row.startswith("| [")]) == 186
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_repository_gets_the_folder_of_the_fragments(
     projects: dict[str, Path], kind: str
