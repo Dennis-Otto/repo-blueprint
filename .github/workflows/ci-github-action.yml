@@ -6,14 +6,8 @@ name: CI (github-action)
 # the newest Python. https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-  # Each week on main as well, so that what no commit changes, such as a new rule of a
-  # tool, fails here and repairs itself through the fix bot, not in the next pull
-  # request. At the time of Lint, so that one commit of the bot holds what both fix.
-  schedule:
-    - cron: "30 4 * * 3"
+  # Only by hand in the blueprint itself, where none of its jobs runs; the template
+  # gives every repository its real triggers (decision 0179).
   workflow_dispatch:
 
 permissions:

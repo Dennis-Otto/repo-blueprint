@@ -36,13 +36,17 @@
 # should do."""
 
 # A step of scripts/check.sh by the name that it prints, such as the step that runs
-# scripts/check-project.sh, to explain the checks of this project there:
+# scripts/check-project.sh, to explain the checks of this project there. A step says in
+# rerun whether it can pass when it runs again without a change: false for one that
+# only reads the files of the commit, such as a lint, which the flaky-test bot then
+# doesn't run again; without rerun, or with true, a job that failed in it runs once more:
 # [step."Checks of this project"]
 # problem = """..."""
 # why = """..."""
 # fix = """..."""
 # autofix = ["npm run lint -- --fix"]
 # writes = ["**/*.ts"]
+# rerun = true
 
 # A part that a workflow of this project adds to the report of the PR coach, such as
 # the size of a module or the result of visual tests, in place of a comment of its own.

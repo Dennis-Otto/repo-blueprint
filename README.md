@@ -138,7 +138,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 ### [Fix bot and self-healing](docs/features/self-healing.md)
 
 - **Fix bot:** A failing check fixes what it can: a stale lock file, a title's form, a missing changelog entry; weekly on `main` too, and on a fork's branch at a maintainer's `/fix`.
-- **Flaky tests:** Failed test jobs run once more, and a job that passes then is reported in one issue.
+- **Flaky tests:** Failed test jobs run once more, unless their step can't pass again; one passing then is reported in one issue.
 - **Cancelled checks:** A required check that a late run or its time limit cancelled starts again by itself.
 - **Failed releases:** The release of a merge that fails for a moment runs its failed jobs once more.
 - **Bot health:** A bot that fails on `main` tries once more where that can help, and otherwise keeps one issue per workflow open, unless the workflow keeps its own.

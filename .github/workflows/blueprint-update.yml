@@ -11,8 +11,8 @@ name: Blueprint update
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  schedule:
-    - cron: "40 4 * * 2"
+  # Only by hand in the blueprint itself, where none of its jobs runs; the template
+  # gives every repository its real triggers (decision 0179).
   workflow_dispatch:
 
 permissions: {}

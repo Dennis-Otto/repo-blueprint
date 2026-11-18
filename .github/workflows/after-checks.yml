@@ -24,7 +24,7 @@ name: After the checks
 # .github/checks.project.toml of the default branch says rerun = false: running it
 # again would only keep a runner busy. The bot leaves the run alone only when every job
 # that broke failed in such a step, and starts the branch bot then, as the failure
-# stays (decision 0179). Only the
+# stays (decision 0180). Only the
 # run of the head of its pull request, or of its branch, runs again: just before the
 # rerun, the bot asks GitHub for the head, as a run of a commit that a newer push
 # replaced shares the concurrency group of the run for the head and would cancel it,
@@ -346,7 +346,7 @@ jobs:
       - name: Read the steps that can't pass when they run again
         if: steps.checkout.outcome == 'success'
         # The steps of scripts/check.sh whose explanation says rerun = false, one on
-        # each line, from the catalogs of the default branch (decision 0179).
+        # each line, from the catalogs of the default branch (decision 0180).
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
@@ -438,7 +438,7 @@ jobs:
           }
           # A job that failed in a step of scripts/check.sh that can't pass without a
           # change, such as Psalm or Files of the project, would only fail the same way
-          # again (decision 0179). The PR coach names that step in the title of its
+          # again (decision 0180). The PR coach names that step in the title of its
           # annotation, and the catalogs of the default branch say which steps can't
           # pass when they run again. Only when every job that broke failed in such a
           # step does the run stay as it is: one that ran out of time, one that

@@ -47,7 +47,16 @@ from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
 from PIL import Image
-from shared import copy_of, git_environment, load_yaml, once, run_folder
+from shared import (
+    BY_HAND,
+    blueprint_environment,
+    copy_of,
+    git_environment,
+    in_a_repository,
+    load_yaml,
+    once,
+    run_folder,
+)
 from shell import BASH, in_bash
 from workflow_steps import (
     RUN_URL,
@@ -64,7 +73,13 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, branches, diagrams, ownership, screenshots
+from blueprint import (
+    bootstrap,
+    branches,
+    diagrams,
+    ownership,
+    screenshots,
+)
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
@@ -139,6 +154,7 @@ from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
+from blueprint.website import idle
 from variants import legs_of
 
 ROOT = Path(__file__).parents[1]
@@ -628,6 +644,10 @@ def test_the_workflows_are_the_blueprints_own(
             assert flavor, "ci.yml names its flavor"
             source_name = f"ci-{flavor.group(1)}.yml"
         source = (sources / source_name).read_text(encoding="utf-8").replace(GUARD, "")
+        if BY_HAND in source:
+            # With the triggers of a repository, which the blueprint's own copy leaves
+            # out, as it starts only by hand (decision 0179).
+            source = in_a_repository(source_name)
         if name == "fuzz.yml":
             source = source.replace(
                 "stacks/fuzz/requirements.txt", "requirements-fuzz.txt"
@@ -692,6 +712,109 @@ def test_the_workflows_are_the_blueprints_own(
             )
             assert entered == signs == 1, name
         assert text == source, name
+
+
+# The triggers that a repository gets for each workflow that the blueprint starts only
+# by hand, as they were before (decision 0179); those of the checks of each kind are
+# those of CI (python), the blueprint's own.
+TRIGGERS: dict[str, dict[str, Any]] = {
+    "action-test.yml": {"push": {"branches": ["main"]}, "pull_request": None},
+    "blueprint-update.yml": {"schedule": [{"cron": "40 4 * * 2"}]},
+    "newest-node.yml": {
+        "push": {"branches": ["main"]},
+        "schedule": [{"cron": "40 3 * * 2"}],
+    },
+    "properties.yml": {"schedule": [{"cron": "41 2 * * *"}]},
+    "upstream.yml": {"schedule": [{"cron": "50 4 * * 3"}]},
+}
+
+
+def triggers_of(text: str) -> dict[str, Any]:
+    """The block on: of a workflow, which YAML reads as the key True."""
+    workflow = load_yaml(text)
+    return dict(workflow.get("on", workflow.get(True)) or {})
+
+
+def test_a_workflow_of_which_no_job_runs_here_starts_only_by_hand() -> None:
+    # GitHub makes a run for every trigger of a workflow, also when each of its jobs
+    # skips: about 3,800 runs a week in the blueprint that did nothing (issue 1003).
+    # A workflow of which no job runs here, as idle() of the page Automation tells it,
+    # has only workflow_dispatch, and a workflow of which a job runs here never has
+    # the lines that make the template give it other triggers.
+    by_hand = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        workflow = load_yaml(text)
+        if idle(workflow["jobs"], "Dennis-Otto/repo-blueprint"):
+            assert list(triggers_of(text)) == ["workflow_dispatch"], path.name
+            if BY_HAND in text:
+                by_hand.append(path.name)
+        else:
+            assert BY_HAND not in text, path.name
+    # Each with the triggers of a repository in its template, the checks of the kinds
+    # of projects other than Python in the one of ci.yml.
+    checks = (ROOT / ".github/workflows").glob("ci-*.yml")
+    assert by_hand == sorted(
+        [path.name for path in checks if path.name != "ci-python.yml"] + [*TRIGGERS]
+    )
+    # Register app starts only by hand in every repository as well.
+    assert "register-app.yml" not in by_hand
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_each_kind_gets_the_triggers_that_the_blueprint_leaves_out(
+    projects: dict[str, Path], kind: str
+) -> None:
+    sources = ROOT / ".github/workflows"
+    slot = project_slot(projects[kind])
+    python = triggers_of(in_slot((sources / "ci-python.yml").read_text("utf-8"), slot))
+    for name, text in workflows(projects[kind]).items():
+        flavor = re.search(r"^name: CI \((.+)\)$", text, re.M)
+        source_name = f"ci-{flavor[1]}.yml" if name == "ci.yml" and flavor else name
+        source = sources / source_name
+        if not source.exists() or BY_HAND not in source.read_text("utf-8"):
+            continue
+        triggers = triggers_of(text)
+        if name == "ci.yml":
+            # The same events as the blueprint's own CI, each week in the slot.
+            assert triggers == python, kind
+            continue
+        # The start by hand of the blueprint's copy, with its inputs, and the triggers
+        # that the workflow had before, each schedule in the slot of the project.
+        expected = {
+            event: [{"cron": moved(item["cron"], slot)} for item in value]
+            if event == "schedule"
+            else value
+            for event, value in TRIGGERS[name].items()
+        }
+        dispatch = triggers_of(source.read_text("utf-8"))["workflow_dispatch"]
+        assert triggers == {**expected, "workflow_dispatch": dispatch}, name
+        assert BY_HAND not in text, name
+
+
+def test_the_variants_audit_the_real_triggers_of_every_kind_with_zizmor() -> None:
+    # The blueprint's own zizmor sees the workflows that it starts only by hand
+    # without the triggers on which some of its audits depend (decision 0179). Each
+    # leg of the Variants audits the workflows of its project as the project has them,
+    # with the zizmor and the configuration of the project's Workflow security.
+    name = "Audit the security of the workflows of the project"
+    audit = workflow_steps.step("variants.yml", "variant", name)
+    own = workflow_steps.step("zizmor.yml", "zizmor", "Check the workflows")
+    assert audit["uses"] == own["uses"]
+    assert "if" not in audit
+    # Every finding fails the leg; the advisories of the pins are the blueprint's own.
+    assert audit["with"] == {
+        "inputs": "${{ env.PROJECT }}",
+        "online-audits": False,
+        "advanced-security": False,
+        "annotations": True,
+    }
+    # Right after actionlint, which lints the same files.
+    steps = [
+        step.get("name")
+        for step in workflow_steps.job("variants.yml", "variant")["steps"]
+    ]
+    assert steps[steps.index(name) - 1] == "Lint the workflows of the project"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -15356,17 +15479,6 @@ def test_a_template_cuts_parts_of_a_file_and_stops_when_they_are_gone(
             rendered(file.replace(reworded, "# other"), cuts)
 
 
-def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
-    """Jinja as Copier renders the template, with the delimiters and the filters of the
-    blueprint, from the folders and then the blueprint's files."""
-    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
-    return SandboxedEnvironment(
-        loader=ChoiceLoader([*map(FileSystemLoader, folders), FileSystemLoader(ROOT)]),
-        extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"],
-        **questions["_envops"],
-    )
-
-
 def moved(cron: str, slot: int) -> str:
     """A cron of the blueprint in a slot of schedules: a weekly one as many days later,
     and every one 8 minutes later for each, within its hour and never on the full one."""
@@ -15482,9 +15594,12 @@ def test_every_template_checks_the_texts_that_it_replaces_in_a_file_of_the_bluep
         # A filter of an include replaced nothing when the text was gone.
         assert not re.search(r"\[%-?\s*filter\s+replace\(", text), path
         if "replaced(" in text:
-            assert (
-                '[%- from "includes/replace.jinja" import replaced with context -%]\n'
-                in text
+            # replaced(), with the start of the triggers that it replaces where needed.
+            assert re.search(
+                r'^\[%- from "includes/replace\.jinja" import (?:by_hand, )?replaced'
+                r" with context -%\]\n",
+                text,
+                re.M,
             ), path
 
 
@@ -16829,6 +16944,8 @@ def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -
     own = (github / "checks.project.toml").read_text(encoding="utf-8")
     assert tomllib.loads(own) == {}
     assert '# [check."e2e (*)"]' in own
+    # It says how a step of the project keeps the flaky-test bot from running it again.
+    assert "# rerun = true\n" in own
     # Every required check and every step of its checks is explained, and each link
     # leads to a section of its contributing guide.
     explained = Catalog.load(project)
@@ -22424,8 +22541,12 @@ def test_the_fuzzing_ends_within_its_timeout_however_many_targets(
 
 def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
     # main takes a pull request only when it is up to date, so a merge gives main the
-    # tree that the checks of the pull request passed with.
-    flows = workflows(ROOT)
+    # tree that the checks of the pull request passed with. Each workflow as a
+    # repository has it, also one that the blueprint starts only by hand (0179).
+    flows = {
+        name: in_a_repository(name) if BY_HAND in text else text
+        for name, text in workflows(ROOT).items()
+    }
     for name in (
         "variants.yml",
         "lint.yml",
@@ -22574,8 +22695,10 @@ def test_the_newest_node_checks_main_and_every_week(
     if not node:
         return
     newest = flows["newest-node.yml"]
-    # Not in pull requests, as the newest Python: a new Node breaks them all alike.
-    assert set(triggers(newest)) == {"push", "schedule", "workflow_dispatch"}
+    # Not in pull requests, as the newest Python: a new Node breaks them all alike. The
+    # blueprint starts it only by hand (decision 0179).
+    events = {"workflow_dispatch"} if project == "blueprint" else {"push", "schedule"}
+    assert set(triggers(newest)) == {"workflow_dispatch", *events}
     assert "\n    name: check (newest Node)\n" in newest
     # The newest release of Node, where the CI takes the Node of .nvmrc.
     assert "node-version: latest\n          check-latest: true\n" in newest
@@ -22858,7 +22981,10 @@ def test_without_code_scanning_no_workflow_sends_its_findings_there(
                 if action.startswith("github/codeql-action/upload-sarif@"):
                     assert WITH_CODE_SCANNING in condition_of(step), (path, step)
                     gated.add(f"{path.name} {step['name']}")
-                if action.startswith("zizmorcore/zizmor-action@"):
+                # The audit of the Variants never uploads: each finding fails its leg.
+                if action.startswith("zizmorcore/zizmor-action@") and (
+                    step["with"].get("advanced-security") is not False
+                ):
                     assert step["with"] == {
                         "advanced-security": f"${{{{ {WITH_CODE_SCANNING} }}}}",
                         "annotations": f"${{{{ {WITHOUT_CODE_SCANNING} }}}}",

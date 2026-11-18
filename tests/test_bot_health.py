@@ -17,6 +17,7 @@ import pytest
 import workflow_steps
 from hypothesis import given
 from hypothesis import strategies as st
+from shared import BY_HAND, in_a_repository
 
 import blueprint.github
 from blueprint import branches, cli
@@ -3070,6 +3071,9 @@ def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
     name: str,
 ) -> None:
     text = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    if BY_HAND in text:
+        # As a repository has it: the blueprint starts it only by hand (decision 0179).
+        text = in_a_repository(name)
 
     inputs = dispatch_inputs(text)
 
