@@ -1399,7 +1399,8 @@ def stopped_bots(
     so such a run is a fork's workflow that only took the name of one of them. The
     runs of the issue assistant for an event of an issue too, whose caller has no last
     job yet, so that a first answer that Harden-Runner stopped comes a day late at the
-    latest; its earlier post keeps it from a second comment after an answer by hand."""
+    latest; its earlier post keeps it from a second analysis once the assistant has answered,
+    also from a run started by hand."""
     since = (now - STOPPED_SINCE).strftime("%Y-%m-%dT%H:%M:%SZ")
     found = []
     for workflow in workflows:
