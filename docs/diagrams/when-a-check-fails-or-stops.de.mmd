@@ -5,13 +5,14 @@ config:
 ---
 flowchart TB
     accTitle: Wenn eine Prüfung scheitert oder abbricht
-    accDescr: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Ein Job einer anderen Prüfung, der beim ersten Versuch sein Zeitlimit erreicht hat, läuft einmal neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.
+    accDescr: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer jeder von ihnen ist an einem Schritt von scripts/check.sh gescheitert, der ohne eine Änderung nicht bestehen kann, oder dieselben Jobs sind schon für den Commit davor gescheitert, was sie rot lässt und die Reihe des Branch-Bots weiterrückt; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Ein Job einer anderen Prüfung, der beim ersten Versuch sein Zeitlimit erreicht hat, läuft einmal neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.
 
     run["Ein Lauf der Prüfungen<br>oder des Releases endet"]
     tests["Tests beim ersten Versuch fehlgeschlagen<br>oder am Zeitlimit"]
     raced["Eine vorgeschriebene Prüfung, abgebrochen<br>von einem verspäteten Lauf für einen älteren Commit"]
     release["Das Release eines Merges ist gescheitert"]
     late["Ein Job einer anderen Prüfung am Zeitlimit,<br>beim ersten Versuch"]
+    step{"Jeder an einem Schritt gescheitert,<br>der ohne Änderung nicht bestehen kann?"}
     before{"Dieselben Jobs schon für<br>den Commit davor gescheitert?"}
     again["Die fehlgeschlagenen Jobs<br>laufen einmal neu"]
     flaky["`Issue *Flaky tests*<br>Job · Schritt · Test · Fehler`"]
@@ -24,7 +25,9 @@ flowchart TB
     run --> raced
     run --> release
     run --> late
-    tests --> before
+    tests --> step
+    step -- "nein" --> before
+    step -- "ja" --> red
     before -- "nein" --> again
     before -- "ja" --> red
     again -- "besteht" --> flaky

@@ -53,11 +53,13 @@ from blueprint.changelog import (
 )
 from blueprint.checklist import SETTINGS_APPLY, checklist, describe_steps
 from blueprint.coach import (
+    CATALOG,
     PROJECT_CATALOG,
     Catalog,
     CatalogError,
     Part,
     check_steps,
+    final_steps,
     link,
     missing,
     plain,
@@ -304,12 +306,25 @@ def explain_command(arguments: argparse.Namespace, root: Path) -> int:
                 "that fix what it finds, or the reason why no command can",
                 file=sys.stderr,
             )
-        if gaps or silent:
+        for step in catalog.unmarked:
+            print(
+                f"blueprint.py: the step {step} of {CATALOG.as_posix()} doesn't say in "
+                "rerun whether it can pass when it runs again without a change: true "
+                "for one that downloads or runs tests, false for one that can't",
+                file=sys.stderr,
+            )
+        if gaps or silent or catalog.unmarked:
             return 1
         print(
             "Every required check and every step of scripts/check.sh is explained, "
-            "and every explanation says how it fixes itself or why it can't."
+            "every explanation says how it fixes itself or why it can't, and every "
+            "step whether it can pass when it runs again."
         )
+        return 0
+    if arguments.action == "final-steps":
+        # For the flaky-test bot, from the catalog of the default branch.
+        for step in final_steps(catalog):
+            print(step)
         return 0
     # A check that runs several others, as lint runs every linter, explains each of
     # them that failed, and itself only when none did.
@@ -2247,6 +2262,11 @@ def add_coach_parsers(
         help="whether every required check and every step of scripts/check.sh has "
         "its explanation",
     )
+    coach_actions.add_parser(
+        "final-steps",
+        help="the steps of scripts/check.sh that can't pass when they run again "
+        "without a change, one on each line, which the flaky-test bot doesn't run again",
+    )
     annotate_parser = commands.add_parser(
         "annotate",
         help="each finding of a tool of scripts/check.sh as an annotation of the CI, "
@@ -3105,7 +3125,11 @@ def standalone_command(
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
         return 0 if done else 1
-    if arguments.command == "coach" and arguments.action in ("explain", "verify"):
+    if arguments.command == "coach" and arguments.action in (
+        "explain",
+        "verify",
+        "final-steps",
+    ):
         try:
             return explain_command(arguments, root)
         except (OSError, CatalogError) as error:

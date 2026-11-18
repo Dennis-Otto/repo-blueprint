@@ -5000,13 +5000,37 @@ def test_the_checks_fail_on_a_step_without_its_explanation(
     assert (explained.returncode, explained.stdout) == (
         0,
         "\n== Explanations of the checks\nEvery required check and every step of "
-        "scripts/check.sh is explained, and every explanation says how it fixes "
-        "itself or why it can't.\n",
+        "scripts/check.sh is explained, every explanation says how it fixes itself "
+        "or why it can't, and every step whether it can pass when it runs again.\n",
     )
     assert unexplained.returncode == 1
     assert unexplained.stderr == (
         "blueprint.py: the step Unexplained of scripts/check.sh has no explanation; "
         "add it to .github/checks.project.toml\n"
+    )
+
+    # The explanation of a step of the project needs no rerun: it runs again when it
+    # fails, so no repository fails its checks after the update that brings the field.
+    with (project / ".github/checks.project.toml").open(
+        "a", encoding="utf-8", newline="\n"
+    ) as file:
+        file.write(
+            '\n[step.Unexplained]\nproblem = "P."\nwhy = "W."\nfix = "F."\n'
+            'autofix = "Only a person mends it."\n'
+        )
+    assert run_the_steps(project, script, path=path, ci=True).returncode == 0
+
+    # A step of the blueprint's catalog without it fails, so none slips through.
+    catalog = project / ".github/checks.toml"
+    catalog.write_text(
+        catalog.read_text(encoding="utf-8").replace("rerun = false\n", "", 1),
+        encoding="utf-8",
+        newline="\n",
+    )
+    unmarked = run_the_steps(project, script, path=path, ci=True)
+    assert unmarked.returncode == 1
+    assert "doesn't say in rerun whether it can pass when it runs again" in (
+        unmarked.stderr
     )
 
 
@@ -19458,14 +19482,28 @@ def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
         in condition
     )
     # It reads the jobs of the runs and their annotations and the head of the pull
-    # request or of the branch, and starts the failed jobs again; it checks out nothing.
+    # request or of the branch, and starts the failed jobs again, or the branch bot.
     assert job["permissions"] == {
         "actions": "write",
         "checks": "read",
         "contents": "read",
         "pull-requests": "read",
     }
-    assert not steps_using(job, "actions/checkout")
+    # It checks out the default branch alone, for the explanations of the checks, and
+    # goes on without them when that fails: every failed job runs again then.
+    (checkout,) = steps_using(job, "actions/checkout")
+    assert checkout["with"] == {
+        "persist-credentials": False,
+        "sparse-checkout": ".github\nblueprint\n",
+    }
+    assert "ref" not in checkout["with"]
+    assert checkout["continue-on-error"] is True
+    read = next(
+        step
+        for step in job["steps"]
+        if step.get("name") == "Read the steps that can't pass when they run again"
+    )
+    assert read["if"] == f"steps.{checkout['id']}.outcome == 'success'"
     # The values of the event reach the script as variables only.
     assert all("${{" not in step.get("run", "") for step in job["steps"])
 
@@ -19509,6 +19547,7 @@ def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
         "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
             *([2] if before else []), conclusion=before[0] if before else "failure"
         ),
+        "workflow run": "",
     }
     if before:
         conclusion, earlier = before
@@ -19541,6 +19580,10 @@ def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
             "actions/runs/3/" in call or "actions/runs/4/" in call for call in calls
         )
         assert ("broke for the commit before" in summary) != again
+    # A failure that stays a failure moves the line of the branch bot on at once, as
+    # no second attempt will (decision 0151); a cancelled run moves nothing.
+    started = "workflow run update-branches.yml --field after=5 --field attempt=1"
+    assert (started in calls) == (before is not None and not again)
 
 
 @WITH_JQ
@@ -19681,6 +19724,281 @@ def test_the_flaky_test_bot_runs_a_job_again_that_harden_runner_stopped_twice(
 
     assert "run rerun 5 --failed" in calls
     assert "broke for the commit before" not in summary
+
+
+def annotations_of_a_step(step: str) -> list[dict[str, str]]:
+    """The annotations of a job whose scripts/check.sh stopped in the step, as the PR
+    coach writes them: the error of the check, the notice of the step and the exit,
+    as in the runs that ran again in vain from 10 to 17 November 2026, such as
+    Dennis-Otto/paperless-sync 43930294054, which stopped in Psalm."""
+    return [
+        {
+            "annotation_level": "failure",
+            "title": "PR coach: The checks of scripts/check.sh",
+            "message": "One of the checks of `scripts/check.sh` failed.",
+        },
+        {
+            "annotation_level": "notice",
+            "title": f"PR coach: {step} (scripts/check.sh)",
+            "message": "What the step found.",
+        },
+        {"annotation_level": "failure", "title": "", "message": EXITED},
+    ]
+
+
+# The steps that can't pass when they run again, as the step before reads them from
+# the catalogs of the default branch.
+FINAL_STEPS = "Text files\nFiles of the project\nLock files\nRuff\nPsalm\n"
+# A job of the tests that failed in each of these, by its annotations.
+FAILED_IN: dict[str, list[dict[str, str]]] = {
+    "Psalm": annotations_of_a_step("Psalm"),
+    "Files of the project": annotations_of_a_step("Files of the project"),
+    "Text files": annotations_of_a_step("Text files"),
+    "a test": annotations_of_a_step("Tests, with every line covered"),
+    # A download: Packagist out of reach (curl error 28), or PyPI for uv.
+    "Composer": annotations_of_a_step("Composer"),
+    "Lock files match their sources": annotations_of_a_step(
+        "Lock files match their sources"
+    ),
+    # A step of the project's own, whose explanation says nothing.
+    "a step of the project": annotations_of_a_step("Checks of this project"),
+    # Outside scripts/check.sh, such as the end-to-end tests, or before it.
+    "another step": annotations_of_a_job(EXITED),
+    "Harden-Runner": annotations_of_a_job(STOPPED_BY_THE_CHECK, EXITED),
+    "ran out of time": annotations_of_a_job(TIMED_OUT, CANCELLED),
+}
+SETTLED = "that can't pass when it runs again without a change"
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("failed", "again"),
+    [
+        # Steps that only read the files of the commit fail the same way again.
+        (["Psalm"], False),
+        (["Files of the project"], False),
+        (["Text files"], False),
+        # Every leg of a matrix in such a step.
+        (["Psalm", "Files of the project"], False),
+        # A test, a download, a step of the project, a failure outside the checks,
+        # Harden-Runner and a time limit can pass when they run again.
+        (["a test"], True),
+        (["Composer"], True),
+        (["Lock files match their sources"], True),
+        (["a step of the project"], True),
+        (["another step"], True),
+        (["Harden-Runner"], True),
+        (["ran out of time"], True),
+        # One such job is enough for every failed job to run again.
+        (["Psalm", "a test"], True),
+        (["Psalm", "Harden-Runner"], True),
+        (["Files of the project", "ran out of time"], True),
+        (["Composer", "Psalm"], True),
+    ],
+)
+def test_the_flaky_test_bot_runs_no_job_again_that_failed_in_a_step_that_cant_pass(
+    tmp_path: Path, failed: list[str], again: bool
+) -> None:
+    conclusions = [
+        "cancelled" if where == "ran out of time" else "failure" for where in failed
+    ]
+    answers: dict[str, object] = {
+        **STILL_THE_HEAD,
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                *(
+                    job_of_a_run(11 + leg, f"check (php {leg})", conclusion)
+                    for leg, conclusion in enumerate(conclusions)
+                ),
+                job_of_a_run(19, "check (php 9)", "success"),
+            ]
+        },
+        **{
+            f"repos/o/r/check-runs/{11 + leg}/annotations": FAILED_IN[where]
+            for leg, where in enumerate(failed)
+        },
+        # No run for a commit before: no failure that repeats.
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        "workflow run": "",
+    }
+
+    done = run_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        files={"$RUNNER_TEMP/final-steps": FINAL_STEPS},
+        CONCLUSION="failure" if "failure" in conclusions else "cancelled",
+        NAME="CI (php)",
+        WORKFLOW="3",
+        EVENT="pull_request",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert bool(done.called("run rerun 5 --failed")) == again
+    assert (SETTLED in done.summary) != again
+    # A failure that stays moves the line of the branch bot on at once.
+    assert bool(done.called("workflow run update-branches.yml")) != again
+    if not again:
+        assert done.summary == (
+            f"Each job of CI (php) that broke failed in a step of scripts/check.sh {SETTLED}"
+            ", so they don't run again:\n"
+            + "".join(
+                f"- check (php {leg}), in {where}\n" for leg, where in enumerate(failed)
+            )
+            + "CI (php) failed for good, so the branch bot moves its line on.\n"
+        )
+        # Neither the run for the commit before nor the head: nothing runs again.
+        assert not any("actions/workflows/3/runs" in call for call in done.commands)
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("event", "head", "started"),
+    [
+        ("pull_request", "o/r", True),
+        # A fork's check on pull_request starts the branch bot, as the job branches does;
+        # one on pull_request_target never, so that a title can't cancel the bot.
+        ("pull_request", "fork/r", True),
+        ("pull_request_target", "o/r", True),
+        ("pull_request_target", "fork/r", False),
+        # A run of a branch is no pull request in the line.
+        ("push", "o/r", False),
+        ("schedule", "o/r", False),
+    ],
+)
+def test_a_failure_that_doesnt_run_again_moves_the_line_of_the_branch_bot_on(
+    tmp_path: Path, event: str, head: str, started: bool
+) -> None:
+    done = run_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "check (php)", "failure")]
+            },
+            "repos/o/r/check-runs/11/annotations": FAILED_IN["Psalm"],
+            "workflow run": "",
+        },
+        files={"$RUNNER_TEMP/final-steps": FINAL_STEPS},
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT=event,
+        HEAD_REPO=head,
+        BRANCH="main",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert not done.called("run rerun")
+    assert (
+        bool(
+            done.called(
+                "workflow run update-branches.yml --field after=5 --field attempt=1"
+            )
+        )
+        == started
+    )
+    assert ("failed for good" in done.summary) == started
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash")
+def test_the_flaky_test_bot_reads_the_steps_from_the_catalogs_of_the_default_branch(
+    tmp_path: Path,
+) -> None:
+    # The Python of the tests stands for that of the runner.
+    python = {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'}
+    read = "Read the steps that can't pass when they run again"
+
+    # The checkout of the default branch: the blueprint's own, here.
+    done = workflow_steps.run_step(
+        tmp_path / "main",
+        "after-checks.yml",
+        "rerun",
+        read,
+        stubs=python,
+        workspace=ROOT,
+    )
+
+    assert done.returncode == 0, done.stderr
+    final = (tmp_path / "main/runner/final-steps").read_text(encoding="utf-8")
+    assert {"Text files", "Files of the project", "Psalm", "Ruff"} <= set(
+        final.splitlines()
+    )
+    assert "Composer" not in final.splitlines()
+    assert "Lock files match their sources" not in final.splitlines()
+
+    # A default branch whose blueprint.py can't read the catalogs leaves no list
+    # behind, and every failed job runs once more.
+    done = workflow_steps.run_step(
+        tmp_path / "broken",
+        "after-checks.yml",
+        "rerun",
+        read,
+        stubs=python,
+        files={".github/checks.toml": "[step.Ruff\n"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "can't be read, so every failed job runs once more" in done.stdout
+    assert not (tmp_path / "broken/runner/final-steps").exists()
+
+
+@WITH_JQ
+@pytest.mark.parametrize("final_steps", [None, ""])
+def test_the_flaky_test_bot_runs_every_failed_job_again_without_the_steps(
+    tmp_path: Path, final_steps: str | None
+) -> None:
+    # The checkout of the default branch failed, or its catalogs couldn't be read.
+    done = run_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **STILL_THE_HEAD,
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "check (php)", "failure")]
+            },
+            "repos/o/r/check-runs/11/annotations": FAILED_IN["Psalm"],
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        files=(
+            {} if final_steps is None else {"$RUNNER_TEMP/final-steps": final_steps}
+        ),
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("run rerun 5 --failed")
+    assert not any("check-runs/11/annotations" in call for call in done.commands)
+
+
+@WITH_JQ
+def test_the_branch_bot_that_doesnt_start_fails_the_flaky_test_bot(
+    tmp_path: Path,
+) -> None:
+    done = run_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [job_of_a_run(11, "check (php)", "failure")]
+            },
+            "repos/o/r/check-runs/11/annotations": FAILED_IN["Psalm"],
+            "workflow run.error": "HTTP 403: Resource not accessible by integration\n",
+        },
+        files={"$RUNNER_TEMP/final-steps": FINAL_STEPS},
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+    )
+
+    assert done.returncode == 1
+    assert "::error title=The branch bot didn't start::" in done.stdout
+    assert not done.called("run rerun")
 
 
 # The pull requests that GitHub names for the commit of the run, abc1234def, when a
@@ -20117,6 +20435,7 @@ def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
             **variants_of_a_run(
                 "repos/o/r/actions/runs/2/jobs", "failure", messages, 21
             ),
+            "workflow run": "",
         },
         NAME="Variants",
         CONCLUSION="failure",
@@ -20127,6 +20446,10 @@ def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
 
     assert ("run rerun 5 --failed" in calls) == again
     assert ("broke for the commit before" in summary) != again
+    # A failure that repeats stays, and moves the line of the branch bot on at once.
+    assert any(
+        call.startswith("workflow run update-branches.yml") for call in calls
+    ) != (again)
 
 
 # What gh says when GitHub fails for a moment, as for hours on 8 November 2026.
