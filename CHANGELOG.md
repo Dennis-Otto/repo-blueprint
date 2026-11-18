@@ -7,6 +7,25 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.22.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.21.0...v1.22.0) (2026-11-18)
+
+
+### Features
+
+* **bot-health:** start only after runs that it acts on ([#1025](https://github.com/Dennis-Otto/repo-blueprint/issues/1025)) ([395b3b3](https://github.com/Dennis-Otto/repo-blueprint/commit/395b3b303ab9861b13383c1029b94fe88dd060ba))
+* **deps:** the weekly refresh of composer.lock merges by itself ([#1027](https://github.com/Dennis-Otto/repo-blueprint/issues/1027)) ([d826462](https://github.com/Dennis-Otto/repo-blueprint/commit/d826462037299dabe354f42d9c0dc8981af69b6b))
+* **flaky:** run no job again that failed in a step that can't pass without a change ([#1037](https://github.com/Dennis-Otto/repo-blueprint/issues/1037)) ([b0d8ed8](https://github.com/Dennis-Otto/repo-blueprint/commit/b0d8ed887b351a591cd2d2dc39292a7611aa1252))
+* only a run of Release that published a release starts Issue lifecycle and Screenshots ([#1024](https://github.com/Dennis-Otto/repo-blueprint/issues/1024)) ([abbc7cc](https://github.com/Dennis-Otto/repo-blueprint/commit/abbc7ccc8aa843c327c6c096cbb6003a4815b97f))
+* **release:** rebuild the release pull request once before it merges ([#1031](https://github.com/Dennis-Otto/repo-blueprint/issues/1031)) ([eab6ff0](https://github.com/Dennis-Otto/repo-blueprint/commit/eab6ff03bdfa989e90380002dcdb127e7f4676f4))
+* **release:** the blueprint releases at most once a day ([#1034](https://github.com/Dennis-Otto/repo-blueprint/issues/1034)) ([d47337e](https://github.com/Dennis-Otto/repo-blueprint/commit/d47337ec004788396cc8f5b666dcc5ed0ca03160))
+* the secret scan and the dependency review share one workflow, Quick checks ([#1026](https://github.com/Dennis-Otto/repo-blueprint/issues/1026)) ([4e0f723](https://github.com/Dennis-Otto/repo-blueprint/commit/4e0f723783222e8eb87e95fa873d068b5cc3fb08))
+
+
+### Bug fixes
+
+* **deps:** update the issue assistant to v1.14.0 ([#1035](https://github.com/Dennis-Otto/repo-blueprint/issues/1035)) ([3dc8828](https://github.com/Dennis-Otto/repo-blueprint/commit/3dc8828ab113a7fc8421d0b626346f4fc33adc56))
+* **settings:** a refused ruleset says why and leaves the others applied ([#1032](https://github.com/Dennis-Otto/repo-blueprint/issues/1032)) ([334f545](https://github.com/Dennis-Otto/repo-blueprint/commit/334f5452f0a5343d09651a3f303622c96f202a98))
+
 ## [1.21.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.20.6...v1.21.0) (2026-11-17)
 
 ### Features
