@@ -198,8 +198,8 @@ jobs:
           # Who needs the app and for what, what happens without it, and whether the
           # run fails then.
           BOT: the release bot
-          TASK: start the checks of the release pull request and sign the release tags
-          WITHOUT: release-please keeps the release pull request with the token of the job, which starts none of its checks, and no release can be published
+          TASK: start the checks of the release pull request, write the rows of the index of decisions into it and sign the release tags
+          WITHOUT: release-please keeps the release pull request with the token of the job, which starts none of its checks, no release can be published, and docs/decisions/README.md gains no row for a new record until you run python3 .github/blueprint.py decisions --complete yourself
           REQUIRED: "false"
         run: |
           if [[ -z "$CLIENT_ID" ]]; then

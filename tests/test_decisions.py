@@ -49,16 +49,6 @@ HOW_TO_FIX = (
     "wrong: give your record the number of its pull request, in the name of its file "
     "and in each link to it, and leave the index alone, which the release writes."
 )
-# The variables of the runner that tell the step which pull request it checks.
-PULL_REQUEST_VARIABLES = ("GITHUB_REF", "GITHUB_SHA", "GITHUB_EVENT_PATH")
-
-
-@pytest.fixture(autouse=True)
-def no_pull_request_of_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test sees the pull request whose CI runs the tests: one that needs one
-    sets its own."""
-    for name in PULL_REQUEST_VARIABLES:
-        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -884,6 +874,7 @@ def test_the_pull_request_comes_from_the_ref_the_commit_and_the_event(
         "GITHUB_REF": "refs/pull/1040/merge",
         "GITHUB_SHA": git(root, "rev-parse", "HEAD"),
         "GITHUB_EVENT_PATH": str(tmp_path / "event.json"),
+        "GITHUB_REPOSITORY": "owner/repo",
     }
 
     assert pull_request_of(root, environment) == PullRequest(
@@ -944,6 +935,16 @@ def test_the_issues_that_a_description_closes_are_those_that_github_closes() -> 
     )
     assert closed_issues(description) == {1033, 12, 7, 8, 9, 10}
     assert closed_issues("") == set()
+
+
+def test_an_issue_named_with_its_repository_counts_only_for_that_one() -> None:
+    description = (
+        "Fixes Owner/Repo#21, closes https://github.com/owner/repo/issues/22, "
+        "fixes other/repo#23, fixes https://github.com/other/repo/issues/24, "
+        "resolves #25"
+    )
+    assert closed_issues(description, "owner/repo") == {21, 22, 25}
+    assert closed_issues(description) == {25}
 
 
 def test_the_own_number_of_a_pull_request_is_its_own_unless_main_has_it() -> None:

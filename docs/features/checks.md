@@ -8,7 +8,7 @@ What runs in every pull request and on `main`, how long it takes, and how a chec
 
 A record of a decision takes the number of its pull request, or of the issue that the pull request fixes, which GitHub counts together, so two pull requests that each add a record never take the same number.
 
-- **The index:** pull requests leave `docs/decisions/README.md` to the release, which writes the row of each new record and the status of each record in the commit that writes the changelog, so they merge without a conflict of Git as well, and the website lists every record at any time.
+- **The index:** pull requests leave `docs/decisions/README.md` to the release, which writes the row of each new record and the status of each record in the commit that writes the changelog, so they merge without a conflict of Git as well, and a website built with MkDocs lists every record at any time.
 - **The check:** the step *Records of decisions* of `scripts/check.sh` still fails when two records of `docs/decisions/` share a number, a file of the folder is no record, or the index lists a record twice, names a file that doesn't exist, names a record by another number or lists the records out of order; in the CI of a pull request, it also fails on a new record that carries neither number, and the log names the number to take.
 - **The fix:** `blueprint.py decisions --fix` fixes what only the index gets wrong, such as the order of the rows, and the fix bot commits it; which record takes a new number stays for its author (decisions 0135 and 1033 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
 

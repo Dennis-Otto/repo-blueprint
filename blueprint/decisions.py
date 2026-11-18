@@ -57,10 +57,14 @@ STATUS = re.compile(r"^[-*][ \t]+Status:[ \t]*(?P<status>.+?)[ \t]*$", re.MULTIL
 # A row of the index with its three cells, the last one the status, in which a | is
 # \|, such as | [0001](0001-a.md) | A decision | accepted |.
 CELLS = re.compile(r"(?P<head>\|[^|\n]*\|(?:[^|\\\n]|\\.)*\|)(?:[^|\\\n]|\\.)*\|[ \t]*")
-# The words of the description of a pull request that close an issue of its
-# repository, as GitHub reads them, such as Fixes #12, Closes: #12 or resolved #12.
+# The words of the description of a pull request that close an issue, as GitHub
+# reads them, such as Fixes #12, Closes: #12, resolved owner/repo#12 or Fixes
+# https://github.com/owner/repo/issues/12; the last two name the repository.
 CLOSING = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+#(?P<number>\d+)\b",
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
+    r"(?:(?P<repository>[\w.-]+/[\w.-]+)#"
+    r"|https://github\.com/(?P<link>[\w.-]+/[\w.-]+)/issues/"
+    r"|#)(?P<number>\d+)\b",
     re.IGNORECASE,
 )
 # The ref that GitHub checks out for the CI of a pull request: its merge into the
@@ -178,7 +182,8 @@ def pull_request_of(
     if head and head == environment.get("GITHUB_SHA"):
         main = numbers_of(root, "HEAD^1", folder)
     description = description_of(environment.get("GITHUB_EVENT_PATH", ""), number)
-    return PullRequest(number, main, frozenset(closed_issues(description)))
+    repository = environment.get("GITHUB_REPOSITORY", "")
+    return PullRequest(number, main, frozenset(closed_issues(description, repository)))
 
 
 def numbers_of(root: Path, commit: str, folder: str = FOLDER) -> frozenset[int] | None:
@@ -218,10 +223,17 @@ def description_of(event: str, number: int) -> str:
     return body if isinstance(body, str) else ""
 
 
-def closed_issues(description: str) -> set[int]:
-    """The issues that the description of a pull request closes, such as 12 of Fixes
-    #12; an issue of another repository, such as o/r#12, is none of them."""
-    return {int(match["number"]) for match in CLOSING.finditer(description)}
+def closed_issues(description: str, repository: str = "") -> set[int]:
+    """The issues of the repository, such as owner/repo, that the description of a
+    pull request closes: 12 of Fixes #12, of Fixes owner/repo#12 and of Fixes
+    https://github.com/owner/repo/issues/12; an issue of another repository is none
+    of them."""
+    return {
+        int(match["number"])
+        for match in CLOSING.finditer(description)
+        if (match["repository"] or match["link"] or repository).casefold()
+        == repository.casefold()
+    }
 
 
 def own_number(main: Collection[int], pull: int) -> int:
