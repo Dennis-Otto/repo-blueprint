@@ -25,6 +25,7 @@ from blueprint.settings import (
     check,
     fitted,
     gated,
+    no_release_app_by_choice,
     read_plan,
 )
 from blueprint.social_preview import (
@@ -209,10 +210,23 @@ def installed_on(api: Api, repo: str, app_id: str) -> bool | None:
     return True if isinstance(suites, dict) and suites.get("total_count") else None
 
 
-def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step]:
+# The step of a repository that says in its settings that it has no release app,
+# which leaves the release pull requests, the release tags and the bots to the
+# GITHUB_TOKEN and to a person.
+NO_RELEASE_APP = (
+    "No release app, by choice: RELEASE_AUTOMATION_CLIENT_ID is empty in the"
+    " settings as code"
+)
+
+
+def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step | None]:
     """The release app: registered by the owner and named in the settings, then
     installed on the repository. Every owner registers their own, since only the
-    owner of an app has its private key."""
+    owner of an app has its private key. A repository that says in its settings
+    that it has none, with RELEASE_AUTOMATION_CLIENT_ID = "", has nothing to
+    register or install."""
+    if no_release_app_by_choice(settings.variables):
+        return Step(NO_RELEASE_APP, True), None
     name = str(settings.variables.get("RELEASE_APP", "")).strip()
     client = str(settings.variables.get("RELEASE_AUTOMATION_CLIENT_ID", "")).strip()
     app_id = str(settings.variables.get("RELEASE_AUTOMATION_APP_ID", "")).strip()
@@ -562,7 +576,7 @@ def checklist(
                 for item in classic
             ),
         ),
-        installed,
+        *([installed] if installed else []),
         DEPENDABOT_ALERTS,
         renovate(
             api, repo, root, str(settings.variables.get("RELEASE_APP", "")).strip()
