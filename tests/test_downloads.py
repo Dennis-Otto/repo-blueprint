@@ -800,7 +800,15 @@ def test_the_links_of_the_documents_are_checked_by_their_patterns(
         "links.yml",
         "links",
         "Check the links of the documentation",
-        env={"EVENT": event, "FILES": files, "EVERY": every},
+        env={
+            "EVENT": event,
+            "FILES": files,
+            "EVERY": every,
+            "REPOSITORY": "o/r.s",
+            "SHA": "abc123",
+            # GitHub gives the base branch only to a pull request.
+            "BASE_REF": "main" if event == "pull_request" else "",
+        },
         report=report_of(total),
         code=code,
         # Documents that the patterns would find, had bash expanded them.
@@ -810,9 +818,20 @@ def test_the_links_of_the_documents_are_checked_by_their_patterns(
     assert done.returncode == ends, done.stdout + done.stderr
     assert done.outputs == {"exit_code": str(code)}
     documents = " ".join(f"[{name}]" for name in re.findall(r"'([^']*)'", files))
+    # A pull request reads the links to its own repository on its base branch at its
+    # merge commit, each rule one argument, with its space and its $1.
+    raw = "https://raw.githubusercontent.com/o/r.s/abc123"
+    remaps = (
+        " [--remap] [^https://github\\.com/(?i:o/r\\.s)/blob/main/(.+)$ $RAW/$1]"
+        " [--remap] [^https://raw\\.githubusercontent\\.com/(?i:o/r\\.s)/main/(.+)$"
+        " $RAW/$1]"
+        " [--remap] [^https://github\\.com/(?i:o/r\\.s)/tree/main([/#?].*)?$"
+        " https://github.com/o/r.s/tree/abc123$1]"
+    ).replace("$RAW", raw)
     assert lychee_calls(tmp_path) == [
         "lychee [--mode] [task] [--format] [markdown] [--output]"
         f" [{done.runner_temp.as_posix()}/links.md] [--config] [lychee.toml]"
+        f"{remaps if event == 'pull_request' else ''}"
         f" [--no-progress] [--cache] [--max-cache-age] [1d] {documents}"
         f" in workspace token the-token"
     ]

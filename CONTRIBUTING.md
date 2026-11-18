@@ -95,6 +95,10 @@ The headings are those of the blueprint, `Breaking changes`, `Features`, `Change
 - **Only a new fragment:** The check of the title, *conventional title*, takes only a new fragment as the entry of a pull request: one that `main` has already is the entry of another pull request that waits for its release, so a pull request that changes it gets a warning, and one that needs an entry adds a fragment of its own under a new name.
 - **On the website:** A page of the website that includes `CHANGELOG.md` with a line `--8<-- "CHANGELOG.md"` shows the entries of the fragments under Unreleased until the release takes them in, grouped as the release groups them.
 
+### Links to this repository
+
+A page of the website that links a file outside `docs/`, such as a workflow or `SECURITY.md`, links its address on `main`, `https://github.com/Dennis-Otto/repo-blueprint/blob/main/<path>`, which is where the file is once the pull request is merged. The link check of a pull request reads such a link, and those to a folder with `tree/main` or to `raw.githubusercontent.com`, at the merge commit of the pull request, so a link to a file, a folder or a heading that the pull request adds passes before the merge, and one to a file or heading that it deletes, moves or doesn't have fails. Links to another repository, branch or tag are read as they are, and `main` and the weekly run read every link on `main`.
+
 ### Records of decisions
 
 A decision that shapes the blueprint gets a record in [`docs/decisions/`](docs/decisions/README.md): copy [the template](docs/decisions/0000-template.md) to a file named after the number of your pull request, or of the issue that the pull request fixes, such as `1040-the-oldest-supported-release.md`, and cite it by that number, as *decision 1040*. GitHub counts issues and pull requests together, so no other pull request takes the number, and the name never changes; a pull request that fixes no issue is opened first, as a draft if needed.
