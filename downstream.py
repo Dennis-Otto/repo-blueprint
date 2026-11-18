@@ -10,7 +10,8 @@ answers of each of these repositories, and
         clones each repository, read-only, and updates it as its blueprint bot does,
         without --trust, from the version that it has to REF of this checkout: HEAD
         by default, with the changes that aren't committed yet. It lists the files
-        that the update changes and those that it leaves a conflict in, and with
+        that the update changes, those that it leaves a conflict in and the lines of
+        the repository that name a file that a release removed, and with
         --base the files whose update REF changes against BASE, such as the commit of
         main that a pull request merges into. An update that fails fails it, and so
         does a conflict that REF brings into a file that isn't a page of text, such
@@ -50,6 +51,7 @@ import yaml
 from jinja2.sandbox import SandboxedEnvironment
 
 import reference
+from blueprint.migrate import MOVED, MOVED_NEXT, moved_lines
 from blueprint.update import MARKERS
 
 ROOT = Path(__file__).resolve().parent
@@ -85,6 +87,10 @@ COMMITTER = (
     "commit.gpgsign=false",
 )
 
+# The files that a release removed, with those that join MOVED in the next release:
+# the lines of a repository that still name one show before the release.
+REMOVED = {**MOVED, **MOVED_NEXT}
+
 Fetch = Callable[[str], str]
 Sleep = Callable[[float], None]
 
@@ -107,6 +113,8 @@ class Update:
     touched: list[str] | None = None
     before: list[str] = field(default_factory=list)
     drift: list[str] = field(default_factory=list)
+    # The lines that name a file that a release removed, as migrate names them.
+    moved: list[str] = field(default_factory=list)
     error: str = ""
 
     def ours(self, path: str) -> bool:
@@ -347,6 +355,7 @@ def try_one(
         after = update(folder, head)
         result.changed = changes(folder)
         result.conflicts = conflicted(after)
+        result.moved = [item.describe() for item in moved_lines(folder, REMOVED)]
         if base is not None:
             result.before = conflicted(before)
             result.touched = sorted(
@@ -400,6 +409,10 @@ def findings(update: Update, drift_fails: bool = False) -> list[str]:
         )
     if update.error:
         lines.append(f"::error title=The update of {name}::{name} {update.error}")
+    lines += [
+        f"::warning title=A removed file in {name}::{name}: {line}"
+        for line in update.moved
+    ]
     for path in update.conflicts:
         if not update.ours(path):
             continue
@@ -423,6 +436,14 @@ def details(update: Update) -> list[str]:
         for path in update.conflicts:
             note = "" if update.ours(path) else ", as the base leaves it already"
             lines.append(f"- {code(path)}{note}")
+        lines.append("")
+    if update.moved:
+        lines += [
+            "The lines that name a file that a release removed, which `migrate` "
+            "finds in the update:",
+            "",
+        ]
+        lines += [f"- {line}" for line in update.moved]
         lines.append("")
     lines += ["The files that the update changes:", ""]
     lines += [f"- {code(path)} ({status})" for status, path in update.changed]

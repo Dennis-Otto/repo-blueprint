@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release that removes a file of the blueprint reaches the project's own lines
+    accDescr: A pull request of the blueprint removes a file of the blueprint. The job update of the Variants workflow fails it until MOVED of blueprint/migrate.py names the file and the one that takes its place. After the release, the update deletes the file, and the step Files of the project finds each line of the project that still names it. A page of Markdown is changed by migrate --fix, which the fix bot commits onto the update. Any other line is a warning and a step of the checklist for you, and a line with blueprint: keep in a comment stays as it is. Then the update merges itself.
+
+    removed(["A pull request of the<br>blueprint removes a file"])
+    guard{"Variants, update:<br>does MOVED name it?"}
+    entry["Add it to MOVED, with<br>the file that takes its place"]
+    update["After the release, the<br>update deletes the file"]
+    step{"Step Files of the project:<br>which line names it?"}
+    page["A page of Markdown:<br>migrate --fix changes only<br>the path, the fix bot<br>commits it"]
+    other["Any other line: a warning<br>and a step of the checklist"]
+    kept["A line with<br>blueprint: keep stays"]
+    merged(["The update<br>merges itself"])
+
+    removed --> guard
+    guard -- "no: the check fails" --> entry --> guard
+    guard -- "yes" --> update --> step
+    step --> page --> merged
+    step --> other --> merged
+    step --> kept --> merged
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class removed,guard,update,step,page bot
+    class entry,other,kept you
+    class merged done

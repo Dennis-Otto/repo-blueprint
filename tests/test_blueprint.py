@@ -34,6 +34,7 @@ from blueprint.checklist import (
     bot_tools_allowed,
     change_answer,
     checklist,
+    moved_step,
     release_app_name,
     renovate,
     reuse_compliant,
@@ -5186,6 +5187,32 @@ def test_without_its_dependency_review_a_repository_lacks_every_tool(
     assert step.how.startswith(
         "Add pkg:pypi/jinja2-ansible-filters, pkg:pypi/typing-extensions,"
         " pkg:pypi/wcwidth under"
+    )
+
+
+def test_the_checklist_names_a_line_that_names_a_removed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A line that the fix bot doesn't change fails no check, so the checklist keeps
+    # it open until a person changes it or keeps it (decision 1051).
+    review = ".github/workflows/dependency-review.yml"
+    monkeypatch.setattr(
+        "blueprint.migrate.MOVED", {review: ".github/workflows/quick-checks.yml"}
+    )
+    owned = tmp_path / ".github/blueprint/owned.txt"
+    owned.parent.mkdir(parents=True)
+    owned.write_text(".github/blueprint/owned.txt\n", encoding="utf-8")
+    assert moved_step(tmp_path) == []
+    (tmp_path / ".github/dependency-review.yml").write_text(
+        f"# Rules of the review ({review}).\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text(f"See {review}.\n", encoding="utf-8")
+    [step] = moved_step(tmp_path)
+    assert step.done is False
+    assert step.how == (
+        f".github/dependency-review.yml:1: names {review}, which a release of the "
+        "blueprint removed: .github/workflows/quick-checks.yml takes its place\n"
+        "Change each line, or keep it with `blueprint: keep` in a comment."
     )
 
 

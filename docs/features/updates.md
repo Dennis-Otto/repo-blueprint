@@ -77,6 +77,15 @@ The first such move takes the labels `good first issue` and `help wanted` to the
 
 A step that the bot may not commit unread, such as a license that `.github/dependency-review.yml` allows for a tool of the blueprint bot, is a line of the checklist instead: `python3 .github/blueprint.py checklist` names what the file lacks and how to add it, in a pull request that a person reads ([decision 0143](../decisions/0143-a-step-that-the-changelog-asks-of-an-existing-repository-is-a-migration-a-line-of-the-checklist-or-a-note.md)).
 
+### When a release removes a file of the blueprint
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-release-removes-a-file-of-the-blueprint.dark.svg">
+  <img src="../images/diagrams/a-release-removes-a-file-of-the-blueprint.svg" alt="How a release that removes a file of the blueprint reaches the project's own lines: A pull request of the blueprint removes a file of the blueprint. The job update of the Variants workflow fails it until MOVED of blueprint/migrate.py names the file and the one that takes its place. After the release, the update deletes the file, and the step Files of the project finds each line of the project that still names it. A page of Markdown is changed by migrate --fix, which the fix bot commits onto the update. Any other line is a warning and a step of the checklist for you, and a line with blueprint: keep in a comment stays as it is. Then the update merges itself.">
+</picture>
+
+The update deletes a file that a release of the blueprint removed or renamed, such as the workflows *Secret scan* and *Dependency review*, which *Quick checks* replaced in release 1.22.0, but a file of the project can still name it: the badge of the workflow in the README, a link of a page, a comment. `MOVED` of `blueprint/migrate.py` lists each such file with the one that takes its place, and the step *Files of the project* looks for its path and, for a workflow, for the address of its page and its badge in the files of the project that Git tracks. A page of Markdown outside `.github/` fails the step until `migrate --fix` changes only the path or the name of the workflow, which the fix bot commits onto the update; the words of the line stay the project's. Every other line, such as a comment of `.github/dependency-review.yml`, a workflow or a script, is a warning and a step of the checklist, and fails nothing. A link to a tag, a commit or another repository stays, so does a path whose file the project has, and the history in `CHANGELOG.md`, `changelog.d/` and `docs/decisions/` is never searched; a line that keeps the old name on purpose says `blueprint: keep` in a comment. The job `update (kind)` of the Variants workflow fails a pull request of the blueprint whose update removes a file without its entry, and Downstream lists the lines of each repository before the release ([decision 1051](../decisions/1051-a-release-that-removes-a-file-of-the-blueprint-names-it-in-moved.md)).
+
 ### The issue assistant
 
 <picture>

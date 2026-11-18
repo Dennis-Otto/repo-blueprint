@@ -275,8 +275,14 @@ jobs:
           git -C "$PROJECT" add --all
           git -C "$PROJECT" -c user.name=Variants -c user.email=variants@users.noreply.github.com \
             commit --quiet --message "chore: start from the blueprint $latest"
+          # The files of the blueprint that the latest release gives this kind.
+          git -C "$PROJECT" show HEAD:.github/blueprint/owned.txt > "$RUNNER_TEMP/owned.txt"
           # As the blueprint bot does it, without --trust: updating runs no code of the blueprint.
           (cd "$PROJECT" && copier update --defaults --conflict inline --vcs-ref "$commit")
+          # Each file of the blueprint that the update removes needs its entry in MOVED
+          # of blueprint/migrate.py, which finds the lines of a project that still name
+          # it (decision 1051).
+          (cd "$PROJECT" && python3 .github/blueprint.py migrate --since "$RUNNER_TEMP/owned.txt")
           # What the fix bot commits onto the pull request of an update: what a release
           # moves in the files of the project, which the step of scripts/check.sh checks.
           (cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)

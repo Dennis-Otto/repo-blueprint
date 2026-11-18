@@ -6,7 +6,7 @@ Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and project deci
 Use [SUPPORT.md](SUPPORT.md) to choose the correct public support channel and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 All changes reach the protected `main` branch through pull requests that pass every required check.
-Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with the files that belong to the blueprint and are changed there. A pull request that changes one of those, as `.github/blueprint/owned.txt` lists them, gets a notice that says where the change belongs instead.
+Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with the files that belong to the blueprint and are changed there. A pull request that changes one of those, as `.github/blueprint/owned.txt` lists them, gets a notice that says where the change belongs instead. When a release of the blueprint removes one of them, the step *Files of the project* of `scripts/check.sh` names each line of this project that still names it: `python3 .github/blueprint.py migrate --fix` points a page of Markdown at the file that took its place, and a line that keeps the old name on purpose says `blueprint: keep` in a comment.
 
 ## Requirements for changes
 

@@ -1086,19 +1086,25 @@ problem = """A file that belongs to this project, which an update of the bluepri
 as it is, lacks what a release of the blueprint moved, such as the labels `good first
 issue` and `help wanted` in the group `contribution` of `.github/labels.toml`, or the
 hosts and files that the project added to `.github/issue-assistant/config.toml`, which
-go to `.github/issue-assistant/config.project.toml`; the log names each file and what
-moves."""
+go to `.github/issue-assistant/config.project.toml`, or a page of Markdown that still
+names a file that a release removed, such as the badge of a workflow that another one
+replaced; the log names each file and what moves. A line that names a removed file
+outside a page, such as a comment under `.github/`, is a warning and fails nothing."""
 why = """The files of the blueprint in the update count on that move, and an update never
 overwrites a file of the project. Without it the repository stays behind every new one,
-and a feature of the release stays off without a word."""
+a feature of the release stays off without a word, and a page that names a removed file
+shows a broken badge or a link that leads nowhere."""
 fix = """Move it with the command, then commit what changed (in the blueprint itself, the
 tool is `blueprint.py` without `.github/`). A project that declines the move of a label
-writes a comment behind its line `group = "decision"`:"""
+writes a comment behind its line `group = "decision"`, and a line that keeps the name of
+a removed file, such as one about the history of the project, says `blueprint: keep`
+in a comment:"""
 commands = ["python3 .github/blueprint.py migrate --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#a-release-moves-a-file-of-the-project"
 autofix = ["{blueprint} migrate --fix"]
-# MOVABLE of blueprint/migrate.py.
+# MOVABLE and PAGES of blueprint/migrate.py.
 writes = [
+  "**/*.md",
   ".github/issue-assistant/config.project.toml",
   ".github/issue-assistant/config.toml",
   ".github/labels.toml",

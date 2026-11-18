@@ -270,6 +270,32 @@ def test_an_update_without_a_conflict_passes(
     assert "- `.copier-answers.yml` (M)\n- `README.md` (M)\n" in run.summary
 
 
+def test_the_lines_that_name_a_removed_file_show_before_the_release(
+    blueprint: Path,
+    remote: Path,
+    run: Run,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The author of the pull request sees the lines of each repository that migrate
+    # finds once the update has removed a file, not only after the release.
+    old = ".github/workflows/old.yml"
+    monkeypatch.setattr(downstream, "REMOVED", {old: ".github/workflows/ci.yml"})
+    commit(remote / "Dennis-Otto" / "demo", {"docs/automation.md": f"See {old}.\n"})
+    owned = {"template/.github/blueprint/owned.txt": ".github/workflows/ci.yml\n"}
+    head = commit(blueprint, owned)
+
+    assert run("--head", head) == 0
+    line = (
+        f"docs/automation.md:1: names {old}, which a release of the blueprint "
+        "removed: .github/workflows/ci.yml takes its place"
+    )
+    out = capsys.readouterr().out
+    warning = "::warning title=A removed file in Dennis-Otto/demo::Dennis-Otto/demo"
+    assert f"{warning}: {line}" in out
+    assert f"finds in the update:\n\n- {line}\n" in run.summary
+
+
 def test_answers_that_differ_from_those_of_the_repository_warn(
     blueprint: Path, run: Run, capsys: pytest.CaptureFixture[str]
 ) -> None:

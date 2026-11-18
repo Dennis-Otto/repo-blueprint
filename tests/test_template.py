@@ -77,6 +77,7 @@ import reference
 from blueprint import (
     bootstrap,
     branches,
+    cli,
     diagrams,
     ownership,
     screenshots,
@@ -125,10 +126,13 @@ from blueprint.migrate import (
     ISSUE_ASSISTANT_PROJECT_TEXT,
     LINK_HOSTS,
     MIGRATIONS,
+    MOVED,
+    MOVED_NEXT,
     NEXT,
     NO_BOT_FIXES_LABEL,
     contribution_labels,
     migrate,
+    moved_lines,
     no_bot_fixes_label,
 )
 from blueprint.mutation import NOTHING_MATCHES, default_paths
@@ -10321,6 +10325,77 @@ def test_the_update_of_every_kind_finishes_as_the_fix_bot_does() -> None:
     )
     move = script.index('(cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)')
     assert update < move < script.index('git -C "$PROJECT" add --all', update)
+    # The guard against a release that removes a file of the blueprint without its
+    # entry in MOVED compares the owned.txt of the latest release with the update.
+    owned = script.index(
+        'git -C "$PROJECT" show HEAD:.github/blueprint/owned.txt > "$RUNNER_TEMP/owned.txt"'
+    )
+    guard = script.index(
+        '(cd "$PROJECT" && python3 .github/blueprint.py migrate --since '
+        '"$RUNNER_TEMP/owned.txt")'
+    )
+    assert owned < update < guard < move
+
+
+def template_paths() -> set[str]:
+    """The files that owned.txt lists for some kind of project, without conditions."""
+    text = (ROOT / "template/.github/blueprint/owned.txt.jinja").read_text(
+        encoding="utf-8"
+    )
+    return {
+        line for line in text.splitlines() if line and not line.startswith(("#", "[%"))
+    }
+
+
+def test_each_removed_file_is_gone_and_its_successor_is_there() -> None:
+    # A file of MOVED is one that no release brings any more, and the file that took
+    # its place is one that a repository gets.
+    removed = {**MOVED, **MOVED_NEXT}
+    assert removed
+    paths = template_paths()
+    for old, new in removed.items():
+        assert old not in paths, old
+        assert new is None or new in paths, new
+
+
+def test_a_new_repository_names_no_removed_file(projects: dict[str, Path]) -> None:
+    for kind in KINDS:
+        assert not moved_lines(projects[kind], {**MOVED, **MOVED_NEXT}), kind
+
+
+def test_the_update_points_the_badge_of_a_removed_workflow_at_its_successor(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # As five repositories had their READMEs after release 1.22.0: the badge of Secret
+    # scan, which Quick checks replaced. Once MOVED has the entries, the step Files of
+    # the project fails on the update and the fix bot commits migrate --fix onto it.
+    monkeypatch.setattr("blueprint.migrate.MOVED", MOVED_NEXT)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    project = shutil.copytree(projects["generic"], tmp_path / "generic")
+    address = f"https://github.com/{OWNER}/demo-project/actions/workflows"
+    badge = (
+        f"[![Secret scan]({address}/secret-scan.yml/badge.svg)]"
+        f"({address}/secret-scan.yml)"
+    )
+    readme = project / "README.md"
+    readme.write_text(f"{readme.read_text(encoding='utf-8')}\n{badge}\n", "utf-8")
+    review = project / ".github/dependency-review.yml"
+    review.write_text(
+        "# Rules of the dependency review (.github/workflows/dependency-review.yml).\n"
+        + review.read_text(encoding="utf-8"),
+        "utf-8",
+    )
+    assert cli.main(["migrate"], root=project) == 1
+    assert cli.main(["migrate", "--fix"], root=project) == 0
+    assert badge.replace("secret-scan", "quick-checks") in readme.read_text("utf-8")
+    assert (project / ".github/workflows/quick-checks.yml").is_file()
+    # The comment of the project's own configuration stays with a person, and fails
+    # nothing.
+    assert cli.main(["migrate"], root=project) == 0
+    assert ".github/dependency-review.yml:1: names" in capsys.readouterr().out
 
 
 def test_the_check_moves_what_a_release_moves() -> None:
