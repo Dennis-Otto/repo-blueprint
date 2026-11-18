@@ -1,3 +1,0 @@
-### Features
-
-- The flaky-test bot no longer runs a job of the tests again that failed in a step of `scripts/check.sh` that can't pass without a change, such as *Files of the project*, *Text files*, *Ruff* or *Psalm*: the second try would only fail the same way, keep a runner busy and make the branch bot wait for it. It reads the step from the annotation of the PR coach and, from the default branch, the new field `rerun` of that step in `.github/checks.toml`. Tests, downloads such as *Composer*, a job that ran out of time and one that Harden-Runner stopped still run once more, and a failure that stays now moves the line of the branch bot on at once. A step of your own in `.github/checks.project.toml` needs no change: without `rerun = false` it runs again as before.
