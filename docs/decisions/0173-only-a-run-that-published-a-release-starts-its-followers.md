@@ -1,6 +1,6 @@
 # Only a run that published a release starts its followers
 
-- Status: accepted
+- Status: accepted, amended by [0182](0182-only-the-release-starts-the-sweep-after-a-release.md), by which Issue lifecycle no longer follows the end of every run of Release
 - Date: 2026-11-17
 
 ## Context

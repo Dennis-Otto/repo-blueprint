@@ -60,7 +60,7 @@ Only a run of the release bot that published a release starts the bots that foll
 - **Issue lifecycle** closes the issues that the release fixes, with its link. A prerelease closes none, so it starts no sweep.
 - **Screenshots** renders the pictures of the new version, but not after a beta, and not where the repository has no `scripts/screenshots.sh`.
 - **A call that GitHub fails** three times is a warning, and the release stays green: the morning sweep of *Issue lifecycle* and the weekly run of *Screenshots* catch up.
-- **Twice for now:** until a release of the issue assistant lets the blueprint leave it out, *Issue lifecycle* also keeps its own start after every run of *Release*, so a release sweeps the issues twice, one sweep after the other, which does no harm.
+- **Once:** *Issue lifecycle* no longer follows the end of every run of *Release*. `config.toml` of the issue assistant sets `sweep_after_release_workflow = false` under `[releases]`, so its `install` writes `issue-lifecycle.yml` without that start, and a release sweeps the issues once ([decision 0182](../decisions/0182-only-the-release-starts-the-sweep-after-a-release.md)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-starts-after-a-release.dark.svg">
