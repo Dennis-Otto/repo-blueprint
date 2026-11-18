@@ -12,7 +12,9 @@ name: Links
 # fixed, and closes it then. lychee.toml holds the rules, .lycheeignore the exceptions
 # of this repository. The entry in the changelog that most pull requests bring, in
 # CHANGELOG.md or in a fragment of changelog.d/, starts no check on its own; the weekly
-# run checks the links of the changelog.
+# run checks the links of the changelog. The weekly run also compares the public entry on
+# bestpractices.dev with .bestpractices.json and keeps one issue with the links that take
+# in a changed answer (decision 1046).
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

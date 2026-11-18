@@ -1,6 +1,6 @@
 # The secret scan and the dependency review share one workflow, outside Lint
 
-- Status: accepted
+- Status: accepted, amended by [1046](1046-a-bot-notices-a-stale-entry-on-bestpractices-dev.md): the answers of `.bestpractices.json` link to the new file, and the entry on bestpractices.dev takes the new link only through the links of the weekly bot
 - Date: 2026-11-17
 
 ## Context

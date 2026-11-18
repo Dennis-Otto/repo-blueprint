@@ -3,6 +3,7 @@ with saved copies of real entries (decision 1046)."""
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import subprocess
@@ -385,8 +386,9 @@ def test_the_entry_is_read_once_without_a_login() -> None:
         urllib.error.URLError("no route"),
         b"<html>maintenance</html>",
         b"[]",
+        http.client.IncompleteRead(b""),
     ],
-    ids=["error", "unreachable", "no json", "no entry"],
+    ids=["error", "unreachable", "no json", "no entry", "cut off"],
 )
 def test_a_site_that_gives_no_entry_is_unreachable(answer: object) -> None:
     with pytest.raises(Unreachable, match=r"projects/7\.json"):

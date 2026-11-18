@@ -16,6 +16,7 @@ checks the highlighted fields and saves (decision 1046)."""
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -116,7 +117,8 @@ def read_entry(
     try:
         with send(request, timeout=30) as response:
             entry = json.load(response)
-    except (OSError, ValueError) as error:
+    # http.client.HTTPException: an answer that the site cuts off while it is read.
+    except (OSError, ValueError, http.client.HTTPException) as error:
         if isinstance(error, urllib.error.HTTPError):
             # The error is the answer too, and holds its body until it is closed.
             error.close()
