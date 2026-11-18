@@ -1,0 +1,3 @@
+### Bug fixes
+
+- A first analysis of the issue assistant that Harden-Runner stopped gets its second try: *Bot health* now takes a run of *Issue assistant* for an issue or a comment on one, when someone starts it with the run, and its nightly look runs the failed jobs once more of such a run of the last two days that Harden-Runner stopped and no one ran again. The second try posts the analysis that the first attempt kept, without running the AI engine again, and never a second comment after an answer by hand. A run by hand stays its maintainer's own. Until the issue assistant's caller starts *Bot health* by itself, which comes with a later release, that second try comes with the nightly look, a day late at the latest, instead of never.

@@ -90,6 +90,8 @@ from blueprint.bot_health import (
     CRON,
     EVENT_BOTS,
     FAILED,
+    ISSUE_BOTS,
+    ISSUE_EVENTS,
     LABEL,
     LABELS,
     LAST_JOB,
@@ -17820,8 +17822,10 @@ def test_the_bot_health_bot_watches_every_bot(
             assert name in watched | {"Bot health"} | LAST_JOB, name
     # Not the bots of events and the workflows that keep an issue of their own, such
     # as Diagrams, whose last job starts the bot when a job of theirs failed at the
-    # first attempt (decisions 0141 and 0176).
-    assert not watched & LAST_JOB
+    # first attempt (decisions 0141 and 0176). Nor the issue assistant, which runs
+    # hundreds of times a week: a stopped run of it gets its second try from a start
+    # by hand with the run, or from the nightly look.
+    assert not watched & (LAST_JOB | ISSUE_BOTS)
     # Not the checks of pull requests, each of whose runs would start a run of the
     # bot that skips: the daily look covers their runs on the default branch, and
     # the bot after the checks runs them again when Harden-Runner stopped them.
@@ -17903,12 +17907,16 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         condition,
     )
     assert left
-    assert set(json.loads(left[1])) == EVENT_BOTS | OWN_ISSUE
+    assert set(json.loads(left[1])) == EVENT_BOTS | OWN_ISSUE | ISSUE_BOTS
     # None of them runs on pull_request: such a run is a fork's workflow of that name,
     # which `bot-health stopped` leaves alone.
     named = names_of_workflows(ROOT)
-    for name in EVENT_BOTS | OWN_ISSUE:
+    for name in EVENT_BOTS | OWN_ISSUE | ISSUE_BOTS:
         assert "pull_request" not in triggers(named[name]), name
+    # The issue assistant runs for the events of an issue, whose runs alone get the
+    # second try, and by hand, whose runs are its maintainer's own.
+    for name in ISSUE_BOTS:
+        assert set(triggers(named[name])) == ISSUE_EVENTS | {"workflow_dispatch"}
     # Their last job starts it by hand with the run, which the job stopped takes.
     stopped = job_in(text, "stopped")
     taken = condition_of(stopped)

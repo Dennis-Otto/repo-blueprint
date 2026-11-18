@@ -24,6 +24,8 @@ from blueprint import branches, cli
 from blueprint.bot_health import (
     BLUEPRINT_BOT,
     EVENT_BOTS,
+    ISSUE_BOTS,
+    ISSUE_EVENTS,
     LABEL,
     LABEL_COLOR,
     LABEL_DESCRIPTION,
@@ -1420,6 +1422,63 @@ def test_the_workflows_with_a_last_job_are_the_bots_that_bot_health_runs_again()
     None
 ):
     assert LAST_JOB == EVENT_BOTS | OWN_ISSUE
+    # The issue assistant's caller has no last job yet, so it is no workflow of
+    # LAST_JOB, each of which carries one.
+    assert not ISSUE_BOTS & LAST_JOB
+    assert {"issues", "issue_comment"} == ISSUE_EVENTS
+
+
+def assistant_jobs(github: FakeGitHub, number: int) -> None:
+    """The jobs of a run of the issue assistant whose job that checks and posts the
+    analysis Harden-Runner stopped, after the analysis passed."""
+    github.jobs[(number, 1)] = [
+        job_of_a_run(number * 10 + 1, "assistant / Handle the event", "success"),
+        job_of_a_run(number * 10 + 2, "assistant / Analyze", "success"),
+        stopped_job(number * 10 + 3, "assistant / Check and post the analysis"),
+    ]
+    github.annotations[number * 10 + 3] = [STOPPED_JOB]
+
+
+@pytest.mark.parametrize("event", sorted(ISSUE_EVENTS))
+def test_a_first_answer_that_harden_runner_stopped_runs_again(
+    github: FakeGitHub, event: str
+) -> None:
+    # A start by hand with the run gives it the second try of a bot of events: only
+    # the failed job runs again, which posts the analysis that the job that passed
+    # kept, without the AI engine (#1052).
+    github.runs[1] = run_of(1, name="Issue assistant", event=event)
+    assistant_jobs(github, 1)
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result == (
+        "Issue assistant: Harden-Runner stopped a job of [the run of 2026-10-13 "
+        f"09:00 UTC](https://github.com/{REPO}/actions/runs/1), so its failed jobs "
+        "run once more."
+    )
+    assert done
+    # No issue of the bot: the second try posts the first answer.
+    assert writes(github) == [
+        ("POST", f"repos/{REPO}/actions/runs/1/rerun-failed-jobs")
+    ]
+
+
+@pytest.mark.parametrize("event", ["workflow_dispatch", "pull_request", "schedule"])
+def test_a_run_of_the_issue_assistant_for_no_event_of_an_issue_stays_as_it_is(
+    github: FakeGitHub, event: str
+) -> None:
+    # A run by hand is its maintainer's own, whose first job would check the role of
+    # whoever ran it again; the issue assistant runs neither for a pull request nor
+    # on a schedule, so such a run is a fork's workflow that only took the name.
+    github.runs[1] = run_of(1, name="Issue assistant", event=event)
+    assistant_jobs(github, 1)
+
+    assert watch_stop(api_of(github), REPO, 1) == (
+        "Issue assistant: runs once more for an event of an issue only, not for "
+        f"{event}, nothing to do.",
+        True,
+    )
+    assert writes(github) == []
 
 
 def bot_run(
@@ -1504,6 +1563,56 @@ def test_the_daily_look_runs_a_bot_again_whose_last_job_did_not_start_bot_health
         "- `Dependabot maintenance`: Harden-Runner stopped a job of [the run of "
         f"2026-10-13 09:00 UTC](https://github.com/{REPO}/actions/runs/16), so its "
         "failed jobs run once more.",
+    ]
+
+
+def assistant_run(
+    number: int, *, event: str = "issues", conclusion: str = "failure"
+) -> dict[str, Any]:
+    """A run of the issue assistant on the default branch, as every run of it is."""
+    return run_of(
+        number,
+        name="Issue assistant",
+        path=".github/workflows/w6.yml",
+        event=event,
+        conclusion=conclusion,
+        workflow=6,
+    )
+
+
+def test_the_daily_look_gives_a_first_answer_that_harden_runner_stopped_its_second_try(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Nothing starts Bot health for a run of the issue assistant yet, so the daily look
+    # gives it its second try, a day late at the latest (#1052).
+    github.workflows = [workflow(6, "Issue assistant")]
+    for number in (63, 62, 61):
+        assistant_jobs(github, number)
+    github.workflow_runs[6] = [
+        assistant_run(63, event="issue_comment"),
+        # A run by hand is its maintainer's own.
+        assistant_run(62, event="workflow_dispatch"),
+        assistant_run(61),
+        assistant_run(60, conclusion="success"),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == [63, 61]
+    # The look at the workflow passes over the runs that run once more, so it opens
+    # no issue that their second try would close again; the run by hand that failed
+    # gets its issue as before.
+    [issue] = github.issues.values()
+    assert "actions/runs/62" in issue["body"]
+    assert "actions/runs/63" not in issue["body"]
+    assert summary.splitlines()[-2:] == [
+        "- `Issue assistant`: Harden-Runner stopped a job of [the run of 2026-10-13 "
+        f"09:00 UTC](https://github.com/{REPO}/actions/runs/63), so its failed jobs "
+        "run once more.",
+        "- `Issue assistant`: Harden-Runner stopped a job of [the run of 2026-10-13 "
+        f"09:00 UTC](https://github.com/{REPO}/actions/runs/61), so its failed jobs "
+        "run once more.",
     ]
 
 
@@ -2181,7 +2290,7 @@ def test_the_names_of_the_workflows_exist() -> None:
         for path in (ROOT / ".github/workflows").glob("*.yml")
         if (match := re.search(r"^name: (.+)$", path.read_text("utf-8"), re.M))
     }
-    assert names >= ONE_TRY | OWN_ISSUE | EVENT_BOTS
+    assert names >= ONE_TRY | OWN_ISSUE | EVENT_BOTS | ISSUE_BOTS
     # Each keeps an issue of its own, and a second one would repeat it.
     assert {"Diagrams", "Newest Node", "Newest Python", "Next runner"} <= OWN_ISSUE
     # A workflow is one or the other, and the bot gives a second try to either only
