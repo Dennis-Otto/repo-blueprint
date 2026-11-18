@@ -27,6 +27,7 @@ from blueprint import cli
 from blueprint.checklist import (
     APP_NAME_LIMIT,
     BOT_TOOLS,
+    NO_RELEASE_APP,
     RELEASE_APP_PERMISSIONS,
     Step,
     best_practices,
@@ -3628,6 +3629,95 @@ def test_a_repository_without_the_release_app_says_so(
     # Nor does the environment release ask for the private key of an app.
     assert github.environments["release"]["secrets"] == []
     assert "differ" not in capsys.readouterr().out
+
+
+MEND_INSTALL = "https://github.com/apps/renovate/installations/new"
+
+# The release variables of a repository that has no release app, by choice.
+NO_APP = (
+    '[variables]\nRELEASE_APP = ""\nRELEASE_AUTOMATION_CLIENT_ID = ""\n'
+    'RELEASE_AUTOMATION_APP_ID = ""\n'
+)
+
+
+def test_the_checklist_of_a_repository_without_the_release_app_asks_for_none(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_app_id(root)
+    (root / ".github/repository.project.toml").write_text(NO_APP, encoding="utf-8")
+    github.installed = set()
+    assert run(github, root, "settings", "apply") == 0
+    settings = Settings.load(root / ".github/repository.toml")
+
+    steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
+
+    # Done by its own choice: nothing to register, and nothing to install.
+    assert steps[0] == Step(NO_RELEASE_APP, True)
+    assert not [step for step in steps if step.text.startswith("Release app")]
+    capsys.readouterr()
+    run(github, root, "checklist")
+    out = capsys.readouterr().out
+    assert f"  ✔ {NO_RELEASE_APP}\n" in out
+    assert "app register" not in out
+    assert "/installations/new" not in out.replace(MEND_INSTALL, "")
+    # Renovate, which would run as the release app, is left to the Mend Renovate app.
+    (step,) = [step for step in steps if step.text.startswith("Renovate runs")]
+    assert step.how.count("release app") == 1
+    assert "once the app is installed" not in step.how
+    assert MEND_INSTALL in step.how
+    assert "--data renovate_runner=mend" in step.how
+
+
+@pytest.mark.parametrize(
+    ("failure", "said"),
+    [
+        (
+            (403, "API rate limit exceeded for user ID 1."),
+            "GitHub answered 403: API rate limit exceeded for user ID 1.; that is the"
+            " rate limit of GitHub; the next run tries again",
+        ),
+        (502, "GitHub answered 502: simulated failure"),
+    ],
+)
+def test_a_stop_of_github_still_tells_the_rulesets_that_it_refused(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    waits: list[float],
+    failure: int | tuple[int, str],
+    said: str,
+) -> None:
+    with_reviews(root, "required_approvals = 1")
+    run(github, root, "settings", "apply")
+    (number,) = [
+        key
+        for key, ruleset in github.rulesets.items()
+        if ruleset["name"] == "Reviews of main"
+    ]
+    # The ruleset Release tag creation, which names an app that isn't installed, is
+    # refused; GitHub stops answering at the deletion of Reviews of main after it.
+    with_app_id(root)
+    with_reviews(root, "required_approvals = 0")
+    github.installed = set()
+    github.fail[("DELETE", f"repos/{REPO}/rulesets/{number}")] = failure
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 2
+
+    err = capsys.readouterr().err
+    assert "GitHub refused some of the rulesets before it stopped answering:\n" in err
+    assert (
+        "  ruleset Release tag creation: refused: GitHub answered 422: Validation"
+        " Failed (Actor Dennis Otto Release Automation integration must be part of"
+        f" the ruleset source or owner organization); {ACTOR_HINT}\n"
+    ) in err
+    assert (
+        f"  ruleset Reviews of main: stopped: {said}; nothing after it was sent\n"
+    ) in err
+    # What GitHub has after the stop is unknown: the variable of the reviews stays,
+    # and the next run deletes the ruleset and sets the variable.
+    assert "Reviews of main" in ruleset_names(github)
+    assert github.variables["REVIEWS_OF_MAIN"] == "on"
 
 
 def test_without_its_app_id_the_variable_goes_and_is_never_sent_empty(
