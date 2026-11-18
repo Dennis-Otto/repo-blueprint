@@ -1264,6 +1264,35 @@ def dependabot_command(
     return 0
 
 
+def release_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
+    """Whether the release pull request merges itself in this run of the release bot,
+    into the file of the step, with the notice of the daily release (decision 0180)."""
+    workflow = root / ".github/workflows/release.yml"
+    time = schedule_time(
+        workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
+    )
+    verdict = dependency_release(
+        api,
+        repo,
+        arguments.event,
+        arguments.merge,
+        actor=arguments.actor,
+        time=time,
+    )
+    Path(arguments.output).write_text(
+        f"merge={'true' if verdict.merge else 'false'}\n", encoding="utf-8"
+    )
+    if arguments.notice:
+        daily = arguments.merge.strip() == DAILY
+        Path(arguments.notice).write_text(
+            f"{release_notice(time)}\n" if daily else "", encoding="utf-8"
+        )
+    print(verdict.text)
+    return 0
+
+
 def ending_command(
     api: Api, repo: str, arguments: argparse.Namespace, root: Path
 ) -> int:
@@ -3353,28 +3382,7 @@ def main(
             print(write_overrides(api, repo), end="")
             return 0
         if arguments.command == "release":
-            workflow = root / ".github/workflows/release.yml"
-            time = schedule_time(
-                workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
-            )
-            verdict = dependency_release(
-                api,
-                repo,
-                arguments.event,
-                arguments.merge,
-                actor=arguments.actor,
-                time=time,
-            )
-            Path(arguments.output).write_text(
-                f"merge={'true' if verdict.merge else 'false'}\n", encoding="utf-8"
-            )
-            if arguments.notice:
-                daily = arguments.merge.strip() == DAILY
-                Path(arguments.notice).write_text(
-                    f"{release_notice(time)}\n" if daily else "", encoding="utf-8"
-                )
-            print(verdict.text)
-            return 0
+            return release_command(api, repo, arguments, root)
         if arguments.command == "workflows":
             print(register_workflows(api, repo))
             return 0
