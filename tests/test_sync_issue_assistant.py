@@ -143,8 +143,7 @@ for name in os.environ.get("WRITE", "").split():
     (root / name).parent.mkdir(parents=True, exist_ok=True)
     (root / name).write_text("new\\n", encoding="utf-8", newline="\\n")
 for name in os.environ.get("DELETE", "").split():
-    (root / name).unlink()
-"""
+    (root / name).unlink()\n"""
 
 
 def git_in(root: Path, *arguments: str) -> str:
@@ -256,6 +255,68 @@ def test_adopt_takes_the_release_over(
     assert "wrote .github/workflows/triage.yml\n" in capsys.readouterr().err
 
 
+def reusable(ref: str, version: str) -> str:
+    return (
+        "Dennis-Otto/issue-assistant/.github/workflows/reusable-findings.yml"
+        f"@{ref} # {version}"
+    )
+
+
+# A workflow outside the templates whose job calls a reusable workflow of the release,
+# as After the checks dismisses the accepted alerts of a pull request, next to a step
+# with the action.
+AFTER_CHECKS = (
+    "name: After the checks\n"
+    "on: workflow_run\n"
+    "jobs:\n"
+    "  findings:\n"
+    f"    uses: {reusable(OLD, 'v1.2.2')}\n"
+    "  coach:\n"
+    "    runs-on: ubuntu-24.04\n"
+    "    steps:\n"
+    f"      - uses: {pin(OLD, 'v1.2.2')}\n"
+)
+
+
+@needs_git
+def test_adopt_moves_the_pin_of_a_reusable_workflow_outside_the_templates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = blueprint(
+        tmp_path / "blueprint",
+        {**BLUEPRINT, ".github/workflows/after-checks.yml": AFTER_CHECKS},
+    )
+    out = tmp_path / "out"
+
+    sync.keep(root, out, sync.adopt(root, release(tmp_path / "release"), NEW, "v1.3.1"))
+
+    # The pin keeps the reusable workflow that it calls and names the release, as
+    # the pin of the step in the same workflow does, so the blueprint pins one.
+    assert text(root, ".github/workflows/after-checks.yml") == AFTER_CHECKS.replace(
+        reusable(OLD, "v1.2.2"), reusable(NEW, "v1.3.1")
+    ).replace(pin(OLD, "v1.2.2"), pin(NEW, "v1.3.1"))
+    assert sync.pinned(root) == [f"{NEW} v1.3.1"]
+    # The description says that only the pins moved.
+    git_in(root, "checkout", "--quiet", "--", ".")
+    monkeypatch.chdir(root)
+    capsys.readouterr()
+    assert sync.main(["report", str(out), "--version", "v1.3.1", "--url", URL]) == 0
+    assert (
+        "- `.github/workflows/after-checks.yml`: every pin of the action moves to the"
+        " release\n"
+    ) in capsys.readouterr().out
+
+
+@needs_git
+def test_pinned_names_the_release_of_a_reusable_workflow(tmp_path: Path) -> None:
+    root = written(
+        tmp_path,
+        {".github/workflows/after-checks.yml": f"uses: {reusable(NEW, 'v1.3.1')}\n"},
+    )
+
+    assert sync.pinned(root) == [f"{NEW} v1.3.1"]
+
+
 @needs_git
 def test_adopt_starts_a_release_that_is_a_package(
     tmp_path: Path,
@@ -322,8 +383,7 @@ owned.write_text(
     "".join(f".github/workflows/{name}\\n" for name in names),
     encoding="utf-8",
     newline="\\n",
-)
-"""
+)\n"""
 
 
 @needs_git
@@ -760,14 +820,19 @@ def test_pinned_prints_each_release(
 
 
 def test_the_blueprint_pins_one_release_of_the_issue_assistant() -> None:
-    # The workflows of the issue assistant and the check in the Lint workflow, all of
-    # them at the same release, which the sync moves together.
+    # The workflows of the issue assistant, the check in the Lint workflow and the
+    # dismissal in After the checks, all of them at the same release, which the sync
+    # moves together.
     pins = sync.pinned(ROOT)
     assert len(pins) == 1
     for name in ("issue-assistant", "issue-lifecycle", "labels", "findings", "lint"):
         assert pins[0].replace(" ", " # ") in text(
             ROOT, f".github/workflows/{name}.yml"
         )
+    # After the checks calls the reusable workflow of Findings at the same pin, for
+    # the scans of pull requests, and the sync moves it with the others.
+    ref, version = pins[0].split(" ")
+    assert reusable(ref, version) in text(ROOT, ".github/workflows/after-checks.yml")
 
 
 # In the copy of the mutation tests, the script that the test copies is the code with
@@ -1397,8 +1462,7 @@ if [[ "$1" == -C && "$3" == checkout ]]; then
   cp -R "$RELEASE/." "$2/"
   exit 0
 fi
-exec "$REAL_GIT" "$@"
-"""
+exec "$REAL_GIT" "$@"\n"""
 
 
 def install(tmp_path: Path, **variables: str) -> StepResult:
