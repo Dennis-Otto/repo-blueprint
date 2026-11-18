@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from blueprint import workflows
+from blueprint.best_practices import BADGE, SAVE, TITLE
+from blueprint.best_practices import SITE as BEST_PRACTICES
 from blueprint.bootstrap import PUSH_AS_GH, SIGNING
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
@@ -63,12 +65,6 @@ RELEASE_APP_DESCRIPTION = (
     " Blueprint, so that their checks run, and runs their bots."
 )
 REUSE_API = "https://api.reuse.software/status/github.com/"
-BEST_PRACTICES = "https://www.bestpractices.dev"
-# A badge of OpenSSF Best Practices in a README: of the metal series, "badge", or of
-# the OSPS Baseline, "baseline", with the number of the project.
-BADGE = re.compile(r"bestpractices\.dev/projects/(\d+)/(badge|baseline)")
-# The button of each form of bestpractices.dev that reads .bestpractices.json anew.
-SAVE = "Save (and continue) 🤖"
 
 
 @dataclass(frozen=True)
@@ -151,13 +147,18 @@ def social_preview_uploaded(
 
 def best_practices(readme: str) -> list[Step]:
     """The badges of OpenSSF Best Practices and of the OSPS Baseline in the README.
-    The form of each level proposes the answers of .bestpractices.json, and a project
-    that shows one badge has its number for the other."""
+    The form of each level proposes the answers of .bestpractices.json for the
+    questions that are still open, and a project that shows one badge has its number
+    for the other. A changed answer of the file reaches an answered question only
+    through the links of the issue that the weekly run of Links keeps."""
     badges = {series: number for number, series in BADGE.findall(readme)}
     number = badges.get("badge") or badges.get("baseline")
     take = (
         f"On each level, press '{SAVE}' to take in the answers that"
-        " .bestpractices.json proposes, and answer the rest."
+        " .bestpractices.json proposes for the questions still open, and answer the"
+        " rest. Save never replaces an answer that the entry gives: once the README"
+        " shows a badge, the weekly run of Links opens the issue"
+        f" '{TITLE}' when an answer of the file changes, with the links that take it in."
     )
     steps: list[Step] = []
     for series, name, level in (

@@ -5401,7 +5401,11 @@ def test_one_badge_of_openssf_best_practices_leads_to_the_other(
     assert missing.how.splitlines() == [
         edit,
         "On each level, press 'Save (and continue) 🤖' to take in the answers that"
-        " .bestpractices.json proposes, and answer the rest.",
+        " .bestpractices.json proposes for the questions still open, and answer the"
+        " rest. Save never replaces an answer that the entry gives: once the README"
+        " shows a badge, the weekly run of Links opens the issue 'The answers on"
+        " bestpractices.dev differ from .bestpractices.json' when an answer of the"
+        " file changes, with the links that take it in.",
         f"Then add its badge to the README: {badge}",
     ]
 

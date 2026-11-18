@@ -6554,11 +6554,17 @@ def test_every_link_to_a_heading_of_the_blueprint_finds_it() -> None:
     # in a file of the blueprint or of the template, such as the one at the top of
     # every .github/repository.toml, leads to that heading: GitHub drops an anchor
     # that it doesn't know without a word, and the link check reads no comment of a
-    # TOML file. The released sections of the changelog stay as they were.
+    # TOML file. The released sections of the changelog stay as they were, and so do
+    # the saved copies of the entries on bestpractices.dev, whose stale answers the
+    # tests of its bot need.
     links: dict[tuple[str, str], str] = {}
     for name in files_of(ROOT):
         data = (ROOT / name).read_bytes()
-        if name == "CHANGELOG.md" or b"Dennis-Otto/repo-blueprint" not in data:
+        if (
+            name == "CHANGELOG.md"
+            or name.startswith("tests/data/bestpractices/")
+            or b"Dennis-Otto/repo-blueprint" not in data
+        ):
             continue
         for link in BLUEPRINT_ANCHOR.finditer(data.decode("utf-8")):
             links.setdefault((link["path"] or "README.md", link["anchor"]), name)
@@ -10507,7 +10513,7 @@ def test_a_designated_successor_continues_the_project(tmp_path: Path) -> None:
 # The criteria of OpenSSF Best Practices, of its levels passing, silver and gold and
 # of the OSPS Baseline, as bestpractices.dev knows them; the file names their source.
 BEST_PRACTICES: dict[str, dict[str, Any]] = json.loads(
-    (ROOT / "tests/data/bestpractices-criteria.json").read_text(encoding="utf-8")
+    (ROOT / "blueprint/bestpractices-criteria.json").read_text(encoding="utf-8")
 )["criteria"]
 # What only a project knows, of its software or of its people, and no file of the
 # blueprint can promise: .bestpractices.json leaves it out, so that bestpractices.dev
@@ -10932,6 +10938,55 @@ def test_the_blueprint_proposes_its_own_answers_of_openssf_best_practices() -> N
     criteria = proposed_criteria(ROOT, "Dennis-Otto/repo-blueprint")
 
     assert criteria >= GUARANTEED | {"sites_https", "access_continuity", "test"}
+
+
+# It runs the copy of blueprint.py in a rendered project, which the mutation tests don't
+# change.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_weekly_run_of_links_compares_the_entry_on_bestpractices_dev(
+    projects: dict[str, Path], project: str
+) -> None:
+    # bestpractices.dev never replaces an answer that its entry gives, so a job of the
+    # weekly run of Links reads the public entry and keeps the issue with the links
+    # that take in a changed answer of .bestpractices.json (decision 1046).
+    root = ROOT if project == "blueprint" else projects[project]
+    job = job_in(workflows(root)["links.yml"], "best-practices")
+    assert job["if"] == (
+        "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    )
+    # It reads the entry and the issues, writes only the issue and needs no secret.
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert "secrets." not in str(job)
+    (hardening,) = steps_using(job, "step-security/harden-runner")
+    assert hardening["with"]["egress-policy"] == "block"
+    assert hardening["with"]["allowed-endpoints"].split() == [
+        "api.github.com:443",
+        "github.com:443",
+        "www.bestpractices.dev:443",
+    ]
+    script = script_of(
+        job, "Compare the entry on bestpractices.dev with .bestpractices.json"
+    )
+    assert 'python3 "$script" --repo "$GITHUB_REPOSITORY" best-practices' in script
+    if project == "blueprint":
+        return
+    # Every repository has the criteria of each level, which the bot reads.
+    assert (root / ".github/blueprint/bestpractices-criteria.json").read_bytes() == (
+        ROOT / "blueprint/bestpractices-criteria.json"
+    ).read_bytes()
+    # A new repository shows no badge yet: its own copy of the bot asks nothing.
+    done = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "--repo", "o/r", "best-practices"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    assert done.stdout.splitlines()[-1] == (
+        "The README shows no badge of bestpractices.dev: nothing to compare."
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)

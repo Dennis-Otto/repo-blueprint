@@ -1,0 +1,622 @@
+"""The bot that compares the public entry on bestpractices.dev with .bestpractices.json,
+with saved copies of real entries (decision 1046)."""
+
+from __future__ import annotations
+
+import http.client
+import io
+import json
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Sequence
+from email.message import Message
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from blueprint import best_practices
+from blueprint.best_practices import (
+    BODY_LIMIT,
+    LABELS,
+    LIMIT,
+    MARKER,
+    SITE,
+    TITLE,
+    Difference,
+    Unreachable,
+    body,
+    criteria_levels,
+    differences,
+    edit_links,
+    entry_field,
+    gone_files,
+    keep_issue,
+    project_number,
+    read_entry,
+)
+from blueprint.cli import main
+from blueprint.github import Api, Json
+
+ROOT = Path(__file__).resolve().parent.parent
+# Copies of the public entries of two projects, as https://www.bestpractices.dev/
+# projects/<number>.json gave them on 2026-11-18 without a login, with only the id,
+# the name, the repository and the answers, and the .bestpractices.json of each
+# repository on main that day.
+DATA = ROOT / "tests/data/bestpractices"
+BLUEPRINT = "Dennis-Otto/repo-blueprint"
+PAGER = "Dennis-Otto/repo-pager"
+README = (
+    "# Demo\n\n[![OpenSSF Best Practices]"
+    "(https://www.bestpractices.dev/projects/15284/badge)]"
+    "(https://www.bestpractices.dev/projects/15284)\n"
+)
+LEVELS = criteria_levels()
+
+
+def saved(name: str) -> dict[str, Json]:
+    loaded: dict[str, Json] = json.loads(
+        (DATA / f"{name}.json").read_text(encoding="utf-8")
+    )
+    return loaded
+
+
+def query(url: str) -> dict[str, str]:
+    """The fields that a link proposes, each once."""
+    pairs = urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)
+    names = [name for name, _ in pairs]
+    assert len(names) == len(set(names)), url
+    return dict(pairs)
+
+
+def test_a_field_of_the_baseline_has_another_name_in_the_entry() -> None:
+    assert entry_field("osps_br_07_01_justification") == "OSPS-BR-07.01_justification"
+    assert entry_field("osps_ac_03_02_status") == "OSPS-AC-03.02_status"
+    assert entry_field("contribution_status") == "contribution_status"
+
+
+def test_the_number_comes_from_a_badge_of_either_series() -> None:
+    assert project_number(README) == "15284"
+    assert (
+        project_number("![](https://www.bestpractices.dev/projects/7/baseline)") == "7"
+    )
+    assert project_number("# Demo\n\nNo badge.\n") is None
+
+
+def test_each_criterion_has_the_level_of_its_edit_page() -> None:
+    assert LEVELS["contribution"] == "passing"
+    # A criterion that silver asks more strictly is the field of passing.
+    assert LEVELS["contribution_requirements"] == "passing"
+    assert LEVELS["osps_br_07_01"] == "baseline-1"
+    assert set(LEVELS.values()) == set(best_practices.LEVELS)
+
+
+def test_the_stale_entry_of_the_blueprint_is_found() -> None:
+    # On 2026-11-18, after release 1.22.0 moved the secret scan into quick-checks.yml.
+    answers = saved("repo-blueprint.answers")
+    entry = saved("repo-blueprint.entry")
+
+    found = differences(answers, entry, BLUEPRINT, ROOT, LEVELS)
+
+    assert len(answers) == 216
+    assert len(found) == 55
+    # Every status matches; only the justifications drifted.
+    assert all(item.name.endswith("_justification") for item in found)
+    # The two answers that link the workflow that is gone.
+    gone = {item.name: item.gone for item in found if item.gone}
+    assert gone == {
+        "no_leaked_credentials_justification": (".github/workflows/secret-scan.yml",),
+        "osps_br_07_01_justification": (".github/workflows/secret-scan.yml",),
+    }
+    secret = next(item for item in found if item.name == "osps_br_07_01_justification")
+    assert "secret-scan.yml" in secret.found
+    assert "quick-checks.yml" in secret.expected
+    assert secret.level == "baseline-1"
+    assert secret.forced
+
+
+def test_the_answers_that_the_file_leaves_out_are_never_reported() -> None:
+    answers = saved("repo-blueprint.answers")
+    entry = saved("repo-blueprint.entry")
+    # The entry answers what only the project knows, such as its user guides.
+    assert entry["OSPS-DO-01.01_status"] == "Met"
+    assert "osps_do_01_01_status" not in answers
+
+    found = differences(answers, entry, BLUEPRINT, ROOT, LEVELS)
+
+    assert {item.name for item in found} <= set(answers)
+
+
+def test_the_links_of_a_long_level_are_split() -> None:
+    # repo-pager differed in 96 answers, the passing level alone in 34.
+    answers = saved("repo-pager.answers")
+    found = differences(answers, saved("repo-pager.entry"), PAGER, ROOT, LEVELS)
+
+    links = edit_links("16429", found)
+
+    assert len(found) == 96
+    assert [link.label for link in links] == [
+        "passing, part 1 of 2",
+        "passing, part 2 of 2",
+        "silver",
+        "baseline-1",
+        "baseline-2",
+        "baseline-3",
+    ]
+    # Every answer is in exactly one link, of the edit page of its own level, and each
+    # link stays below the length that the site takes.
+    names = [name for link in links for name in link.names]
+    assert sorted(names) == sorted(item.name for item in found)
+    by_name = {item.name: item for item in found}
+    for link in links:
+        assert len(link.url) <= LIMIT, link.label
+        assert link.url.startswith(f"{SITE}/en/projects/16429/{link.level}/edit?")
+        proposed = query(link.url)
+        overrides = proposed.pop("overrides", "")
+        assert set(proposed) == set(link.names)
+        assert {by_name[name].level for name in proposed} == {link.level}
+        assert all(value == by_name[name].expected for name, value in proposed.items())
+        # overrides= forces exactly the answers that the entry gives otherwise.
+        assert overrides.split(",") == [
+            name for name in link.names if by_name[name].forced
+        ]
+    # A status and its justification stay in the same link.
+    for link in links:
+        criteria = {name.rsplit("_", 1)[0] for name in link.names}
+        assert not [
+            other
+            for other in links
+            if other is not link
+            and criteria & {name.rsplit("_", 1)[0] for name in other.names}
+        ]
+
+
+def test_a_level_that_fits_has_one_link() -> None:
+    found = differences(
+        saved("repo-blueprint.answers"),
+        saved("repo-blueprint.entry"),
+        BLUEPRINT,
+        ROOT,
+        LEVELS,
+    )
+    links = edit_links("15284", found)
+
+    baseline = [link for link in links if link.level == "baseline-1"]
+    assert [link.label for link in baseline] == ["baseline-1"]
+    assert query(baseline[0].url) == {
+        "osps_br_07_01_justification": next(
+            item.expected for item in found if item.name == baseline[0].names[0]
+        ),
+        "overrides": "osps_br_07_01_justification",
+    }
+
+
+def answer(
+    name: str, expected: str, found: str, level: str | None = "passing"
+) -> Difference:
+    return Difference(name, level, expected, found)
+
+
+def test_only_an_answer_that_the_entry_gives_is_forced() -> None:
+    found = [
+        answer("contribution_status", "Met", "?"),
+        answer("contribution_justification", "CONTRIBUTING.md", ""),
+        answer("license_location_status", "Met", "Unmet"),
+        answer("floss_license_justification", "MIT-0", "MIT"),
+    ]
+
+    (link,) = edit_links("7", found)
+
+    assert query(link.url)["overrides"] == (
+        "license_location_status,floss_license_justification"
+    )
+    assert "overrides=license_location_status%2Cfloss_license_justification" in link.url
+    # Nothing to force: the link proposes only.
+    (fills,) = edit_links("7", found[:2])
+    assert "overrides" not in query(fills.url)
+
+
+def test_one_criterion_longer_than_the_limit_still_gets_its_link() -> None:
+    found = [
+        answer("contribution_justification", "a" * 50, "b"),
+        answer("floss_license_justification", "c" * 50, "d"),
+    ]
+
+    links = edit_links("7", found, limit=60)
+
+    assert [link.names for link in links] == [
+        ("contribution_justification",),
+        ("floss_license_justification",),
+    ]
+
+
+def test_the_file_and_the_entry_compare_as_the_site_reads_them(tmp_path: Path) -> None:
+    answers: dict[str, Json] = {
+        "$schema": "a key that is no answer",
+        "contribution_status": "met",
+        "contribution_justification": "  CONTRIBUTING.md ",
+        # The file doesn't know: it proposes nothing.
+        "floss_license_status": "?",
+        "license_location_status": "Met",
+        "license_location_justification": 7,
+        "osps_br_07_01_status": "Met",
+    }
+    entry: dict[str, Json] = {
+        "contribution_status": "Met",
+        "contribution_justification": "CONTRIBUTING.md",
+        "floss_license_status": "Met",
+        "license_location_status": None,
+        "OSPS-BR-07.01_status": "Met",
+    }
+
+    found = differences(answers, entry, "o/r", tmp_path, LEVELS)
+
+    assert found == [Difference("license_location_status", "passing", "Met", "")]
+    assert not found[0].forced
+
+
+def test_a_link_into_the_repository_is_checked_against_the_checkout(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "SECURITY.md").write_text("Report it.\n", encoding="utf-8")
+    text = (
+        "See <https://github.com/O/R/blob/main/SECURITY.md>, "
+        "https://github.com/o/r/tree/main/docs. "
+        "https://github.com/o/r/blob/v1/gone%20file.md#part, "
+        "(https://github.com/o/r/blob/main/old.yml), again "
+        "https://github.com/o/r/blob/main/old.yml?plain=1 and another repository: "
+        "https://github.com/o/other/blob/main/missing.md"
+    )
+
+    assert gone_files(text, "o/r", tmp_path) == ("gone file.md", "old.yml")
+
+
+def test_the_issue_gives_the_links_the_reasons_and_the_texts() -> None:
+    found = [
+        Difference(
+            "osps_br_07_01_justification",
+            "baseline-1",
+            "The secret scan of Quick checks.\nSecond line.\n\nThird.",
+            "https://github.com/o/r/blob/main/secret-scan.yml",
+            ("secret-scan.yml",),
+        ),
+        answer("contribution_justification", "CONTRIBUTING.md", ""),
+        answer("license_location_status", "Met", "Unmet"),
+        answer("floss_license_justification", "MIT-0", "MIT"),
+        answer("unknown_justification", "Something new", "", level=None),
+    ]
+
+    text = body("7", found, edit_links("7", found))
+
+    assert text.startswith(MARKER)
+    assert "[project 7](https://www.bestpractices.dev/projects/7)" in text
+    assert "in 5 answer(s)" in text
+    assert (
+        "- [passing](https://www.bestpractices.dev/en/projects/7/passing/edit?" in text
+    )
+    assert (
+        "- [baseline-1](https://www.bestpractices.dev/en/projects/7/baseline-1/" in text
+    )
+    assert "No edit page takes these answers" in text
+    assert (
+        "- `osps_br_07_01_justification` (baseline-1) links `secret-scan.yml`, which "
+        "the repository no longer has"
+    ) in text
+    assert "- `contribution_justification` (passing) is empty on the site" in text
+    assert "- `license_location_status` (passing) is Unmet on the site" in text
+    assert "- `floss_license_justification` (passing) says something else" in text
+    assert "- `unknown_justification` (no level) is empty on the site" in text
+    assert "> The secret scan of Quick checks.\n> Second line.\n>\n> Third." in text
+    assert "<details>" in text
+
+
+def test_a_long_issue_leaves_the_texts_to_its_links() -> None:
+    found = [
+        answer(f"criterion{index}_justification", "x" * 600, "y") for index in range(60)
+    ]
+
+    text = body("7", found, edit_links("7", found))
+
+    assert len(text) <= BODY_LIMIT
+    assert "<details>" not in text
+    assert "The texts to enter are left out" in text
+    assert "- `criterion59_justification` (passing)" in text
+    assert "follow" not in text
+
+
+def test_an_issue_too_long_for_its_links_gives_the_rest_in_the_next_run() -> None:
+    found = [
+        answer(f"criterion{index}_justification", "x" * 1000, "y")
+        for index in range(70)
+    ]
+    links = edit_links("7", found)
+
+    text = body("7", found, links)
+
+    assert len(text) <= BODY_LIMIT
+    shown = text.count("- [passing, part ")
+    assert 0 < shown < len(links)
+    assert (
+        f"{len(links) - shown} more link(s) follow in the next weekly run, once these "
+        "are saved."
+    ) in text
+
+
+class Site:
+    """bestpractices.dev, with the entry that it gives, and every request."""
+
+    def __init__(self, answer: object) -> None:
+        self.answer = answer
+        self.requests: list[urllib.request.Request] = []
+
+    def __call__(self, request: urllib.request.Request, timeout: float) -> Any:
+        assert timeout == 30
+        self.requests.append(request)
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        if isinstance(self.answer, bytes):
+            return io.BytesIO(self.answer)
+        return io.BytesIO(json.dumps(self.answer).encode())
+
+
+def test_the_entry_is_read_once_without_a_login() -> None:
+    site = Site({"id": 15284})
+
+    assert read_entry("15284", site) == {"id": 15284}
+    (request,) = site.requests
+    assert request.full_url == "https://www.bestpractices.dev/projects/15284.json"
+    assert request.get_method() == "GET"
+    assert request.get_header("Accept") == "application/json"
+    assert "Authorization" not in request.headers
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        urllib.error.HTTPError(
+            "https://www.bestpractices.dev/projects/7.json",
+            503,
+            "Service Unavailable",
+            Message(),
+            io.BytesIO(b"busy"),
+        ),
+        urllib.error.URLError("no route"),
+        b"<html>maintenance</html>",
+        b"[]",
+        http.client.IncompleteRead(b""),
+    ],
+    ids=["error", "unreachable", "no json", "no entry", "cut off"],
+)
+def test_a_site_that_gives_no_entry_is_unreachable(answer: object) -> None:
+    with pytest.raises(Unreachable, match=r"projects/7\.json"):
+        read_entry("7", Site(answer))
+
+
+class FakeClient:
+    """GitHub with a list of issues, and the changes it was asked for."""
+
+    def __init__(self, issues: list[Json]) -> None:
+        self.issues = issues
+        self.changes: list[tuple[str, str, Json]] = []
+
+    def get_all(self, path: str) -> list[Json]:
+        assert path == f"repos/{BLUEPRINT}/issues?state=open"
+        return self.issues
+
+    def patch(self, path: str, body: Json) -> None:
+        self.changes.append(("PATCH", path, body))
+
+    def post(self, path: str, body: Json) -> None:
+        self.changes.append(("POST", path, body))
+
+
+def repository(root: Path, readme: str = README, answers: str = "") -> Path:
+    """A checkout with a README and the .bestpractices.json of the blueprint on
+    2026-11-18, and no other file."""
+    (root / "README.md").write_text(readme, encoding="utf-8")
+    (root / ".bestpractices.json").write_text(
+        answers or (DATA / "repo-blueprint.answers.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_a_stale_entry_opens_the_issue(tmp_path: Path) -> None:
+    client = FakeClient(
+        [
+            {"number": 3, "body": "another issue"},
+            {"number": 4, "pull_request": {}, "body": MARKER},
+        ]
+    )
+    site = Site(saved("repo-blueprint.entry"))
+
+    outcome = keep_issue(client, BLUEPRINT, repository(tmp_path), opener=site)
+
+    assert len(site.requests) == 1
+    assert len(outcome.found) == 55
+    ((method, path, sent),) = client.changes
+    assert (method, path) == ("POST", f"repos/{BLUEPRINT}/issues")
+    assert sent["title"] == TITLE
+    assert sent["labels"] == LABELS
+    assert sent["body"].startswith(MARKER)
+    assert "/en/projects/15284/passing/edit?" in sent["body"]
+    assert outcome.summary[-1] == "Opened an issue with the links of the edit pages."
+    assert outcome.warnings == [
+        "::warning title=The entry on bestpractices.dev is stale::55 answer(s) of "
+        ".bestpractices.json differ from the entry of project 15284."
+    ]
+
+
+def test_the_issue_follows_the_entry(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    entry = saved("repo-blueprint.entry")
+    client = FakeClient([{"number": 9, "body": f"{MARKER}\nolder"}])
+
+    keep_issue(client, BLUEPRINT, root, opener=Site(entry))
+
+    ((method, path, sent),) = client.changes
+    assert (method, path) == ("PATCH", f"repos/{BLUEPRINT}/issues/9")
+    # The same text again changes nothing.
+    again = FakeClient([{"number": 9, "body": sent["body"]}])
+    outcome = keep_issue(again, BLUEPRINT, root, opener=Site(entry))
+    assert again.changes == []
+    assert outcome.summary[-1] == "#9 names them already."
+
+
+def test_the_issue_closes_once_the_entry_gives_every_answer(tmp_path: Path) -> None:
+    answers = saved("repo-blueprint.answers")
+    current = {
+        best_practices.entry_field(name): value for name, value in answers.items()
+    }
+    # What the maintainer answered on the site alone stays and counts for nothing.
+    current["OSPS-DO-01.01_status"] = "Met"
+    client = FakeClient([{"number": 9, "body": MARKER}])
+
+    outcome = keep_issue(client, BLUEPRINT, repository(tmp_path), opener=Site(current))
+
+    assert client.changes == [
+        (
+            "PATCH",
+            f"repos/{BLUEPRINT}/issues/9",
+            {"state": "closed", "state_reason": "completed"},
+        )
+    ]
+    assert outcome.summary == [
+        "The entry of project 15284 gives every answer of .bestpractices.json.",
+        "Closed #9.",
+    ]
+    assert outcome.warnings == []
+    # Nothing differs and no issue is open: nothing to do.
+    quiet = FakeClient([])
+    keep_issue(quiet, BLUEPRINT, repository(tmp_path), opener=Site(current))
+    assert quiet.changes == []
+
+
+@pytest.mark.parametrize(
+    ("issues", "entry", "said"),
+    [
+        ([], "stale", "Would open an issue with the links of the edit pages."),
+        ([{"number": 9, "body": MARKER}], "stale", "Would update #9."),
+        ([{"number": 9, "body": MARKER}], "current", "Would close #9."),
+    ],
+)
+def test_the_dry_run_changes_nothing(
+    tmp_path: Path, issues: list[Json], entry: str, said: str
+) -> None:
+    answers = saved("repo-blueprint.answers")
+    given = (
+        saved("repo-blueprint.entry")
+        if entry == "stale"
+        else {
+            best_practices.entry_field(name): value for name, value in answers.items()
+        }
+    )
+    client = FakeClient(issues)
+
+    outcome = keep_issue(
+        client, BLUEPRINT, repository(tmp_path), opener=Site(given), dry_run=True
+    )
+
+    assert client.changes == []
+    assert outcome.summary[-1] == said
+
+
+def test_a_repository_without_the_badge_asks_nothing(tmp_path: Path) -> None:
+    site = Site({})
+    client = FakeClient([{"number": 9, "body": MARKER}])
+
+    outcome = keep_issue(
+        client, BLUEPRINT, repository(tmp_path, readme="# Demo\n"), opener=site
+    )
+    (tmp_path / "README.md").unlink()
+    without = keep_issue(client, BLUEPRINT, tmp_path, opener=site)
+
+    assert site.requests == []
+    assert client.changes == []
+    assert (
+        outcome.summary
+        == without.summary
+        == ["The README shows no badge of bestpractices.dev: nothing to compare."]
+    )
+
+
+def test_a_repository_without_the_file_asks_nothing(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (root / ".bestpractices.json").unlink()
+    site = Site({})
+
+    outcome = keep_issue(FakeClient([]), BLUEPRINT, root, opener=site)
+
+    assert site.requests == []
+    assert outcome.summary == [
+        "The repository has no .bestpractices.json: nothing to compare."
+    ]
+
+
+def test_a_site_that_doesnt_answer_leaves_the_issue_as_it_is(tmp_path: Path) -> None:
+    client = FakeClient([{"number": 9, "body": MARKER}])
+
+    outcome = keep_issue(
+        client,
+        BLUEPRINT,
+        repository(tmp_path),
+        opener=Site(urllib.error.URLError("timed out")),
+    )
+
+    assert client.changes == []
+    (warning,) = outcome.warnings
+    assert warning.startswith("::warning title=bestpractices.dev didn't answer::")
+    assert "the issue stays as it is" in outcome.summary[0]
+
+
+class Runner:
+    """The GitHub CLI with an answer for the list of issues, and every change."""
+
+    def __init__(self, issues: list[Json]) -> None:
+        self.issues = issues
+        self.sent: list[tuple[str, str]] = []
+
+    def __call__(
+        self, arguments: Sequence[str], payload: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        if "--paginate" in arguments:
+            return subprocess.CompletedProcess([], 0, json.dumps([self.issues]), "")
+        self.sent.append((arguments[3], arguments[4]))
+        return subprocess.CompletedProcess(
+            arguments, 0, 'HTTP/2.0 201 Created\r\n\r\n{"number": 9}', ""
+        )
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_command_compares_and_keeps_the_issue(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    dry_run: bool,
+) -> None:
+    site = Site(saved("repo-blueprint.entry"))
+    monkeypatch.setattr(urllib.request, "urlopen", site)
+    runner = Runner([])
+    command = ["--repo", BLUEPRINT, "best-practices"] + (
+        ["--dry-run"] if dry_run else []
+    )
+
+    code = main(command, api=Api(runner), root=repository(tmp_path))
+
+    printed = capsys.readouterr()
+    assert code == 0
+    assert len(site.requests) == 1
+    assert runner.sent == ([] if dry_run else [("POST", f"repos/{BLUEPRINT}/issues")])
+    assert "::warning title=The entry on bestpractices.dev is stale::" in printed.err
+    lines = printed.out.splitlines()
+    assert lines[0] == f"The entry of {BLUEPRINT} on bestpractices.dev" + (
+        " (a dry run: nothing changed):" if dry_run else ":"
+    )
+    assert (
+        "- `osps_br_07_01_justification` (baseline-1) links "
+        "`.github/workflows/secret-scan.yml`, which the repository no longer has"
+    ) in lines
+    assert lines[-1].endswith("an issue with the links of the edit pages.")

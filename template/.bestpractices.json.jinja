@@ -2,8 +2,11 @@
     that the blueprint guarantees for every repository made from it: the criteria of
     the levels passing, silver and gold and of the OSPS Baseline that its files, workflows
     and settings as code meet, each with the file that shows it. bestpractices.dev
-    reads the file and proposes these answers, also after a change of the file once
-    a maintainer presses "Save (and continue)" with the robot. What depends on the
+    reads the file and proposes these answers for the questions that are still open
+    once a maintainer presses "Save (and continue)" with the robot; it never replaces
+    an answer that the entry gives. A changed answer reaches the entry through the
+    links of the issue that the weekly run of Links keeps while the public entry
+    differs from the file (decision 1046). What depends on the
     software or on the people of a project is left out: bestpractices.dev keeps the
     answers that a maintainer gives there for it. -#]
 [%- set repository = 'https://github.com/' ~ owner ~ '/' ~ project_slug -%]

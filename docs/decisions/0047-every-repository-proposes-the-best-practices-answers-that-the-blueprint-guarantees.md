@@ -1,6 +1,6 @@
 # Every repository proposes the answers of OpenSSF Best Practices that the blueprint guarantees
 
-- Status: accepted
+- Status: accepted, amended by [1046](1046-a-bot-notices-a-stale-entry-on-bestpractices-dev.md), with which Save (and continue) fills only the answers still open, a moved list of the criteria, and a weekly bot that gives the links that take in a changed answer
 - Date: 2026-10-18
 
 ## Context

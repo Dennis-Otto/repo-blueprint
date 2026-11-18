@@ -76,6 +76,17 @@ Every week, the branches that `main` holds and the caches of closed pull request
 
 **How:** `cleanup.yml`.
 
+## The entry on bestpractices.dev
+
+bestpractices.dev proposes the answers of `.bestpractices.json` only for the questions that its entry leaves open: *Save (and continue) 🤖* never replaces an answer that the entry gives, so an answer that an update of the file changes, such as the link to a workflow that moved, never reaches the entry by itself. When release 1.22.0 joined two workflows into *Quick checks*, the entries of all eight repositories went on linking `secret-scan.yml`, which was gone.
+
+- **Once a week:** a job of the weekly run of *Links* reads the public entry of the project, whose number the badge in the README gives, once and without a login, and compares each answer of the file with it, also each link of the entry into the repository with the files of the checkout. A repository without the badge asks nothing.
+- **One issue:** *The answers on bestpractices.dev differ from .bestpractices.json* lists each answer that differs or links a file that is gone, with the text to enter, and closes once the entry gives every answer. A site that doesn't answer leaves it as it is.
+- **A few clicks:** for each level, the issue gives a link of its edit page that proposes the answers of the file and forces exactly those that the entry answers otherwise (`overrides=`), split into parts below 8,000 characters, the longest address that the site takes. Open each while signed in, check the highlighted fields and save.
+- **Read only:** the bot never writes the entry and needs no secret; the answers that the file leaves out are the project's own and are never compared ([decision 1046](../decisions/1046-a-bot-notices-a-stale-entry-on-bestpractices-dev.md)).
+
+**How:** `links.yml`, `blueprint.py best-practices`.
+
 ## What the bots cost
 
 Every bot starts from an event, such as a merge into `main`, a pull request or the end of a check. A merge that auto-merge does with the token of a workflow starts no workflow, so Renovate, Dependabot's updates of the dev container, the release bot and the branch bot merge as the release app, and every merge into `main` is a push that starts the release bot and the branch bot at once:
