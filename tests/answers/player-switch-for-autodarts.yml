@@ -5,10 +5,10 @@
 # change them with the repository.
 author: Dennis Otto
 copyright: 2026 Dennis Otto
-description: 'Chrome extension for a shared Autodarts display: everyone plays under
-  their own account and a tap on a tile switches players. Sessions are parked and
-  kept fresh, so nobody signs in again; an optional remembered password signs an account
-  back in by itself. Everything stays on the computer.'
+description: 'Browser extension for Chrome, Edge and Firefox, for a shared Autodarts
+  display: everyone plays under their own account and a tap on a tile switches players.
+  Sessions are parked and kept fresh, so nobody signs in again; an optional remembered
+  password signs an account back in by itself. Everything stays on the computer.'
 discussions: true
 homepage: https://dennis-otto.github.io/player-switch-for-autodarts/
 issue_assistant_ai: true
@@ -28,4 +28,4 @@ sponsor: Dennis-Otto
 successor: true
 test_marker: ''
 test_workflows: E2E
-topics: autodarts,darts,dartboard,chrome-extension,browser-extension,chrome,google-chrome,manifest-v3,account-switcher,account-switching,multi-account,shared-display,kiosk,touchscreen,session-management,typescript
+topics: autodarts,darts,dartboard,chrome-extension,browser-extension,chrome,google-chrome,microsoft-edge,firefox,firefox-extension,manifest-v3,account-switcher,account-switching,multi-account,shared-display,kiosk,touchscreen,session-management,typescript
