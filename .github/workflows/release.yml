@@ -445,24 +445,30 @@ jobs:
                 continue
               fi
               echo "Writing the changelog of $version into $branch."
-              # A file, not a process substitution, which the jq.exe of Git Bash can't open.
+              # The contents of the files go from file to file and never through an
+              # argument of a command: Linux takes none longer than 128 KiB, which a
+              # long changelog in Base64 exceeds. Files, not process substitutions,
+              # which the jq.exe of Git Bash can't open.
               base64 --wrap=0 "$RUNNER_TEMP/release.md" > "$RUNNER_TEMP/release.b64"
-              additions="$(jq --null-input -cj --rawfile contents "$RUNNER_TEMP/release.b64" '[{path: "CHANGELOG.md", contents: $contents}]')"
+              jq --null-input -c --rawfile contents "$RUNNER_TEMP/release.b64" \
+                '[{path: "CHANGELOG.md", contents: $contents}]' > "$RUNNER_TEMP/additions.json"
               if [[ "$indexed" == true ]]; then
                 echo "The same commit writes the rows of the records of decisions into $index."
                 base64 --wrap=0 "$RUNNER_TEMP/index.md" > "$RUNNER_TEMP/index.b64"
-                additions="$(jq -cj --arg path "$index" --rawfile contents "$RUNNER_TEMP/index.b64" '. + [{path: $path, contents: $contents}]' <<<"$additions")"
+                jq -c --arg path "$index" --rawfile contents "$RUNNER_TEMP/index.b64" \
+                  '. + [{path: $path, contents: $contents}]' "$RUNNER_TEMP/additions.json" > "$RUNNER_TEMP/both.json"
+                mv "$RUNNER_TEMP/both.json" "$RUNNER_TEMP/additions.json"
               fi
               jq --null-input --arg repo "$GH_REPO" --arg branch "$branch" --arg head "$head" \
                 --arg headline "chore: write the changelog of $version" \
-                --argjson additions "$additions" \
+                --slurpfile additions "$RUNNER_TEMP/additions.json" \
                 --argjson deletions "$deletions" \
                 '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
                   variables: {input: {
                     branch: {repositoryNameWithOwner: $repo, branchName: $branch},
                     expectedHeadOid: $head,
                     message: {headline: $headline},
-                    fileChanges: ({additions: $additions}
+                    fileChanges: ({additions: $additions[0]}
                       + if $deletions == [] then {} else {deletions: $deletions} end)}}}' |
                 gh api --header "$API_VERSION_HEADER" graphql --input - --jq .data.createCommitOnBranch.commit.oid
             done

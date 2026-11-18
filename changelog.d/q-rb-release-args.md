@@ -1,0 +1,3 @@
+### Bug fixes
+
+- The release bot writes the changelog into the release pull request again when `CHANGELOG.md` and `docs/decisions/README.md` are long. Since the release writes the index of the decisions in the same commit, it handed both files, in Base64, to `jq` as one argument of the command, and Linux refuses an argument longer than 128 KiB: the step failed with `Argument list too long`, the release pull request kept a changelog without the text of the release, and no release could be made. The files now go from file to file, so a changelog of any length reaches the release pull request; a repository with a long changelog gets the fix with this update and needs to do nothing.
