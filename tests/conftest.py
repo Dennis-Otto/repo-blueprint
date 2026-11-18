@@ -35,6 +35,23 @@ def no_runner_of_the_run() -> Iterator[None]:
         yield
 
 
+# The variables of the runner that tell `blueprint.py decisions` which pull request it
+# checks.
+PULL_REQUEST_VARIABLES = ("GITHUB_REF", "GITHUB_SHA", "GITHUB_EVENT_PATH")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_pull_request_of_the_run() -> Iterator[None]:
+    """No test sees the pull request whose CI runs the tests, nor a Python that a
+    test starts: in the CI of a pull request, `decisions` of a test's own repository
+    would otherwise look for the records of main and say that it can't find them.
+    A test that needs a pull request sets its own."""
+    with pytest.MonkeyPatch.context() as patch:
+        for name in PULL_REQUEST_VARIABLES:
+            patch.delenv(name, raising=False)
+        yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Each Python that a test starts keeps its bytecode in a folder of the run, not

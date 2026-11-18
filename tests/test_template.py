@@ -5514,11 +5514,12 @@ def test_the_checks_fail_on_two_records_of_one_number(
         script, encoding="utf-8", newline="\n"
     )
     subprocess.run(["git", "init", "--quiet", str(project)], check=True)
-    # The Python of the tests first, without the variables of a run of the CI.
+    # The Python of the tests first, without the variables of a run of the CI, such
+    # as those of the pull request whose CI runs the tests.
     environment = {
         name: value
         for name, value in os.environ.items()
-        if name not in ("CI", "GITHUB_ACTIONS")
+        if name not in ("CI", "GITHUB_ACTIONS", "GITHUB_REF", "GITHUB_SHA")
     }
     environment["PATH"] = os.pathsep.join(
         [str(Path(sys.executable).parent), environment.get("PATH", "")]
@@ -5534,43 +5535,58 @@ def test_the_checks_fail_on_two_records_of_one_number(
             check=False,
         )
 
+    def tool(action: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, ".github/blueprint.py", "decisions", action],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
     decisions = project / "docs/decisions"
+    index = decisions / "README.md"
     passed = step()
-    # A pull request added 0002 without its row, and fixes it with the command.
-    (decisions / "0002-the-oldest-release.md").write_text(
+    # Pull request #312 adds its record 0312 and leaves the index alone.
+    (decisions / "0312-the-oldest-release.md").write_text(
         "# The oldest release\n\n- Status: accepted\n", encoding="utf-8"
     )
-    missing = step()
-    fix = subprocess.run(
-        [sys.executable, ".github/blueprint.py", "decisions", "--fix"],
-        cwd=project,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
+    added = step()
+    # The release writes its row.
+    complete = tool("--complete")
+    released = index.read_text(encoding="utf-8")
+    # A hand puts the rows out of order, and the command fixes them.
+    rows = released.splitlines(keepends=True)
+    index.write_text("".join([*rows[:-2], rows[-1], rows[-2]]), encoding="utf-8")
+    disordered = step()
+    fix = tool("--fix")
     fixed = step()
     # Then main, merged into it, brings a record of the same number.
-    (decisions / "0002-a-website.md").write_text("# A website\n", encoding="utf-8")
+    (decisions / "0312-a-website.md").write_text("# A website\n", encoding="utf-8")
     clash = step()
 
     assert passed.returncode == 0, passed.stdout + passed.stderr
-    assert missing.returncode == 1, missing.stdout + missing.stderr
-    assert (
-        "docs/decisions: the index misses 0002-the-oldest-release.md\n"
-        "python3 .github/blueprint.py decisions --fix fixes what only the index gets"
-    ) in missing.stdout
-    assert fix.returncode == 0, fix.stdout + fix.stderr
-    index = (decisions / "README.md").read_text(encoding="utf-8")
-    assert index.endswith(
-        "| [0002](0002-the-oldest-release.md) | The oldest release | accepted |\n"
+    assert added.returncode == 0, added.stdout + added.stderr
+    assert complete.returncode == 0, complete.stdout + complete.stderr
+    assert released.endswith(
+        "| [0312](0312-the-oldest-release.md) | The oldest release | accepted |\n"
     )
+    assert disordered.returncode == 1, disordered.stdout + disordered.stderr
+    assert (
+        "docs/decisions: the index lists 0001-record-decisions.md after "
+        "0312-the-oldest-release.md\n"
+        "python3 .github/blueprint.py decisions --fix fixes what only the index gets"
+    ) in disordered.stdout
+    assert fix.returncode == 0, fix.stdout + fix.stderr
+    assert index.read_text(encoding="utf-8") == released
     assert fixed.returncode == 0, fixed.stdout + fixed.stderr
     assert clash.returncode == 1, clash.stdout + clash.stderr
     assert (
-        "docs/decisions: 0002 is the number of 2 records: 0002-a-website.md, "
-        "0002-the-oldest-release.md\n"
+        "docs/decisions: 0312 is the number of 2 records: 0312-a-website.md, "
+        "0312-the-oldest-release.md\n"
     ) in clash.stdout
-    assert "the next free number, 0003, in the name of its file" in clash.stdout
+    assert "a new record takes the number of its pull request" in clash.stdout
     # The PR coach explains the step that stopped it.
     assert "Two records of `docs/decisions/` share a number" in clash.stdout
 
@@ -29044,6 +29060,139 @@ def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
     assert step.result.returncode != 0
     assert "HTTP 502" in step.result.stderr
     assert "input" not in step.written
+
+
+# The index of the records of decisions on main, which pull requests leave alone: it
+# lacks the row of 1040, and 0002 has its old status.
+MAIN_INDEX = (
+    "# Decisions\n\n| Record | Decision | Status |\n| --- | --- | --- |\n"
+    "| [0001](0001-record-decisions.md) | Record the decisions | accepted |\n"
+    "| [0002](0002-a-way.md) | A way | accepted |\n"
+)
+RELEASE_INDEX = (
+    "# Decisions\n\n| Record | Decision | Status |\n| --- | --- | --- |\n"
+    "| [0001](0001-record-decisions.md) | Record the decisions | accepted |\n"
+    "| [0002](0002-a-way.md) | A way | accepted, amended by [1040](1040-a-new-way.md) |\n"
+    "| [1040](1040-a-new-way.md) | A new way | accepted |\n"
+)
+
+
+def a_checkout_with_records(tmp_path: Path, index: str) -> Path:
+    """The checkout of main, a repository of Git with the records of decisions of
+    two pull requests that left the index alone: 1040 and the status of 0002."""
+    checkout = a_checkout_with_the_tool(tmp_path)
+    records = {
+        "README.md": index,
+        "0000-template.md": "# The decision\n",
+        "0001-record-decisions.md": "# Record the decisions\n\n- Status: accepted\n",
+        "0002-a-way.md": (
+            "# A way\n\n- Status: accepted, amended by [1040](1040-a-new-way.md)\n"
+        ),
+        "1040-a-new-way.md": "# A new way\n\n- Status: accepted\n",
+    }
+    for name, text in records.items():
+        path = checkout / "docs/decisions" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    subprocess.run(["git", "init", "--quiet", str(checkout)], check=True)
+    subprocess.run(["git", "add", "--all"], cwd=checkout, check=True)
+    return checkout
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@WITH_JQ
+def test_the_release_writes_the_index_of_the_decisions_with_the_changelog(
+    tmp_path: Path,
+) -> None:
+    checkout = a_checkout_with_records(tmp_path, MAIN_INDEX)
+    answers = release_please_answers(release_branch_changelog(MAIN_CHANGELOG), [])
+    answers["repos/o/r/contents/docs/decisions/README.md?ref=abc123"] = MAIN_INDEX
+
+    step = run_a_step_with_the_fake_gh(tmp_path, RELEASE_CHANGELOG, answers, PR="")
+
+    assert step.result.returncode == 0, step.result.stderr
+    assert (
+        "The same commit writes the rows of the records of decisions into "
+        "docs/decisions/README.md." in step.result.stdout
+    )
+    mutation = json.loads(step.written["input"])["variables"]["input"]
+    assert mutation["message"] == {"headline": "chore: write the changelog of 1.3.0"}
+    changelog, index = mutation["fileChanges"]["additions"]
+    assert changelog["path"] == "CHANGELOG.md"
+    assert index["path"] == "docs/decisions/README.md"
+    assert base64.b64decode(index["contents"]).decode("utf-8") == RELEASE_INDEX
+    # The steps after it find main as the checkout brought it.
+    written = (checkout / "docs/decisions/README.md").read_text(encoding="utf-8")
+    assert written == MAIN_INDEX
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("key", "answer"),
+    [
+        # The index that an earlier run wrote: nothing to do.
+        ("repos/o/r/contents/docs/decisions/README.md?ref=abc123", RELEASE_INDEX),
+        # An index that can't be read is written again, with the changelog.
+        (
+            "repos/o/r/contents/docs/decisions/README.md?ref=abc123.error",
+            "gh: Server Error (HTTP 502)\n",
+        ),
+    ],
+)
+def test_the_release_writes_the_index_of_the_decisions_only_where_it_differs(
+    tmp_path: Path, key: str, answer: str
+) -> None:
+    a_checkout_with_records(tmp_path, MAIN_INDEX)
+    changelog = release_changelog(
+        "1.3.0", MAIN_CHANGELOG, release_branch_changelog(MAIN_CHANGELOG), []
+    )
+    answers = release_please_answers(changelog, [])
+    answers[key] = answer
+
+    step = run_a_step_with_the_fake_gh(tmp_path, RELEASE_CHANGELOG, answers, PR="")
+
+    assert step.result.returncode == 0, step.result.stderr
+    if not key.endswith(".error"):
+        assert "The changelog of 1.3.0 is up to date." in step.result.stdout
+        assert "input" not in step.written
+        return
+    additions = json.loads(step.written["input"])["variables"]["input"]["fileChanges"][
+        "additions"
+    ]
+    assert [addition["path"] for addition in additions] == [
+        "CHANGELOG.md",
+        "docs/decisions/README.md",
+    ]
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@WITH_JQ
+def test_the_release_warns_about_records_that_need_a_person_and_goes_on(
+    tmp_path: Path,
+) -> None:
+    checkout = a_checkout_with_records(tmp_path, MAIN_INDEX)
+    clash = checkout / "docs/decisions/1040-another-way.md"
+    clash.write_text("# Another way\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--all"], cwd=checkout, check=True)
+    answers = release_please_answers(release_branch_changelog(MAIN_CHANGELOG), [])
+    answers["repos/o/r/contents/docs/decisions/README.md?ref=abc123"] = MAIN_INDEX
+
+    step = run_a_step_with_the_fake_gh(tmp_path, RELEASE_CHANGELOG, answers, PR="")
+
+    assert step.result.returncode == 0, step.result.stderr
+    assert "1040 is the number of 2 records" in step.result.stdout
+    assert "::warning title=Records of decisions::" in step.result.stdout
+    mutation = json.loads(step.written["input"])["variables"]["input"]
+    [_, index] = mutation["fileChanges"]["additions"]
+    written = base64.b64decode(index["contents"]).decode("utf-8")
+    assert "| [1040](1040-another-way.md) | Another way |  |\n" in written
 
 
 @pytest.mark.parametrize("kind", KINDS)
