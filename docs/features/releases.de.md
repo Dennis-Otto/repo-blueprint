@@ -62,7 +62,7 @@ Nur ein Lauf des Release-Bots, der ein Release veröffentlicht hat, startet die 
 - **Issue lifecycle** schließt die Issues, die das Release behebt, mit seinem Link. Ein Prerelease schließt keines, also startet es keinen Durchlauf.
 - **Screenshots** rendert die Bilder der neuen Version, aber nicht nach einer Beta und nicht, wo das Repository kein `scripts/screenshots.sh` hat.
 - **Ein Aufruf, an dem GitHub dreimal scheitert,** ist eine Warnung, und das Release bleibt grün: Der morgendliche Durchlauf von *Issue lifecycle* und der wöchentliche Lauf von *Screenshots* holen es nach.
-- **Vorerst zweimal:** Bis ein Release des Issue-Assistenten dem Blueprint erlaubt, ihn wegzulassen, behält *Issue lifecycle* auch seinen eigenen Start nach jedem Lauf von *Release*, sodass ein Release die Issues zweimal durchgeht, einen Durchlauf nach dem anderen, was nicht schadet.
+- **Einmal:** *Issue lifecycle* folgt nicht mehr dem Ende jedes Laufs von *Release*. `config.toml` des Issue-Assistenten setzt `sweep_after_release_workflow = false` unter `[releases]`, also schreibt sein `install` die `issue-lifecycle.yml` ohne diesen Start, und ein Release geht die Issues einmal durch ([Entscheidung 0182](../decisions/0182-only-the-release-starts-the-sweep-after-a-release.md)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-starts-after-a-release.de.dark.svg">

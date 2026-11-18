@@ -1,0 +1,3 @@
+### Features
+
+- A run of the release bot that publishes nothing no longer starts *Issue lifecycle*: only the last job of a run that published a release starts the sweep that closes the issues that the release fixes, with its link, so a release sweeps the issues once instead of twice. `.github/issue-assistant/config.toml` sets `sweep_after_release_workflow = false` under `[releases]`, with which the issue assistant writes `issue-lifecycle.yml` without its start after every run of *Release*, and its check expects that form. The morning sweep, merged pull requests and a release that a person publishes still start it, as before.

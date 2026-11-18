@@ -1368,6 +1368,7 @@ def test_the_checklist_ticks_the_app_after_register_and_the_installation(
         "Release app octo-org-release-automation named in .github/repository.toml"
     )
     # GitHub opens a check suite of an installed app with Checks for each push.
+    assert installed is not None
     assert installed.done is True
     assert installed.how == INSTALL
     assert api.asked == [f"repos/{REPO}/commits/main/check-suites?app_id=4242"]
@@ -1382,5 +1383,6 @@ def test_the_checklist_leaves_an_installation_that_it_cant_see_open(
     _, installed = release_app(api, REPO, settings_after_the_update(copy))
 
     # Never a cross: the installation may have come after the last push.
+    assert installed is not None
     assert installed.done is None
     assert installed.how == INSTALL
