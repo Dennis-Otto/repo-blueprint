@@ -1355,7 +1355,7 @@ def test_a_notice_found_among_many_comments_is_not_posted_again(
 def test_the_release_bot_learns_who_started_its_run() -> None:
     merge = step("release.yml", "release-please", MERGE_STEP)
 
-    # A run that a bot started by hand keeps to the day (decision 0179).
+    # A run that a bot started by hand keeps to the day (decision 0180).
     assert '--actor "$GITHUB_TRIGGERING_ACTOR"' in merge["run"]
 
 

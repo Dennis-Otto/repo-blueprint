@@ -22,7 +22,7 @@ name: Release
 # Screenshots. A release that only updates dependencies merges itself once its checks
 # pass, once a day, or at once with a fix of a vulnerability; where the variable
 # RELEASE_MERGE is daily, as in the blueprint, every release does, at most one a day,
-# and at once when the workflow is started by hand (decision 0179). Beside the release bot, the
+# and at once when the workflow is started by hand (decision 0180). Beside the release bot, the
 # Dependabot alert bot closes each Dependabot alert that an osv-scanner.toml accepts,
 # with its reason and its end, opens again each one that it closed once the acceptance
 # is gone, and warns of each acceptance that ends within two weeks.
@@ -39,7 +39,7 @@ on:
   # RELEASE_MERGE is daily, and the one that closes the Dependabot alerts of advisories
   # published since the last push. At 02:25 UTC, in the night of Europe, the Rollout
   # and the checks of every repository that it updates run before the weekly scans of
-  # the repositories from 03:20 on, and nobody waits for them (decision 0179).
+  # the repositories from 03:20 on, and nobody waits for them (decision 0180).
   schedule:
     - cron: "25 2 * * *"
   # By hand, it releases at once: the way for a fix that can't wait for the daily run.
@@ -445,7 +445,7 @@ jobs:
       # doesn't hold it back; a change of a person waits for the maintainer. Where the
       # variable RELEASE_MERGE is daily, as in the blueprint, every release merges in
       # the daily run, at most one a day, and at once in a run started by hand or with
-      # the fix of a vulnerability; the pull request says so in a comment (decision 0179).
+      # the fix of a vulnerability; the pull request says so in a comment (decision 0180).
       - name: Merge a release of dependency updates once its checks pass
         if: steps.app.outputs.token != '' && steps.release.outputs.release_created != 'true'
         env:

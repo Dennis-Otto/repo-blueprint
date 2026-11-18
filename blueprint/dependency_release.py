@@ -1,6 +1,6 @@
 """Whether the open release pull request merges itself in this run of the release
 bot: as a release of dependency updates (decision 0087), or as the daily release of a
-repository whose variable RELEASE_MERGE is daily (decision 0179).
+repository whose variable RELEASE_MERGE is daily (decision 0180).
 
 A release of nothing but dependency updates merges itself once a day, in the run of
 the schedule of the release bot or in one started by hand, and at once when an update

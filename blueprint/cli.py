@@ -2035,7 +2035,7 @@ def add_changelog_parsers(
         "--merge",
         default="",
         help="the variable RELEASE_MERGE: daily merges every release once a day "
-        "(decision 0179); any other value leaves it to the maintainer",
+        "(decision 0180); any other value leaves it to the maintainer",
     )
     dependency_parser.add_argument(
         "--actor",

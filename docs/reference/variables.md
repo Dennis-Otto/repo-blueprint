@@ -187,10 +187,10 @@ Who merges the release pull request. `maintainer`, the default of a new reposito
 
 What the workflows say of it:
 
-- `release.yml`: A release that only updates dependencies merges itself once its checks pass, once a day, or at once with a fix of a vulnerability; where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release does, at most one a day, and at once when the workflow is started by hand (decision 0179).
+- `release.yml`: A release that only updates dependencies merges itself once its checks pass, once a day, or at once with a fix of a vulnerability; where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release does, at most one a day, and at once when the workflow is started by hand (decision 0180).
 - `release.yml`: It is also the daily run that merges a release of dependency updates, or every release where `RELEASE_MERGE` is daily, and the one that closes the Dependabot alerts of advisories published since the last push.
-- `release.yml`: Where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release merges in the daily run, at most one a day, and at once in a run started by hand or with the fix of a vulnerability; the pull request says so in a comment (decision 0179).
-- `release.yml`: With `RELEASE_MERGE` daily, by the event of the run and the day of the last release.
+- `release.yml`: Where the variable `RELEASE_MERGE` is daily, as in the blueprint, every release merges in the daily run, at most one a day, and at once in a run started by hand or with the fix of a vulnerability; the pull request says so in a comment (decision 0180).
+- `release.yml`: With `RELEASE_MERGE` daily, by the event of the run, who started it and the day of the last release: a run that a bot started by hand, such as bot health, keeps to the day as the daily run does; one of a person goes at once.
 
 ### `REVIEWS_OF_MAIN`
 
