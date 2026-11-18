@@ -3631,6 +3631,8 @@ def test_a_repository_without_the_release_app_says_so(
     assert "differ" not in capsys.readouterr().out
 
 
+MEND_INSTALL = "https://github.com/apps/renovate/installations/new"
+
 # The release variables of a repository that has no release app, by choice.
 NO_APP = (
     '[variables]\nRELEASE_APP = ""\nRELEASE_AUTOMATION_CLIENT_ID = ""\n'
@@ -3657,7 +3659,13 @@ def test_the_checklist_of_a_repository_without_the_release_app_asks_for_none(
     out = capsys.readouterr().out
     assert f"  ✔ {NO_RELEASE_APP}\n" in out
     assert "app register" not in out
-    assert "installations/new" not in out
+    assert "/installations/new" not in out.replace(MEND_INSTALL, "")
+    # Renovate, which would run as the release app, is left to the Mend Renovate app.
+    (step,) = [step for step in steps if step.text.startswith("Renovate runs")]
+    assert step.how.count("release app") == 1
+    assert "once the app is installed" not in step.how
+    assert MEND_INSTALL in step.how
+    assert "--data renovate_runner=mend" in step.how
 
 
 @pytest.mark.parametrize(
@@ -3697,7 +3705,7 @@ def test_a_stop_of_github_still_tells_the_rulesets_that_it_refused(
     assert run(github, root, "settings", "apply") == 2
 
     err = capsys.readouterr().err
-    assert "GitHub refused some of the rulesets, and took the others:\n" in err
+    assert "GitHub refused some of the rulesets before it stopped answering:\n" in err
     assert (
         "  ruleset Release tag creation: refused: GitHub answered 422: Validation"
         " Failed (Actor Dennis Otto Release Automation integration must be part of"

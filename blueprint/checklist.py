@@ -349,9 +349,12 @@ def unanswered_app(app: str, root: Path) -> list[str]:
     ]
 
 
-def renovate(api: Api, repo: str, root: Path, app: str = "") -> Step:
+def renovate(
+    api: Api, repo: str, root: Path, app: str = "", no_app: bool = False
+) -> Step:
     """Renovate, which runs once it has opened a pull request, and how it comes to
-    run; app is the release app by the settings as code."""
+    run; app is the release app by the settings as code, and no_app says that the
+    settings leave it out by choice, which leaves Renovate to the Mend Renovate app."""
     pulls = api.get(f"repos/{repo}/pulls?state=all&per_page={LATEST}")
     running = isinstance(pulls, list) and any(
         isinstance(pull, dict)
@@ -360,7 +363,15 @@ def renovate(api: Api, repo: str, root: Path, app: str = "") -> Step:
         for pull in pulls
     )
     runner = renovate_runner(root)
-    if runner == "self":
+    if no_app and runner != "mend":
+        how = [
+            "Renovate runs here as the release app, which the settings as code leave"
+            " out by choice; without it, the Mend Renovate app runs it, which needs"
+            " none. Install it on this repository:",
+            f"{MEND_APP}/installations/new",
+            *change_answer("renovate_runner=mend"),
+        ]
+    elif runner == "self":
         how = [
             "The Renovate workflow of this repository runs it every two hours as the"
             " release app, once the app is installed; start its first run:",
@@ -579,7 +590,11 @@ def checklist(
         *([installed] if installed else []),
         DEPENDABOT_ALERTS,
         renovate(
-            api, repo, root, str(settings.variables.get("RELEASE_APP", "")).strip()
+            api,
+            repo,
+            root,
+            str(settings.variables.get("RELEASE_APP", "")).strip(),
+            no_release_app_by_choice(settings.variables),
         ),
         bot_tools_allowed(root),
         Step(

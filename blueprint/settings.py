@@ -2212,6 +2212,11 @@ def refusal(part: str, error: GitHubError) -> str:
         and len(set(map(str, error.errors))) == 1
     ):
         lines = "".join(f"\n  {item}: {what}" for item, what in error.outcomes)
+        # After a stop, GitHub never saw the items that came after it.
+        if any(what.startswith("stopped") for _, what in error.outcomes):
+            return (
+                f"GitHub refused some of the {part} before it stopped answering:{lines}"
+            )
         return f"GitHub refused some of the {part}, and took the others:{lines}"
     return f"the {part} could not be applied: {error}{hint(part, error)}"
 
