@@ -76,6 +76,17 @@ Jede Woche verschwinden die Branches, die `main` enthält, und die Caches geschl
 
 **Womit:** `cleanup.yml`.
 
+## Der Eintrag auf bestpractices.dev
+
+bestpractices.dev schlägt die Antworten aus `.bestpractices.json` nur für die Fragen vor, die sein Eintrag offen lässt: *Save (and continue) 🤖* ersetzt nie eine Antwort, die der Eintrag gibt, und so erreicht eine Antwort, die ein Update der Datei ändert, etwa der Link auf einen verschobenen Workflow, den Eintrag nie von selbst. Als Release 1.22.0 zwei Workflows zu *Quick checks* zusammenlegte, verlinkten die Einträge aller acht Repositorys weiter `secret-scan.yml`, das es nicht mehr gab.
+
+- **Einmal pro Woche:** Ein Job des wöchentlichen Laufs von *Links* liest den öffentlichen Eintrag des Projekts, dessen Nummer das Badge in der README nennt, einmal und ohne Anmeldung, und vergleicht jede Antwort der Datei mit ihm, auch jeden Link des Eintrags ins Repository mit den Dateien des Checkouts. Ein Repository ohne das Badge fragt nichts.
+- **Ein Issue:** *The answers on bestpractices.dev differ from .bestpractices.json* nennt jede Antwort, die abweicht oder auf eine verschwundene Datei verlinkt, mit dem Text zum Eintragen, und schließt sich, sobald der Eintrag jede Antwort gibt. Eine Seite, die nicht antwortet, lässt es, wie es ist.
+- **Wenige Klicks:** Für jede Stufe gibt das Issue einen Link ihrer Bearbeitungsseite, der die Antworten der Datei vorschlägt und genau die erzwingt, die der Eintrag anders beantwortet (`overrides=`), in Teile unter 8.000 Zeichen geteilt, die längste Adresse, die die Seite annimmt. Öffne jeden angemeldet, prüfe die hervorgehobenen Felder und speichere.
+- **Nur lesend:** Der Bot schreibt den Eintrag nie und braucht kein Secret; die Antworten, die die Datei auslässt, gehören dem Projekt und werden nie verglichen ([Entscheidung 1046](../decisions/1046-a-bot-notices-a-stale-entry-on-bestpractices-dev.md)).
+
+**Wie:** `links.yml`, `blueprint.py best-practices`.
+
 ## Was die Bots kosten
 
 Jeder Bot startet von einem Ereignis, etwa einem Merge in `main`, einem Pull Request oder dem Ende einer Prüfung. Ein Merge, den Auto-Merge mit dem Token eines Workflows macht, startet keinen Workflow, also mergen Renovate, die Updates von Dependabot für den Dev-Container, der Release-Bot und der Branch-Bot als Release-App, und jeder Merge in `main` ist ein Push, der den Release-Bot und den Branch-Bot sofort startet:

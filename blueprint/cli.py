@@ -23,6 +23,7 @@ import blueprint
 from blueprint import (
     advisories,
     annotate,
+    best_practices,
     decisions,
     dependabot,
     ending,
@@ -1342,6 +1343,25 @@ def ending_command(
     print(
         f"The acceptances of the osv-scanner.toml files of {repo} that end within "
         f"{ending.WINDOW.days} days"
+        + (" (a dry run: nothing changed):" if arguments.dry_run else ":")
+    )
+    for line in outcome.summary:
+        print(line)
+    return 0
+
+
+def best_practices_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
+    """Compares the entry of the project on bestpractices.dev with
+    .bestpractices.json, and keeps the one issue of the answers that differ; with
+    --dry-run, only says so. A site that doesn't answer is a warning, not a failure:
+    the next weekly run reads it again."""
+    outcome = best_practices.keep_issue(api, repo, root, dry_run=arguments.dry_run)
+    for warning in outcome.warnings:
+        print(warning, file=sys.stderr)
+    print(
+        f"The entry of {repo} on bestpractices.dev"
         + (" (a dry run: nothing changed):" if arguments.dry_run else ":")
     )
     for line in outcome.summary:
@@ -2860,6 +2880,23 @@ def add_advisories_parsers(
     )
 
 
+def add_best_practices_parser(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Whether the entry on bestpractices.dev gives the answers of the file."""
+    best_practices_parser = commands.add_parser(
+        "best-practices",
+        help="read the public entry of the project on bestpractices.dev once, and keep "
+        f"one issue with the answers of {best_practices.ANSWERS} that it doesn't give "
+        "and the links of the edit pages that take them in; it closes once none differs",
+    )
+    best_practices_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="only say what it would change",
+    )
+
+
 def add_locks_parsers(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -3084,6 +3121,7 @@ def parser() -> argparse.ArgumentParser:
         add_mutation_parsers,
         add_pages_parsers,
         add_advisories_parsers,
+        add_best_practices_parser,
         add_locks_parsers,
     ):
         add(commands)
@@ -3429,6 +3467,8 @@ def main(
             return 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments, root)
+        if arguments.command == "best-practices":
+            return best_practices_command(api, repo, arguments, root)
         if arguments.command == "advisories" and arguments.ending:
             return ending_command(api, repo, arguments, root)
         if arguments.command == "advisories":
