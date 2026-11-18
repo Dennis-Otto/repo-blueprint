@@ -84,7 +84,7 @@ name: After the checks
 # it, about 7,200 runs a week in the repositories of the blueprint. A second job tries
 # once more after any failure of the first, as nothing runs a job here again, and a
 # third says so on the pull request, once for each commit, when the second fails as
-# well (decision 0183). A fork's pull request keeps its threads for a person.
+# well (decision 1043). A fork's pull request keeps its threads for a person.
 #
 # The PR coach: after every run of the checks of a pull request, one comment on it
 # explains each check that failed: what it found, why that matters and how to fix
@@ -1808,7 +1808,7 @@ jobs:
     # Findings takes, with OpenSSF Scorecard, which scans main alone. Findings ran for
     # this before, one run after each scan with one of Bot health behind it; with
     # [findings] pull_requests = false in .github/issue-assistant/config.toml it runs
-    # for main alone (decision 0183). The Issue assistant sync moves the pin with that
+    # for main alone (decision 1043). The Issue assistant sync moves the pin with that
     # of findings.yml. The reusable workflow keeps its group for the branch of the pull
     # request, in which the newest scan dismisses every accepted alert of it.
     if: >-

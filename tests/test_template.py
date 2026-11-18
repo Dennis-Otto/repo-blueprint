@@ -14892,7 +14892,7 @@ ISSUE_ASSISTANT_TOP = (
 # The keys at the end of config.toml with which install writes Issue lifecycle without
 # its start after every run of Release, as the release starts the sweep itself
 # (decision 0182), and Findings for the scans of main alone, as After the checks
-# dismisses the accepted alerts of a pull request (decision 0183); they came after
+# dismisses the accepted alerts of a pull request (decision 1043); they came after
 # 1.18.3 as well.
 ISSUE_ASSISTANT_SWEEP = (
     "# The last job of Release starts the sweep that closes them once a run published a\n"
@@ -14904,7 +14904,7 @@ ISSUE_ASSISTANT_SWEEP = (
     "# After the scan of a pull request, a job of After the checks dismisses its accepted\n"
     "# alerts, with a second try and a comment on the pull request when both fail, so\n"
     "# Findings runs after the scans of main alone and no run of it, nor of Bot health\n"
-    "# behind it, follows each scan of a pull request (decision 0183 of the blueprint).\n"
+    "# behind it, follows each scan of a pull request (decision 1043 of the blueprint).\n"
     "pull_requests = false\n"
 )
 # The repositories that follow the blueprint and added hosts or files of the issue
@@ -25147,7 +25147,7 @@ def test_every_kind_starts_the_followers_of_a_release_alike(
 
 # The jobs of After the checks that dismiss the accepted alerts of a pull request after
 # each of its scans, in place of a run of Findings and one of Bot health for each
-# (decision 0183): the dismissal, its second try and the comment when both failed.
+# (decision 1043): the dismissal, its second try and the comment when both failed.
 DISMISSAL = ("findings", "findings-again", "findings-failed")
 # The scans of a pull request after which they run.
 PULL_REQUEST_SCANS = ["CodeQL", "OSV-Scanner", "Workflow security"]

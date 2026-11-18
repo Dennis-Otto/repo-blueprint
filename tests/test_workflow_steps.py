@@ -689,7 +689,7 @@ def test_every_step_that_changes_something_on_github_runs_in_a_test() -> None:
 
 
 # The dismissal of the accepted alerts of a pull request in After the checks, when both
-# of its tries failed (decision 0183).
+# of its tries failed (decision 1043).
 
 STAYS = "Say on the pull request that its accepted alerts stay"
 STAYS_COMMENTS = r"pr view 42 --json comments --jq \.comments\[\]\.body"
