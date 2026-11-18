@@ -2929,6 +2929,84 @@ def test_the_changelog_code_comes_from_beside_the_hook_or_the_root(
     assert module.with_fragments(line, settings) == line
 
 
+# The index of the records of decisions on main: pull requests added 1040 since the
+# last release, and amended 0002, and left the index alone.
+DECISIONS_INDEX = (
+    "# Decisions\n\n| Record | Decision | Status |\n| --- | --- | --- |\n"
+    "| [0001](0001-record-decisions.md) | Record the decisions | accepted |\n"
+    "| [0002](0002-a-way.md) | A way | accepted |\n"
+)
+
+
+def a_folder_of_decisions(folder: Path) -> Path:
+    """A folder of records whose index lacks a record and a status: its index."""
+    records = {
+        "README.md": DECISIONS_INDEX,
+        "0000-template.md": "# The decision\n",
+        "0001-record-decisions.md": "# Record the decisions\n\n- Status: accepted\n",
+        "0002-a-way.md": "# A way\n\n- Status: amended by [1040](1040-a-new-way.md)\n",
+        "1040-a-new-way.md": "# A new way\n\n- Status: accepted\n",
+    }
+    folder.mkdir(parents=True)
+    (folder / "images").mkdir()
+    for name, text in records.items():
+        (folder / name).write_text(text, encoding="utf-8", newline="\n")
+    return folder / "README.md"
+
+
+def test_the_index_of_the_decisions_shows_the_records_that_wait_for_the_release(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    index = a_folder_of_decisions(tmp_path / "docs/decisions")
+    page = page_of("decisions/README.html")
+    page.file.abs_src_path = str(index)
+
+    shown = module.on_page_markdown(
+        DECISIONS_INDEX, page, SimpleNamespace(plugins={}), []
+    )
+
+    assert shown == (
+        "# Decisions\n\n| Record | Decision | Status |\n| --- | --- | --- |\n"
+        "| [0001](0001-record-decisions.md) | Record the decisions | accepted |\n"
+        "| [0002](0002-a-way.md) | A way | amended by [1040](1040-a-new-way.md) |\n"
+        "| [1040](1040-a-new-way.md) | A new way | accepted |\n"
+    )
+    # The file stays as it is: only the release writes it.
+    assert index.read_text(encoding="utf-8") == DECISIONS_INDEX
+    # Another page of the folder, or another page that is an index, stays as it is.
+    for url in ("decisions/0002-a-way.html", "guide/README.html"):
+        other = page_of(url)
+        other.file.abs_src_path = str(index)
+        assert module.with_decisions(DECISIONS_INDEX, other) == DECISIONS_INDEX
+
+
+# The copy of blueprint/decisions.py in a folder of its own is the code with the
+# mutants in the copy of the mutation tests, which finds no configuration of mutmut.
+@pytest.mark.mutation_unsafe
+def test_the_decisions_code_comes_from_beside_the_hook_or_the_root(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    page = page_of("decisions/README.html")
+    page.file.abs_src_path = str(a_folder_of_decisions(tmp_path / "docs/decisions"))
+    # In a repository made from the blueprint, the hook and blueprint.py are in its
+    # .github/; in the blueprint itself, blueprint.py is at the root.
+    made = tmp_path / "made/.github"
+    (made / "blueprint").mkdir(parents=True)
+    shutil.copy(ROOT / "blueprint/decisions.py", made / "blueprint/decisions.py")
+    module.__file__ = str(made / "mkdocs_blueprint.py")
+    assert "| [1040](1040-a-new-way.md) |" in module.with_decisions(
+        DECISIONS_INDEX, page
+    )
+    code = module.decisions_code()
+    assert Path(code.__file__) == (made / "blueprint/decisions.py").resolve()
+    # Without blueprint.py, the page shows the index as it is.
+    module.__file__ = str(tmp_path / "alone/.github/mkdocs_blueprint.py")
+    assert module.decisions_code() is None
+    assert module.with_decisions(DECISIONS_INDEX, page) == DECISIONS_INDEX
+
+
 def test_the_changelog_takes_the_date_of_its_newest_fragment(tmp_path: Path) -> None:
     settings = changelog_repository(
         tmp_path, **{"dark-mode.md": DARK_MODE, "token.md": TOKEN}

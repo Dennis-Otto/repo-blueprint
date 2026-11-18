@@ -1001,7 +1001,10 @@ def binaries_command(root: Path) -> int:
 def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
     """What is wrong with the numbers of the records of the decisions and with their
     index, one on each line, and in the CI also as annotations of the index; with
-    --fix, the index first, where only it is wrong."""
+    --fix, the index first, where only it is wrong, and with --complete, as the
+    release writes it, with the row and the status of every record. In the CI of a
+    pull request, a record that main doesn't have takes the number of the pull
+    request or of an issue that it fixes (decision 1033)."""
     folder = decisions.FOLDER
     names = decisions.names_of(root, folder)
     if not names:
@@ -1009,11 +1012,17 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
         return 0
     path = root / folder / decisions.INDEX
     index = path.read_text(encoding="utf-8") if decisions.INDEX in names else None
-    if arguments.fix and index is not None and decisions.index_findings(names, index):
+    complete = arguments.complete
+    if (
+        (arguments.fix or complete)
+        and index is not None
+        and (complete or decisions.index_findings(names, index))
+    ):
         new = decisions.fixed(
             index,
             names,
             lambda name: (root / folder / name).read_text(encoding="utf-8"),
+            complete=complete,
         )
         # A fix that changes nothing, such as of a row whose file is gone, says nothing.
         if new != index:
@@ -1021,7 +1030,16 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
             print(f"{folder}/{decisions.INDEX}: the rows of the index are fixed")
             index = new
     records, strays = decisions.numbered(names)
+    pull = decisions.pull_request_of(root, os.environ, folder)
     numbers = strays + decisions.number_findings(records)
+    if pull is not None:
+        numbers += decisions.pull_request_findings(records, pull)
+        if pull.main is None:
+            print(
+                f"The records of main aren't in this checkout of pull request "
+                f"#{pull.number}, which the merge of fetch-depth 2 brings, so the step "
+                "checks only that each number is a record's own."
+            )
     rows = [] if index is None else decisions.index_findings(names, index)
     if not numbers and not rows:
         count = sum(len(files) for files in records.values())
@@ -1041,14 +1059,19 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
         for finding in numbers + rows:
             print(annotate.Annotation("Records of decisions", finding, place).command())
     if numbers:
-        print(
-            "Another pull request took the number first, or a file is no record: give "
-            "the record of your pull request the next free number, "
-            f"{decisions.next_free(records):04d}, in the name of its file, in its row "
-            f"of {folder}/{decisions.INDEX} and in each link to it. Only you can "
-            "choose which record moves, so no command renames one."
+        own = (
+            f", {decisions.own_number(pull.main, pull.number):04d},"
+            if pull is not None and pull.main is not None
+            else ""
         )
-    if rows and arguments.fix:
+        print(
+            "Another pull request took the number first, or a file is no record: a new "
+            f"record takes the number of its pull request{own} or that of an issue that "
+            "the pull request fixes, which its description names as Fixes #…, in the "
+            "name of its file and in each link to it. Only you can choose which record "
+            "moves, so no command renames one."
+        )
+    if rows and (arguments.fix or complete):
         print(
             "The rows that these lines name need you: a row of a file that the folder "
             "doesn't have, or two rows of one record that say different things."
@@ -1056,8 +1079,8 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
     elif rows:
         print(
             f"{command(root)} decisions --fix fixes what only the index gets wrong: "
-            "the number of a row, the row of a renamed record, a row twice, a missing "
-            "row and the order of the rows."
+            "the number of a row, the row of a renamed record, a row twice and the "
+            "order of the rows."
         )
     return 1
 
@@ -2897,14 +2920,22 @@ def add_pages_parsers(
     )
     decisions_parser = commands.add_parser(
         "decisions",
-        help="the records of docs/decisions/: a number of its own for each, the next "
-        "one after the last, and one row for each in the index, in order",
+        help="the records of docs/decisions/: a number of its own for each, in the CI "
+        "of a pull request that of the pull request or of an issue that it fixes for "
+        "a new one, and at most one row for each in the index, in order",
     )
-    decisions_parser.add_argument(
+    decisions_actions = decisions_parser.add_mutually_exclusive_group()
+    decisions_actions.add_argument(
         "--fix",
         action="store_true",
         help="fix what only the index gets wrong first: the number of a row, the row "
-        "of a renamed record, a row twice, a missing row and the order of the rows",
+        "of a renamed record, a row twice and the order of the rows",
+    )
+    decisions_actions.add_argument(
+        "--complete",
+        action="store_true",
+        help="write the index as the release does: fixed, with a row for each record "
+        "that it misses and the status of each record in its row",
     )
     migrate_parser = commands.add_parser(
         "migrate",
