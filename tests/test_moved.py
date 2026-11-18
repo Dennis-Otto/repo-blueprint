@@ -86,6 +86,25 @@ def test_the_badge_of_a_removed_workflow_shows_the_one_that_took_its_place(
     assert not moved_lines(root, REMOVED)
 
 
+def test_the_name_of_a_repository_can_have_a_dot(tmp_path: Path) -> None:
+    # Such as dennis-otto.github.io: its own addresses are found by its whole name.
+    site = "https://github.com/Dennis-Otto/demo.site/actions/workflows"
+    root = repository(
+        tmp_path,
+        {
+            ".copier-answers.yml": "owner: Dennis-Otto\nproject_slug: demo.site\n",
+            "README.md": f"[![Scan]({site}/secret-scan.yml/badge.svg)]\n",
+        },
+    )
+    found = moved_lines(root, REMOVED)
+    assert [(item.path, item.line, item.fixable) for item in found] == [
+        ("README.md", 1, True)
+    ]
+    move_lines(root, found)
+    fixed = (root / "README.md").read_text(encoding="utf-8")
+    assert fixed == f"[![Scan]({site}/quick-checks.yml/badge.svg)]\n"
+
+
 @pytest.mark.parametrize(
     "link",
     [

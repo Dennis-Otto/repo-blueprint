@@ -10337,25 +10337,20 @@ def test_the_update_of_every_kind_finishes_as_the_fix_bot_does() -> None:
     assert owned < update < guard < move
 
 
-def template_paths() -> set[str]:
-    """The files that owned.txt lists for some kind of project, without conditions."""
-    text = (ROOT / "template/.github/blueprint/owned.txt.jinja").read_text(
-        encoding="utf-8"
-    )
-    return {
-        line for line in text.splitlines() if line and not line.startswith(("#", "[%"))
-    }
-
-
-def test_each_removed_file_is_gone_and_its_successor_is_there() -> None:
-    # A file of MOVED is one that no release brings any more, and the file that took
-    # its place is one that a repository gets.
+def test_each_removed_file_is_gone_and_its_successor_is_there(
+    projects: dict[str, Path],
+) -> None:
+    # A file of MOVED is one that a release no longer brings to some kind of project,
+    # and the file that took its place is there wherever the old one is gone. A file
+    # that one kind loses and the others keep is gone only from that kind: the guard
+    # of the Variants workflow asks for its entry all the same.
     removed = {**MOVED, **MOVED_NEXT}
     assert removed
-    paths = template_paths()
     for old, new in removed.items():
-        assert old not in paths, old
-        assert new is None or new in paths, new
+        gone = [kind for kind in KINDS if not (projects[kind] / old).exists()]
+        assert gone, old
+        for kind in gone:
+            assert new is None or (projects[kind] / new).is_file(), (kind, new)
 
 
 def test_a_new_repository_names_no_removed_file(projects: dict[str, Path]) -> None:

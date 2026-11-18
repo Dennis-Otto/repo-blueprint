@@ -214,8 +214,8 @@ step "Files of the project"
 # What a release of the blueprint moves in a file that an update leaves as it is, such
 # as the group of a label in .github/labels.toml, or a page that names a file that a
 # release removed. migrate --fix moves it, and the fix bot commits that onto the pull
-# request of the update; any other line that names a removed file is a warning. The Python and blueprint.py of the
-# step Pages in one column.
+# request of the update; any other line that names a removed file is a warning. The
+# Python and blueprint.py of the step Pages in one column.
 if [[ -n "$python" ]]; then
   "$python" "$tool" migrate
 elif [[ -n "${CI:-}" ]]; then

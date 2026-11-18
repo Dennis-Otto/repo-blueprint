@@ -211,7 +211,8 @@ def answer(root: Path, name: str) -> str:
     """An answer of Copier for the repository in root, empty without one."""
     answers = root / ANSWERS
     text = answers.read_text(encoding="utf-8") if answers.is_file() else ""
-    found = re.search(rf"^{name}: *['\"]?([\w-]+)", text, re.MULTILINE)
+    # A dot as well: the name of a repository can have one, such as owner.github.io.
+    found = re.search(rf"^{name}: *['\"]?([\w.-]+)", text, re.MULTILINE)
     return found[1] if found else ""
 
 
