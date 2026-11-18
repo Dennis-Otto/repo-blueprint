@@ -7,7 +7,8 @@ name: Issue assistant sync
 # demand, this workflow takes the latest published release of the issue assistant and,
 # once it has verified that the release workflow of the issue assistant made it, runs
 # install of that release in the root of the blueprint, takes over its firewall policy
-# and moves every pin of the action to it, that of the check in the Lint workflow too,
+# and moves every pin of the action to it, that of the check in the Lint workflow and
+# that of the reusable workflow of Findings in After the checks too,
 # with sync_issue_assistant.py. It keeps one pull request with the result from the
 # branch bot/issue-assistant, as the release app, which merges itself once every check
 # passes; the next release of the blueprint brings it to every repository. A release

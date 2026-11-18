@@ -91,6 +91,7 @@ from blueprint.bot_health import (
     LABEL,
     LABELS,
     LAST_JOB,
+    ONE_TRY,
     OWN_ISSUE,
     RENOVATE_LABEL,
     STEP,
@@ -14888,14 +14889,23 @@ ISSUE_ASSISTANT_TOP = (
     "# This file belongs to the blueprint, whose updates change it: the hosts and the "
     "files\n# of this project go into config.project.toml, which adds to them.\n"
 )
-# The key at the end of config.toml with which install writes Issue lifecycle without
+# The keys at the end of config.toml with which install writes Issue lifecycle without
 # its start after every run of Release, as the release starts the sweep itself
-# (decision 0182); it came after 1.18.3 as well.
+# (decision 0182), and Findings for the scans of main alone, as After the checks
+# dismisses the accepted alerts of a pull request (decision 1043); they came after
+# 1.18.3 as well.
 ISSUE_ASSISTANT_SWEEP = (
     "# The last job of Release starts the sweep that closes them once a run published a\n"
     "# release, so Issue lifecycle doesn't follow the end of every run of Release, most\n"
     "# of which publish nothing (decision 0182 of the blueprint).\n"
     "sweep_after_release_workflow = false\n"
+    "\n"
+    "[findings]\n"
+    "# After the scan of a pull request, a job of After the checks dismisses its accepted\n"
+    "# alerts, with a second try and a comment on the pull request when both fail, so\n"
+    "# Findings runs after the scans of main alone and no run of it, nor of Bot health\n"
+    "# behind it, follows each scan of a pull request (decision 1043 of the blueprint).\n"
+    "pull_requests = false\n"
 )
 # The repositories that follow the blueprint and added hosts or files of the issue
 # assistant to its config.toml, as each had it at release 1.18.3, by their kind.
@@ -25133,6 +25143,140 @@ def test_every_kind_starts_the_followers_of_a_release_alike(
         (project / ".github/issue-assistant/config.toml").read_text("utf-8")
     )
     assert config["releases"]["sweep_after_release_workflow"] is False
+
+
+# The jobs of After the checks that dismiss the accepted alerts of a pull request after
+# each of its scans, in place of a run of Findings and one of Bot health for each
+# (decision 1043): the dismissal, its second try and the comment when both failed.
+DISMISSAL = ("findings", "findings-again", "findings-failed")
+# The scans of a pull request after which they run.
+PULL_REQUEST_SCANS = ["CodeQL", "OSV-Scanner", "Workflow security"]
+
+
+def test_after_the_checks_dismisses_the_accepted_alerts_of_a_pull_request() -> None:
+    flows = workflows(ROOT)
+    after = parse(flows["after-checks.yml"])
+    findings = parse(flows["findings.yml"])
+    first = job_in(after, "findings")
+    # After each scan of a pull request from a branch of this repository whose commit
+    # is still its head, whatever the scan found, as Findings ran before; never after
+    # the scan of a fork, which keeps its threads for a person, nor after one of main.
+    assert condition_of(first) == (
+        "!github.event.repository.fork && "
+        f"contains(fromJSON('{json.dumps(PULL_REQUEST_SCANS)}'), "
+        "github.event.workflow_run.name) && "
+        "github.event.workflow_run.event == 'pull_request' && "
+        "github.event.workflow_run.head_repository.full_name == github.repository && "
+        "contains(github.event.workflow_run.pull_requests.*.head.sha, "
+        "github.event.workflow_run.head_sha)"
+    )
+    # The scans are those of Findings but OpenSSF Scorecard, which scans main alone,
+    # and After the checks follows the end of each.
+    scans = findings["on"]["workflow_run"]["workflows"]
+    assert sorted(set(scans) - {"OpenSSF Scorecard"}) == PULL_REQUEST_SCANS
+    assert set(PULL_REQUEST_SCANS) <= watched_after_the_checks(
+        flows["after-checks.yml"]
+    )
+    scorecard = parse(flows["scorecard.yml"])["on"]
+    assert "pull_request" not in scorecard
+    assert scorecard["push"]["branches"] == ["main"]
+    # Findings runs after the scans of main alone, as install of the issue assistant
+    # writes it for the key of config.toml, which its check in Lint expects; still
+    # every morning and after a push of findings.toml.
+    assert findings["on"]["workflow_run"]["branches"] == ["main"]
+    assert set(findings["on"]) == {
+        "schedule",
+        "push",
+        "workflow_run",
+        "workflow_dispatch",
+    }
+    assert findings["on"]["push"] == {
+        "branches": ["main"],
+        "paths": [".github/findings.toml"],
+    }
+    config = tomllib.loads(
+        (ROOT / ".github/issue-assistant/config.toml").read_text(encoding="utf-8")
+    )
+    assert config["findings"] == {"pull_requests": False}
+    # Both tries call the reusable workflow of Findings at the pin of findings.yml,
+    # which the Issue assistant sync moves with it, with its rights and no dry run.
+    # They keep its group for the branch of the pull request, in which the newest
+    # scan dismisses every accepted alert, and take none of their own, such as the
+    # group of the PR coach for each commit.
+    own = job_in(findings, "findings")
+    assert own["uses"].startswith(
+        "Dennis-Otto/issue-assistant/.github/workflows/reusable-findings.yml@"
+    )
+    for job_id in DISMISSAL[:2]:
+        called = job_in(after, job_id)
+        assert called["uses"] == own["uses"]
+        assert called["permissions"] == own["permissions"]
+        assert called["permissions"] == {
+            "contents": "read",
+            "security-events": "write",
+        }
+        assert called["with"] == {"dry_run": False}
+        assert "concurrency" not in called
+    # The second try after any failure of the first, and only then; the comment only
+    # after both failed.
+    again = job_in(after, "findings-again")
+    assert again["needs"] == "findings"
+    assert condition_of(again) == "failure() && needs.findings.result == 'failure'"
+    failed = job_in(after, "findings-failed")
+    assert failed["needs"] == ["findings", "findings-again"]
+    assert condition_of(failed) == (
+        "always() && needs.findings-again.result == 'failure'"
+    )
+    # The comment writes to the pull request alone, through GitHub's API alone, once
+    # for each commit, and stops when Harden-Runner doesn't block.
+    assert failed["permissions"] == {"pull-requests": "write"}
+    assert failed["concurrency"] == {
+        "group": "${{ github.workflow }}-findings-"
+        "${{ github.event.workflow_run.head_sha }}",
+        "cancel-in-progress": False,
+    }
+    blocking = failed["steps"][0]["with"]
+    assert blocking["egress-policy"] == "block"
+    assert blocking["allowed-endpoints"].split() == ["api.github.com:443"]
+    names = [each.get("name") for each in failed["steps"]]
+    assert names.index("Make sure that Harden-Runner blocks") < names.index(
+        "Say on the pull request that its accepted alerts stay"
+    )
+    said = step_in(failed, "Say on the pull request that its accepted alerts stay")
+    assert said["run"].startswith('eval "$OUTAGE"\n')
+    assert 'once gh pr comment "$PULL"' in said["run"]
+    # Bot health still watches Findings on main, opens and closes its issue, and
+    # gives it its one try.
+    assert "Findings" in watched_by_bot_health(ROOT)
+    assert "Findings" in ONE_TRY
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_kind_dismisses_the_accepted_alerts_of_a_pull_request_alike(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    rendered = workflows(project)
+    own = workflows(ROOT)
+    for job_id in DISMISSAL:
+        assert job_in(rendered["after-checks.yml"], job_id) == job_in(
+            own["after-checks.yml"], job_id
+        ), job_id
+    # Its Findings is the blueprint's, for the scans of main alone, and its
+    # config.toml has the key that makes install write it so and the check of its
+    # Lint expect it.
+    assert rendered["findings.yml"] == own["findings.yml"]
+    config = tomllib.loads(
+        (project / ".github/issue-assistant/config.toml").read_text("utf-8")
+    )
+    assert config["findings"]["pull_requests"] is False
+    # Each scan of a pull request is a workflow of the project, whose end After the
+    # checks follows.
+    names = {parse(text)["name"] for text in rendered.values()}
+    assert set(PULL_REQUEST_SCANS) <= names
+    assert set(PULL_REQUEST_SCANS) <= watched_after_the_checks(
+        rendered["after-checks.yml"]
+    )
 
 
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:

@@ -1,6 +1,6 @@
 # A bot that fails keeps one issue open until it passes again
 
-- Status: accepted, amended by [0126](0126-a-failure-issue-waits-for-the-jobs-that-failed.md), with which a run that passes closes the issue only once every job that failed passed again in it
+- Status: accepted, amended by [0126](0126-a-failure-issue-waits-for-the-jobs-that-failed.md), with which a run that passes closes the issue only once every job that failed passed again in it, and by [1043](1043-after-the-checks-dismisses-the-accepted-alerts-of-a-pull-request.md), with which a failed dismissal of the accepted alerts of a pull request shows on the pull request
 - Date: 2026-10-13
 
 ## Context

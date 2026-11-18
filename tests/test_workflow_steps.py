@@ -441,6 +441,11 @@ TESTED = {
     ("publish-store.yml", "store", "Submit the release for review"): "test_template.py",
     ("after-checks.yml", "rerun", "Run the failed jobs once more"): "test_template.py",
     ("after-checks.yml", "branches", "Start the branch bot"): "test_workflow_steps.py",
+    (
+        "after-checks.yml",
+        "findings-failed",
+        "Say on the pull request that its accepted alerts stay",
+    ): "test_workflow_steps.py",
     **{
         (name, "bot-health", "Start the bot-health bot"): "test_workflow_steps.py"
         for name in (
@@ -681,6 +686,112 @@ def test_every_step_that_changes_something_on_github_runs_in_a_test() -> None:
             text == step_name or (len(text) >= 20 and step_name.startswith(text))
             for text in strings
         ), f"{module} runs no step {step_name!r} of {name}/{job_id}"
+
+
+# The dismissal of the accepted alerts of a pull request in After the checks, when both
+# of its tries failed (decision 1043).
+
+STAYS = "Say on the pull request that its accepted alerts stay"
+STAYS_COMMENTS = r"pr view 42 --json comments --jq \.comments\[\]\.body"
+STAYS_MARKER = f"<!-- the accepted alerts stay on {SHA} -->"
+
+
+def say_that_the_alerts_stay(tmp_path: Path, *answers: Answer) -> StepResult:
+    return run_step(
+        tmp_path,
+        "after-checks.yml",
+        "findings-failed",
+        STAYS,
+        answers=answers,
+        env={
+            "PULL": "42",
+            "SHA": SHA,
+            "NAME": "CodeQL",
+            "URL": "https://run/9",
+        },
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+def test_the_pull_request_learns_that_its_accepted_alerts_stay(tmp_path: Path) -> None:
+    done = say_that_the_alerts_stay(
+        tmp_path,
+        Answer(STAYS_COMMENTS, "Another comment.\n"),
+        Answer(r"pr comment 42 --body .*"),
+    )
+
+    assert done.returncode == 0, done.stderr
+    [comment] = done.called(r"pr comment 42 --body ")
+    # It names the scan and the run, what blocks the merge and what helps, and ends
+    # with the mark of the commit.
+    assert "after the scan *CodeQL*, not in a second try either (https://run/9)" in (
+        comment
+    )
+    assert "`.github/findings.toml`" in comment
+    assert "*Re-run failed jobs*, or a person resolves them." in comment
+    assert comment.endswith(STAYS_MARKER)
+    assert (
+        done.summary
+        == f"The accepted alerts of {SHA} stay; the pull request says so.\n"
+    )
+
+
+def test_the_pull_request_learns_it_once_for_each_commit(tmp_path: Path) -> None:
+    # Each of the three scans of a commit may end so; the first says it.
+    done = say_that_the_alerts_stay(
+        tmp_path,
+        Answer(STAYS_COMMENTS, f"They stay.{STAYS_MARKER}\n"),
+        Answer(r"pr comment .*"),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert not done.called("pr comment")
+    assert done.summary == (
+        f"The pull request says already that the accepted alerts of {SHA} stay.\n"
+    )
+
+
+def test_the_pull_request_learns_it_for_a_new_commit(tmp_path: Path) -> None:
+    older = STAYS_MARKER.replace(SHA, "b" * 40)
+    done = say_that_the_alerts_stay(
+        tmp_path,
+        Answer(STAYS_COMMENTS, f"They stay.{older}\n"),
+        Answer(r"pr comment .*"),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called("pr comment 42 ")) == 1
+
+
+def test_the_comment_on_the_alerts_that_stay_sits_out_an_outage(
+    tmp_path: Path,
+) -> None:
+    # GitHub keeps failing, as on 9 November 2026: a notice, no comment, and the run
+    # mails no one for it (decision 0136).
+    done = say_that_the_alerts_stay(
+        tmp_path,
+        Answer(STAYS_COMMENTS, err="HTTP 503: Service Unavailable\n", code=1),
+        Answer(r"pr comment .*"),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(STAYS_COMMENTS)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith("::notice title=GitHub is unavailable::")
+    assert not done.called("pr comment")
+
+
+def test_a_refused_comment_on_the_alerts_that_stay_fails_the_job(
+    tmp_path: Path,
+) -> None:
+    done = say_that_the_alerts_stay(
+        tmp_path,
+        Answer(STAYS_COMMENTS, ""),
+        Answer(r"pr comment .*", err="HTTP 403: Forbidden\n", code=1),
+    )
+
+    assert done.returncode != 0
+    assert len(done.called("pr comment")) == 1
 
 
 # The clean-up bot.
