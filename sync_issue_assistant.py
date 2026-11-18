@@ -39,8 +39,13 @@ from typing import Any
 
 ACTION = "Dennis-Otto/issue-assistant"
 # A pin of the action, as install writes it: the commit of the release, and its tag
-# in the comment.
-PIN = re.compile(rf"{re.escape(ACTION)}@(?P<ref>[0-9a-f]{{40}}) # (?P<version>\S+)")
+# in the comment. A job of another workflow may call a reusable workflow of the
+# release at the same pin, such as the dismissal of the accepted alerts of a pull
+# request in after-checks.yml, whose path the pin keeps.
+PIN = re.compile(
+    rf"{re.escape(ACTION)}(?P<workflow>/\.github/workflows/reusable-[a-z-]+\.yml)?"
+    r"@(?P<ref>[0-9a-f]{40}) # (?P<version>\S+)"
+)
 SHA = re.compile(r"[0-9a-f]{40}")
 # A tag of a release, such as v1.3.1, which the commit names and the pins carry.
 VERSION = re.compile(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
@@ -75,6 +80,14 @@ COMMIT = (
 
 class SyncError(Exception):
     """A release that the sync can't take over by itself, with what to do."""
+
+
+def moved_pins(text: str, ref: str, version: str) -> str:
+    """text with every pin of the action at the release of ref and version, each
+    with the reusable workflow that it calls, if any."""
+    return PIN.sub(
+        lambda pin: f"{ACTION}{pin['workflow'] or ''}@{ref} # {version}", text
+    )
 
 
 def include(name: str) -> str:
@@ -165,10 +178,9 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
     if installed.returncode != 0:
         raise SyncError(f"install of {version} failed; its log above says why.")
     shutil.copyfile(templates / FIREWALL.name, root / FIREWALL)
-    pin = f"{ACTION}@{ref} # {version}"
     for path in sorted((root / WORKFLOWS).glob("*.yml")):
         text = path.read_text(encoding="utf-8")
-        moved = PIN.sub(lambda _: pin, text)
+        moved = moved_pins(text, ref, version)
         if moved != text:
             path.write_text(moved, encoding="utf-8", newline="\n")
     # A workflow of the templates that install leaves out of the root, such as that
@@ -303,7 +315,7 @@ def what(root: Path, folder: Path, path: str) -> str:
     if old is None:
         return "a new workflow of the release"
     pin = PIN.search(new)
-    if pin and PIN.sub(lambda _: pin[0], old) == new:
+    if pin and moved_pins(old, pin["ref"], pin["version"]) == new:
         return "every pin of the action moves to the release"
     return "the template of the release"
 

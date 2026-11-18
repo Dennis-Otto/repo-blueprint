@@ -40,3 +40,10 @@ close_with_release = true
 # release, so Issue lifecycle doesn't follow the end of every run of Release, most
 # of which publish nothing (decision 0182 of the blueprint).
 sweep_after_release_workflow = false
+
+[findings]
+# After the scan of a pull request, a job of After the checks dismisses its accepted
+# alerts, with a second try and a comment on the pull request when both fail, so
+# Findings runs after the scans of main alone and no run of it, nor of Bot health
+# behind it, follows each scan of a pull request (decision 0183 of the blueprint).
+pull_requests = false
