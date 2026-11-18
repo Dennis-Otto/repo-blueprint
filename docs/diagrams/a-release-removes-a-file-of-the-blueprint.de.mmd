@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Release, das eine Datei des Blueprints entfernt, die eigenen Zeilen des Projekts erreicht
+    accDescr: Ein Pull Request des Blueprints entfernt eine Datei des Blueprints. Der Job update des Variants-Workflows lässt ihn scheitern, bis MOVED in blueprint/migrate.py die Datei und die nennt, die ihren Platz einnimmt. Nach dem Release löscht das Update die Datei, und der Schritt Files of the project findet jede Zeile des Projekts, die sie noch nennt. Eine Markdown-Seite ändert migrate --fix, und der Fix-Bot committet das auf das Update. Jede andere Zeile ist eine Warnung und ein Schritt der Checkliste für dich, und eine Zeile mit blueprint: keep in einem Kommentar bleibt, wie sie ist. Dann merged das Update sich selbst.
+
+    removed(["Ein Pull Request des<br>Blueprints entfernt eine Datei"])
+    guard{"Variants, update:<br>nennt MOVED sie?"}
+    entry["Trage sie in MOVED ein, mit<br>der Datei an ihrer Stelle"]
+    update["Nach dem Release löscht<br>das Update die Datei"]
+    step{"Schritt Files of the project:<br>welche Zeile nennt sie?"}
+    page["Eine Markdown-Seite:<br>migrate --fix ändert nur<br>den Pfad, der Fix-Bot<br>committet es"]
+    other["Jede andere Zeile: eine Warnung<br>und ein Schritt der Checkliste"]
+    kept["Eine Zeile mit<br>blueprint: keep bleibt"]
+    merged(["Das Update<br>merged sich selbst"])
+
+    removed --> guard
+    guard -- "nein: die Prüfung scheitert" --> entry --> guard
+    guard -- "ja" --> update --> step
+    step --> page --> merged
+    step --> other --> merged
+    step --> kept --> merged
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class removed,guard,update,step,page bot
+    class entry,other,kept you
+    class merged done

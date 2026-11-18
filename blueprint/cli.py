@@ -111,7 +111,7 @@ from blueprint.fixes import (
 )
 from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
-from blueprint.migrate import migrate
+from blueprint.migrate import KEEP, migrate, move_lines, moved_lines, unlisted
 from blueprint.notices import third_party_notices
 from blueprint.outage import (
     check_unavailable,
@@ -1128,22 +1128,53 @@ def translations_command(arguments: argparse.Namespace, root: Path) -> int:
 
 def migrate_command(arguments: argparse.Namespace, root: Path) -> int:
     """What the releases of the blueprint move in the files of the project, one on each
-    line, and in the CI also as annotations of those files; with --fix, it moves them."""
+    line, and in the CI also as annotations of those files; with --fix, it moves them.
+    The lines of the project that name a file that a release removed count too: a page
+    of Markdown moves to the file that took its place, and every other line is a
+    warning for a person, which fails nothing (decision 1051)."""
+    if arguments.since is not None:
+        return removed_command(arguments.since, root)
+    ci = os.environ.get("GITHUB_ACTIONS") == "true"
     found = migrate(root, arguments.fix)
+    named = moved_lines(root)
+    pages = [item for item in named if item.fixable]
+    if arguments.fix:
+        move_lines(root, pages)
     for migration in found:
         print(f"{migration.path}: {migration.summary}")
-    if arguments.fix or not found:
+    for item in named:
+        print(item.describe())
+        if ci and not item.fixable:
+            print(
+                f"::warning file={item.path},line={item.line},"
+                f"title=Files of the project::{item.describe()}"
+            )
+    if len(pages) < len(named):
         print(
-            f"{len(found)} move(s) of a release done in the files of the project."
-            if found
+            "A person changes the other lines that name a removed file, as no bot "
+            "changes a workflow, a file under .github/, a file that isn't a page of "
+            "Markdown or a name that nothing replaces. A line that stays as it is, "
+            f"such as one about the history of the project, says `{KEEP}` in a "
+            "comment; `blueprint.py checklist` lists the lines until then."
+        )
+    moves = len(found) + len(pages)
+    if arguments.fix or not moves:
+        print(
+            f"{moves} move(s) of a release done in the files of the project."
+            if moves
             else "The files of the project have what the releases of the blueprint moved."
         )
         return 0
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    if ci:
         for migration in found:
             print(
                 f"::error file={migration.path},title=Files of the project::"
                 f"{migration.summary}"
+            )
+        for item in pages:
+            print(
+                f"::error file={item.path},line={item.line},"
+                f"title=Files of the project::{item.describe()}"
             )
     print(
         f"{command(root)} migrate --fix moves what these lines name: an update of the "
@@ -1151,6 +1182,31 @@ def migrate_command(arguments: argparse.Namespace, root: Path) -> int:
         "through this check. How a project declines: "
         "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/"
         "troubleshooting.md#a-release-moves-a-file-of-the-project"
+    )
+    return 1
+
+
+def removed_command(before: Path, root: Path) -> int:
+    """The guard of the Variants workflow on the update of a project: each file of the
+    blueprint that the owned.txt of the release before lists and that the update
+    removed needs its entry in MOVED of blueprint/migrate.py, or no release finds
+    the lines of the projects that still name it."""
+    missing = unlisted(before.read_text(encoding="utf-8"), root)
+    for path in missing:
+        print(
+            f"::error title=A removed file without its entry::The update removes {path}, "
+            "a file of the blueprint, which MOVED of blueprint/migrate.py doesn't name."
+        )
+    if not missing:
+        print(
+            "Each file of the blueprint that the update removes has its entry in MOVED "
+            "of blueprint/migrate.py."
+        )
+        return 0
+    print(
+        "Name each in MOVED of blueprint/migrate.py with the file that takes its place, "
+        "or with None when nothing does: the update deletes it, and only then does "
+        "migrate find the lines of a project that still name it (decision 1051)."
     )
     return 1
 
@@ -2983,6 +3039,14 @@ def add_pages_parsers(
         "--fix",
         action="store_true",
         help="move it in those files",
+    )
+    migrate_parser.add_argument(
+        "--since",
+        type=Path,
+        metavar="OWNED",
+        help="instead: fail for each file of the blueprint that OWNED, the owned.txt "
+        "of an earlier release, lists and the update removed without its entry in "
+        "MOVED (the Variants workflow)",
     )
     translations_parser = commands.add_parser(
         "translations",

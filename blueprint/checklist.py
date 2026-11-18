@@ -18,6 +18,7 @@ from blueprint.best_practices import BADGE, SAVE, TITLE
 from blueprint.best_practices import SITE as BEST_PRACTICES
 from blueprint.bootstrap import PUSH_AS_GH, SIGNING
 from blueprint.github import Api, GitHubError
+from blueprint.migrate import KEEP, moved_lines
 from blueprint.settings import (
     BRANCH,
     CLASSIC_PROTECTION,
@@ -500,6 +501,26 @@ def bot_tools_allowed(root: Path) -> Step:
     )
 
 
+def moved_step(root: Path) -> list[Step]:
+    """The lines of the project that still name a file that a release of the blueprint
+    removed, which `migrate --fix` doesn't change: a workflow, a file under .github/,
+    a file that isn't a page of Markdown, or a name that nothing replaces. They fail no
+    check, so that no update waits for a person over a comment (decision 1051); the
+    step stays open until a person changes each or keeps it."""
+    found = [item for item in moved_lines(root) if not item.fixable]
+    if not found:
+        return []
+    return [
+        Step(
+            "No file of the project names a file that a release of the blueprint"
+            " removed",
+            False,
+            "\n".join(item.describe() for item in found)
+            + f"\nChange each line, or keep it with `{KEEP}` in a comment.",
+        )
+    ]
+
+
 def workflows_step(api: Api, repo: str, root: Path) -> list[Step]:
     """Whether GitHub knows each workflow, which it starts only then, and whether the
     comments that registered some are out again (#652). Both are of main as GitHub
@@ -598,6 +619,7 @@ def checklist(
             no_release_app_by_choice(settings.variables),
         ),
         bot_tools_allowed(root),
+        *moved_step(root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",

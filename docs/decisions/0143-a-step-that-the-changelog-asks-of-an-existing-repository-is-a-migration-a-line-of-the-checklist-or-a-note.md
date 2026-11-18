@@ -1,6 +1,6 @@
 # A step that the changelog asks of an existing repository is a migration, a line of the checklist or a note
 
-- Status: accepted, amends [0111](0111-a-release-moves-a-file-of-the-project-through-a-check-that-fixes-itself.md)
+- Status: accepted, amends [0111](0111-a-release-moves-a-file-of-the-project-through-a-check-that-fixes-itself.md), amended by [1051](1051-a-release-that-removes-a-file-of-the-blueprint-names-it-in-moved.md), with which a file of the blueprint that a release removes names the file that takes its place, and a test of every update makes sure it does
 - Date: 2026-11-12
 
 ## Context

@@ -378,6 +378,10 @@ python3 .github/blueprint.py migrate --fix
 
 **To decline the move of a label,** write a comment behind its line, such as `group = "decision" # no candidates of the issue assistant`, and the step leaves that label alone. A label that the file doesn't have moves nowhere either.
 
+**A file that a release of the blueprint removed** is gone after the update, but a file of the project can still name it, such as the badge of a workflow in the README: `README.md:9: names .github/workflows/secret-scan.yml, which a release of the blueprint removed: .github/workflows/quick-checks.yml takes its place`. In a page of Markdown outside `.github/`, the step fails, and `migrate --fix` changes only the path, or the name of the workflow in the address of its page and its badge; the words of the line stay yours. A link to a tag, a commit or another repository stays, so does a path whose file the project has, and `CHANGELOG.md`, `changelog.d/` and `docs/decisions/` are never searched. Any other line, such as a comment of `.github/dependency-review.yml`, a workflow or a script, is a warning that fails nothing, and `python3 .github/blueprint.py checklist` lists it until you change it ([decision 1051](decisions/1051-a-release-that-removes-a-file-of-the-blueprint-names-it-in-moved.md)).
+
+**To keep the old name in a line,** such as on a page about the history of the project, write `blueprint: keep` in a comment of that line, such as `<!-- blueprint: keep -->`, and the step leaves it alone.
+
 **The hosts and files of the issue assistant** that a project added to `config.toml`, a file of the blueprint, move to the end of the lists in `config.project.toml`, the file of the project, each once; `config.toml` keeps the defaults of its kind, so that the next update changes them without a conflict. The issue assistant adds the lists of both files, so its comments link the same hosts as before, and its footers the same file ([decision 0162](decisions/0162-the-hosts-and-files-of-the-issue-assistant-of-a-project-have-a-file-of-their-own.md)).
 
 ## A scheduled workflow didn't run

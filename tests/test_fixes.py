@@ -95,7 +95,7 @@ from blueprint.fixes import (
     written_by,
 )
 from blueprint.github import Api, GitHubError
-from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE, NEXT
+from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE, NEXT, PAGES, Named
 from blueprint.update import BRANCH as UPDATE_BRANCH
 from blueprint.versions import PLACES
 
@@ -2243,6 +2243,18 @@ def test_a_migration_moves_only_data_that_the_bot_may_commit() -> None:
         assert path.split("/")[0] not in RIGHTS_FOLDERS
 
 
+def test_the_bot_commits_the_pages_that_point_at_a_file_that_took_the_place() -> None:
+    # migrate --fix changes only a page of Markdown outside .github/, which the writes
+    # of its step name and which decides nothing that a workflow runs, so the bot
+    # commits it onto the update that nobody reads (decisions 0142 and 1051).
+    for path in ("README.md", "docs/README.de.md", "docs/automation.md"):
+        assert Named(path, 1, 0, 1, "a", "b").fixable
+        assert written_by(PAGES, path)
+        assert path in for_unread(Fixes({path: b""}), "update").files
+    for path in (".github/pull_request_template.md", ".github/workflows/x.yml"):
+        assert not Named(path, 1, 0, 1, "a", "b").fixable
+
+
 # ---------------------------------------------------------------- what each check writes
 
 TEXTS = 'title = "T"\nproblem = "P"\nwhy = "W"\nfix = "F"\n'
@@ -2444,7 +2456,9 @@ def test_every_fix_that_a_workflow_keeps_names_the_paths_that_it_writes() -> Non
 
 def test_the_paths_of_the_fixers_are_those_that_they_write() -> None:
     catalog = Catalog.load(ROOT)
-    assert catalog.steps["Files of the project"].writes == tuple(sorted(MOVABLE))
+    assert catalog.steps["Files of the project"].writes == tuple(
+        sorted({*MOVABLE, PAGES})
+    )
     assert set(catalog.steps["Version"].writes or ()) == {
         f"**/{name}" for name in PLACES
     }
