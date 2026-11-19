@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **The link check of a pull request finds what the pull request adds:** a link to a file, a folder or a heading of the repository on `main`, such as a new workflow that a page links with its address on `main`, failed with 404 or "Cannot find fragment" in every pull request that added it, until the merge. A pull request now reads the links to its own repository on its base branch, `github.com/<repo>/blob/main/…`, `tree/main/…` and `raw.githubusercontent.com/<repo>/main/…`, at its merge commit, also from a fork. A link to a file or heading that the pull request deletes, moves or doesn't have still fails, and `main` and the weekly run read every link on `main` as before.

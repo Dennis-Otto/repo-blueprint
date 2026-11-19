@@ -1,3 +1,0 @@
-### Bug fixes
-
-- The texts of the daily release no longer promise a time that GitHub doesn't keep: the log, the summary and the comment of the release pull request where `RELEASE_MERGE` is `daily`, the comment above `schedule:` in `release.yml` and the automation page of the website. GitHub starts scheduled runs hours after their cron at present, so they say that GitHub starts the daily run from the time of the repository's cron on, at present usually hours later, and that a release that went out earlier the same UTC day, such as one started by hand, moves the release of the bot to the daily run of the next day. An open release pull request keeps its comment, and the next one gets the new words; nothing to do.
