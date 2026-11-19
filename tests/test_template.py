@@ -11196,10 +11196,13 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
     projects: dict[str, Path], project: str
 ) -> None:
     # GitHub has the most schedules to start on the full hour, and drops runs then.
-    # It runs every schedule as it can, often hours late, so no comment promises one.
+    # It runs every schedule as it can, at present usually hours late, so no comment
+    # promises one: no rate, no clock time and no part of the day (decisions 0033 and
+    # 1055).
     root = ROOT if project == "blueprint" else projects[project]
     promise = re.compile(
-        r"\b(?:hourly|half-hourly|every (?:hour|half hour|two hours|morning|\d+ minutes))\b",
+        r"\b(?:hourly|half-hourly|every (?:hour|half hour|two hours|morning|\d+ minutes)"
+        r"|in the night|\d{1,2}:\d{2})\b",
         re.IGNORECASE,
     )
     for name, text in workflows(root).items():

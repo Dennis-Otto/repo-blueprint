@@ -603,3 +603,22 @@ def test_the_map_of_the_website_lists_the_pages_of_every_section() -> None:
         "# Demo\n\nThe pages of this website, in the order of its menu.\n\n"
         f"## Guides\n\n- [Deep]({ADDRESS}a/b/deep.html)\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("language", "late"),
+    [("en", "at present usually hours late"), ("de", "derzeit meist Stunden später")],
+)
+def test_the_page_says_that_github_starts_a_schedule_hours_late(
+    language: str, late: str
+) -> None:
+    # The times of the table are those of the crons, from which GitHub may start a
+    # run; at present it starts them hours later, never only minutes (decision 1055).
+    page = website.automation_page(
+        [], [], [], "Demo", "https://github.com/owner/demo", language, ["", ""]
+    )
+
+    assert f"{website.WORDS[language]['glance intro']}\n" in page
+    assert late in page
+    assert "minutes late" not in page
+    assert "Minuten später" not in page

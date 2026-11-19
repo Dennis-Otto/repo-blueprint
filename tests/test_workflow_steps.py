@@ -1292,7 +1292,7 @@ RELEASE_PR = json.dumps({"number": 21, "headBranchName": "release-please--x"})
 
 
 # The comment of a daily release, as blueprint.py writes it with RELEASE_MERGE daily.
-NOTICE = "<!-- The daily release of the release bot -->\nIt goes at 02:25 UTC.\n"
+NOTICE = "<!-- The daily release of the release bot -->\nIt goes in the daily run.\n"
 
 
 def decides(verdict: str, notice: str = "") -> str:

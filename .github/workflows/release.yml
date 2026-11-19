@@ -37,9 +37,10 @@ on:
   # often hours late, and the bot-health bot starts a run that it missed. It is also
   # the daily run that merges a release of dependency updates, or every release where
   # RELEASE_MERGE is daily, and the one that closes the Dependabot alerts of advisories
-  # published since the last push. At 02:25 UTC, in the night of Europe, the Rollout
-  # and the checks of every repository that it updates run before the weekly scans of
-  # the repositories from 03:20 on, and nobody waits for them (decision 0180).
+  # published since the last push. The cron sets the earliest time of the daily run,
+  # after that of the daily look of the bot-health bot, before the weekly scans and
+  # off the full hour. GitHub starts it when it can, at present usually hours later
+  # (decisions 0180 and 1055).
   schedule:
     - cron: "25 2 * * *"
   # By hand, it releases at once: the way for a fix that can't wait for the daily run.

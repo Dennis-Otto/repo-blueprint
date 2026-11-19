@@ -354,7 +354,7 @@ TREND = (
 # How far back the delay of the scheduled runs looks.
 SCHEDULED = timedelta(days=7)
 # The least time between two times of the schedules of a workflow that a scheduled
-# run of it is measured against: GitHub starts a schedule up to six hours late and
+# run of it is measured against: GitHub starts a schedule hours late and
 # drops many runs of one that comes round more often, so that it isn't clear which
 # time a run of such a schedule belongs to.
 AMBIGUOUS = timedelta(hours=12)

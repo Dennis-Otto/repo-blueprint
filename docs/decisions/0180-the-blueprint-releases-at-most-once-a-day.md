@@ -1,6 +1,6 @@
 # The blueprint releases at most once a day
 
-- Status: accepted
+- Status: accepted, amended by [1055](1055-github-starts-the-daily-release-hours-after-its-schedule.md), with which the texts say that GitHub starts the daily run hours after its cron
 - Date: 2026-11-17
 - Amends [0087](0087-a-release-of-dependency-updates-merges-once-a-day.md) and [0033](0033-schedules-are-only-a-safety-net.md)
 
