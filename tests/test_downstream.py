@@ -280,7 +280,7 @@ def test_the_lines_that_name_a_removed_file_show_before_the_release(
     # The author of the pull request sees the lines of each repository that migrate
     # finds once the update has removed a file, not only after the release.
     old = ".github/workflows/old.yml"
-    monkeypatch.setattr(downstream, "REMOVED", {old: ".github/workflows/ci.yml"})
+    monkeypatch.setattr("blueprint.migrate.MOVED", {old: ".github/workflows/ci.yml"})
     commit(remote / "Dennis-Otto" / "demo", {"docs/automation.md": f"See {old}.\n"})
     owned = {"template/.github/blueprint/owned.txt": ".github/workflows/ci.yml\n"}
     head = commit(blueprint, owned)
