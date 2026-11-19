@@ -130,9 +130,10 @@ LAST_JOB = EVENT_BOTS | OWN_ISSUE
 # which posts the analysis that the job that passed kept, without the AI engine. Only
 # a run of an event of an issue, of ISSUE_EVENTS: a run by hand is its maintainer's
 # own, and a second try of it would check the role of whoever ran it again. Its caller
-# comes from the issue assistant's template and has no last job yet, so a start by
-# hand with the run and the daily look give the second try (decision 0176). Not in
-# LAST_JOB, whose workflows each carry that job.
+# comes from the issue assistant's template: [failures] workflow of its config.toml
+# chooses the variant whose last job, failure, starts this bot with the run, and the
+# daily look covers a run whose start failed (decision 0176). Not in LAST_JOB, whose
+# workflows each carry the blueprint's own last job.
 ISSUE_BOTS = frozenset({"Issue assistant"})
 ISSUE_EVENTS = frozenset({"issues", "issue_comment"})
 PAUSE = 10

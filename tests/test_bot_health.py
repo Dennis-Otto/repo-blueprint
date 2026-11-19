@@ -1422,8 +1422,9 @@ def test_the_workflows_with_a_last_job_are_the_bots_that_bot_health_runs_again()
     None
 ):
     assert LAST_JOB == EVENT_BOTS | OWN_ISSUE
-    # The issue assistant's caller has no last job yet, so it is no workflow of
-    # LAST_JOB, each of which carries one.
+    # The issue assistant's caller carries the last job of its template's variant,
+    # not the blueprint's, so it is no workflow of LAST_JOB, each of which carries
+    # that one.
     assert not ISSUE_BOTS & LAST_JOB
     assert {"issues", "issue_comment"} == ISSUE_EVENTS
 

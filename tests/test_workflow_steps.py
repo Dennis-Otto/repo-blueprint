@@ -460,6 +460,11 @@ TESTED = {
         )
     },
     (
+        "issue-assistant.yml",
+        "failure",
+        "Start the workflow for failed runs",
+    ): "test_workflow_steps.py",
+    (
         "after-checks.yml",
         "stopped",
         "Run the jobs again that Harden-Runner stopped",
@@ -1242,6 +1247,69 @@ def test_a_bot_health_bot_that_github_refuses_to_start_fails_with_what_follows(
         "::error title=The bot-health bot didn't start::GitHub didn't start Bot "
         "health for this run; its nightly look runs the failed jobs once more if "
         "Harden-Runner stopped one of them."
+    ) in done.stdout
+    assert done.summary == ""
+
+
+# The start of the workflow of [failures] workflow after a failed job of the issue
+# assistant, which the variant of its install writes into the caller.
+
+
+def start_the_workflow_for_failed_runs(tmp_path: Path, *answers: Answer) -> StepResult:
+    return run_step(
+        tmp_path,
+        "issue-assistant.yml",
+        "failure",
+        "Start the workflow for failed runs",
+        answers=answers,
+        env={"RUN": "77", "WORKFLOW": "bot-health.yml"},
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+def test_a_failed_issue_assistant_starts_the_workflow_for_failed_runs(
+    tmp_path: Path,
+) -> None:
+    done = start_the_workflow_for_failed_runs(tmp_path, exact(START_THE_BOT_HEALTH_BOT))
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT]
+    assert done.summary == (
+        "A job of this run failed, so bot-health.yml looks at it and may run the "
+        "failed jobs once more.\n"
+    )
+    assert done.stubbed == []
+
+
+def test_the_start_of_the_workflow_for_failed_runs_tries_again_when_github_fails(
+    tmp_path: Path,
+) -> None:
+    done = start_the_workflow_for_failed_runs(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 502", code=1, once=True),
+        exact(START_THE_BOT_HEALTH_BOT),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 2
+    assert done.stubbed == ["sleep 10"]
+
+
+def test_a_workflow_for_failed_runs_that_github_refuses_to_start_fails_with_a_reason(
+    tmp_path: Path,
+) -> None:
+    done = start_the_workflow_for_failed_runs(
+        tmp_path,
+        Answer(re.escape(START_THE_BOT_HEALTH_BOT), err="HTTP 403", code=1),
+    )
+
+    assert done.returncode == 1
+    assert done.commands == [START_THE_BOT_HEALTH_BOT] * 3
+    assert done.stubbed == ["sleep 10", "sleep 20"]
+    assert (
+        "::error title=The workflow for failed runs didn't start::GitHub didn't start "
+        "bot-health.yml of [failures] workflow in .github/issue-assistant/config.toml "
+        "for this run."
     ) in done.stdout
     assert done.summary == ""
 

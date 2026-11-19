@@ -15169,9 +15169,10 @@ ISSUE_ASSISTANT_TOP = (
 )
 # The keys at the end of config.toml with which install writes Issue lifecycle without
 # its start after every run of Release, as the release starts the sweep itself
-# (decision 0182), and Findings for the scans of main alone, as After the checks
-# dismisses the accepted alerts of a pull request (decision 1043); they came after
-# 1.18.3 as well.
+# (decision 0182), Findings for the scans of main alone, as After the checks
+# dismisses the accepted alerts of a pull request (decision 1043), and Issue assistant
+# with the last job that starts Bot health after a failure (decision 0176); they came
+# after 1.18.3 as well.
 ISSUE_ASSISTANT_SWEEP = (
     "# The last job of Release starts the sweep that closes them once a run published a\n"
     "# release, so Issue lifecycle doesn't follow the end of every run of Release, most\n"
@@ -15184,6 +15185,13 @@ ISSUE_ASSISTANT_SWEEP = (
     "# Findings runs after the scans of main alone and no run of it, nor of Bot health\n"
     "# behind it, follows each scan of a pull request (decision 1043 of the blueprint).\n"
     "pull_requests = false\n"
+    "\n"
+    "[failures]\n"
+    "# A run of Issue assistant whose job failed at its first attempt starts Bot health\n"
+    "# from its last job, which runs the failed jobs once more when Harden-Runner stopped\n"
+    "# one: the analysis that the first attempt kept is posted within minutes, without\n"
+    "# the AI engine (decision 0176 of the blueprint).\n"
+    'workflow = "bot-health.yml"\n'
 )
 # The repositories that follow the blueprint and added hosts or files of the issue
 # assistant to its config.toml, as each had it at release 1.18.3, by their kind.
@@ -17969,6 +17977,9 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
 
 
 LAST_JOB_ID = "bot-health"
+# The last job of the variant of the issue assistant's caller, as its template names
+# it.
+FAILURE_JOB_ID = "failure"
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -18025,6 +18036,38 @@ def test_the_bots_that_bot_health_runs_again_start_it_after_a_failure(
     assert 'gh workflow run bot-health.yml --field run="$RUN"' in start["run"]
     assert start["env"]["RUN"] == "${{ github.run_id }}"
     assert start["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    # The issue assistant's caller comes from its template, whose check keeps it
+    # exact: the key [failures] workflow of its config.toml chooses the variant whose
+    # last job, failure, starts the bot the same way (decision 0176). Not for a run by
+    # hand, which is its maintainer's own, and whose second try would check the role
+    # of whoever ran it again.
+    config = tomllib.loads(
+        (root / ".github/issue-assistant/config.toml").read_text(encoding="utf-8")
+    )
+    assert config["failures"] == {"workflow": "bot-health.yml"}
+    assert parse((root / ".github/workflows/bot-health.yml").read_text("utf-8")) == bot
+    for name in ISSUE_BOTS:
+        assert name not in watched, name
+        jobs = parse(named[name])["jobs"]
+        last = jobs[FAILURE_JOB_ID]
+        assert sorted(last["needs"]) == sorted(set(jobs) - {FAILURE_JOB_ID}), name
+        assert condition_of(last) == (
+            "failure() && github.run_attempt == 1 && !github.event.repository.fork"
+            " && github.event_name != 'workflow_dispatch'"
+        ), name
+        for key in ("permissions", "runs-on", "timeout-minutes"):
+            assert last[key] == reference[key], (name, key)
+        assert not steps_using(last, "actions/checkout"), name
+        [harden] = steps_using(last, "step-security/harden-runner")
+        assert harden["with"]["egress-policy"] == "block", name
+        assert harden["with"]["allowed-endpoints"].split() == ["api.github.com:443"]
+        assert step_in(last, MAKE_SURE) == step_in(reference, MAKE_SURE), name
+        assert last["env"] == {"WORKFLOW": "bot-health.yml"}, name
+        started = step_in(last, "Start the workflow for failed runs")
+        assert 'gh workflow run "$WORKFLOW" --field run="$RUN"' in started["run"]
+        assert started["env"]["RUN"] == "${{ github.run_id }}", name
+        # The token of the job, which may start a workflow and nothing else.
+        assert started["env"]["GH_TOKEN"] == "${{ github.token }}", name
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
