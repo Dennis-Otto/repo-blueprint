@@ -24,6 +24,11 @@ name: Issue assistant
 # analysis one each, the oldest after the number of issue first, up to [engine]
 # backlog_per_run of config.toml: the job assistant chooses them, and the job
 # backlog analyzes each. It sets labels only, unless comment is ticked.
+#
+# A repository with a workflow of its own that gives a failed run a second try,
+# such as the bot-health bot of the Repo Blueprint, names it in [failures] workflow
+# of .github/issue-assistant/config.toml, and install writes this workflow with a
+# last job that starts it.
 
 on:
   issues:
@@ -75,7 +80,7 @@ jobs:
       contents: read
       issues: write
       discussions: read
-    uses: Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml@00a1bb67482924c61555fc31542d3d67de661269 # v1.14.0
+    uses: Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml@86a680d365c7c225a7295c06ae341d9059eaf2e4 # v1.15.0
     with:
       dry_run: ${{ inputs.dry_run || false }}
     # Passed by name: only the job analyze sees their values, those of the
@@ -103,7 +108,7 @@ jobs:
       contents: read
       issues: write
       discussions: read
-    uses: Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml@00a1bb67482924c61555fc31542d3d67de661269 # v1.14.0
+    uses: Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml@86a680d365c7c225a7295c06ae341d9059eaf2e4 # v1.15.0
     with:
       dry_run: ${{ inputs.dry_run || false }}
       backlog_issue: ${{ matrix.issue }}
