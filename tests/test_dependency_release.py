@@ -20,6 +20,7 @@ from blueprint.dependency_release import (
     FIRST,
     HELD,
     LATER,
+    LATER_ON,
     NOTICE,
     NOW,
     SECURITY_NOW,
@@ -298,8 +299,10 @@ def test_the_time_of_the_notice_is_that_of_the_schedule() -> None:
 @pytest.mark.parametrize(
     ("workflow", "time"),
     [
-        # A repository made from the blueprint runs some minutes later (decision 0083).
+        # A repository made from the blueprint runs at a minute of its own (decision
+        # 0083), which may come before that of the blueprint.
         ('on:\n  schedule:\n    - cron: "33 2 * * *"\n', "02:33 UTC"),
+        ('    - cron: "6 2 * * *"\n', "02:06 UTC"),
         ('    - cron: "5 14 * * *"\n', "14:05 UTC"),
         # Without a daily schedule that can be read, the time of the blueprint.
         ('    - cron: "5 14 * * 1"\n', TIME),
@@ -321,7 +324,28 @@ def test_the_texts_name_the_time_of_the_repository() -> None:
     assert daily(commits, "schedule", today=True, time="02:33 UTC") == Verdict(
         False, TODAY_AT.format(time="02:33 UTC")
     )
-    assert "at 02:33 UTC," in notice("02:33 UTC")
+    assert "from 02:33 UTC on" in notice("02:33 UTC")
+
+
+@pytest.mark.parametrize("time", [TIME, "02:33 UTC"])
+def test_no_text_promises_the_time_of_the_cron(time: str) -> None:
+    # GitHub starts the daily run hours after its cron at present, so every text that
+    # names the time names it as the earliest one, with the one hedge (decision 1055).
+    texts = [WAITS_AT.format(time=time), TODAY_AT.format(time=time), notice(time)]
+
+    for text in texts:
+        assert f"from {time} on, {LATER_ON}." in text
+        assert f"at {time}" not in text
+    assert WAITS_AT.format(time=TIME) == WAITS
+    assert TODAY_AT.format(time=TIME) == TODAY
+
+
+def test_the_texts_say_how_a_release_by_hand_counts_for_the_day() -> None:
+    assert "A run of Release that a person starts by hand releases it at once." in TODAY
+    assert (
+        "A release that went out earlier the same UTC day, such as one started by"
+        " hand, moves it to the daily run of the next day."
+    ) in notice()
 
 
 class DailyGitHub(FakeGitHub):

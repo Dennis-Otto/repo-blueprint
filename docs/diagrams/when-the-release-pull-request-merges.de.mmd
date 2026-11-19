@@ -5,14 +5,14 @@ config:
 ---
 flowchart TB
     accTitle: Wann der Release-Pull-Request gemergt wird
-    accDescr: Wo die Variable RELEASE_MERGE daily ist, wie im Blueprint, merged der Release-Bot jedes Release selbst. Der Lauf eines Merges in main hält den Release-Pull-Request nur aktuell, außer der Merge behebt eine Schwachstelle, der sofort gemergt wird. Der tägliche Lauf um 02:25 UTC merged ihn, sobald seine Prüfungen bestehen, außer an diesem Tag ging schon ein Release hinaus. Ein Lauf von Release, den du von Hand startest, released sofort, für einen Fix, der nicht warten kann. Mit maintainer, der Vorgabe eines neuen Repositorys, mergst du ihn, und nur ein Release aus Abhängigkeits-Updates merged sich selbst, einmal am Tag. Der Rollout bringt das Release dann in jedes Repository, das dem Blueprint folgt.
+    accDescr: Wo die Variable RELEASE_MERGE daily ist, wie im Blueprint, merged der Release-Bot jedes Release selbst. Der Lauf eines Merges in main hält den Release-Pull-Request nur aktuell, außer der Merge behebt eine Schwachstelle, der sofort gemergt wird. Der tägliche Lauf, den GitHub ab 02:25 UTC startet, derzeit meist Stunden später, merged ihn, sobald seine Prüfungen bestehen, außer an diesem Tag ging schon ein Release hinaus. Ein Lauf von Release, den du von Hand startest, released sofort, für einen Fix, der nicht warten kann. Mit maintainer, der Vorgabe eines neuen Repositorys, mergst du ihn, und nur ein Release aus Abhängigkeits-Updates merged sich selbst, einmal am Tag. Der Rollout bringt das Release dann in jedes Repository, das dem Blueprint folgt.
 
     pr["`Der Release-Pull-Request sammelt,<br>was seit dem letzten Release gemergt wurde`"]
     setting{"`RELEASE_MERGE`"}
     you["`Du mergst ihn; ein Release aus Abhängigkeits-<br>Updates merged sich einmal am Tag selbst`"]
     event{"Welcher Lauf<br>des Release-Bots?"}
     push["`Ein Merge in *main*: er wartet,<br>außer er behebt eine Schwachstelle`"]
-    daily["`Der tägliche Lauf um 02:25 UTC, außer<br>an diesem Tag ging schon ein Release hinaus`"]
+    daily["`Der tägliche Lauf, ab 02:25 UTC, außer<br>an diesem Tag ging schon ein Release hinaus`"]
     hand["`Du startest Release von Hand,<br>für einen Fix, der nicht warten kann`"]
     merged["`Er wird gemergt, sobald seine Prüfungen bestehen`"]
     rollout["`Der Rollout bringt es in jedes Repository`"]
