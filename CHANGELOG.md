@@ -7,6 +7,26 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.23.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.22.0...v1.23.0) (2026-11-19)
+
+
+### Features
+
+* After the checks dismisses the accepted alerts of a pull request ([#1043](https://github.com/Dennis-Otto/repo-blueprint/issues/1043)) ([76ddc24](https://github.com/Dennis-Otto/repo-blueprint/commit/76ddc24c409013cb62735f78477dd32d8d441798))
+* **decisions:** a new record takes the number of its pull request, and the release writes the index ([#1042](https://github.com/Dennis-Otto/repo-blueprint/issues/1042)) ([1e74ea5](https://github.com/Dennis-Otto/repo-blueprint/commit/1e74ea59e268acceb752fcae651a2dfc6778e6c7))
+* only the release starts the sweep of the issues after a release ([#1040](https://github.com/Dennis-Otto/repo-blueprint/issues/1040)) ([547c7b0](https://github.com/Dennis-Otto/repo-blueprint/commit/547c7b0d955678280193653ed5f2e05fad01b6bd))
+* **update:** a release that removes a file of the blueprint points the project's pages at its successor ([#1051](https://github.com/Dennis-Otto/repo-blueprint/issues/1051)) ([0174490](https://github.com/Dennis-Otto/repo-blueprint/commit/0174490218aae77e03d89ab43a2d17c369006879))
+
+
+### Bug fixes
+
+* **best-practices:** a bot notices a stale entry on bestpractices.dev ([#1049](https://github.com/Dennis-Otto/repo-blueprint/issues/1049)) ([0da23fb](https://github.com/Dennis-Otto/repo-blueprint/commit/0da23fbe0053b27884f3e7a074abe9d47b1be8f5))
+* **bot-health:** a first analysis that Harden-Runner stopped gets its second try ([#1053](https://github.com/Dennis-Otto/repo-blueprint/issues/1053)) ([c5c1b06](https://github.com/Dennis-Otto/repo-blueprint/commit/c5c1b065319f99081a341183bcfeffe8df676d9d))
+* **links:** a pull request checks the links to its own repository at its merge commit ([#1048](https://github.com/Dennis-Otto/repo-blueprint/issues/1048)) ([75728fd](https://github.com/Dennis-Otto/repo-blueprint/commit/75728fd1cd847f905302673361de27cf278201e9))
+* **release:** promise no time that GitHub doesn't keep for the daily release ([#1056](https://github.com/Dennis-Otto/repo-blueprint/issues/1056)) ([75049e9](https://github.com/Dennis-Otto/repo-blueprint/commit/75049e9948b6a6eebe30116517d6702d25fc3a29))
+* **release:** the changelog and the index reach jq from files, not as one argument ([#1045](https://github.com/Dennis-Otto/repo-blueprint/issues/1045)) ([e3b9646](https://github.com/Dennis-Otto/repo-blueprint/commit/e3b964616c77c9feed32c92a79935fa6093038d8))
+* **settings:** the checklist asks for no release app left out by choice, and a stop keeps the refusals ([#1039](https://github.com/Dennis-Otto/repo-blueprint/issues/1039)) ([ea0e8f7](https://github.com/Dennis-Otto/repo-blueprint/commit/ea0e8f7ab1c53a581d4efa41330ab3587b862a6e))
+
 ## [1.22.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.21.0...v1.22.0) (2026-11-18)
 
 ### Features
