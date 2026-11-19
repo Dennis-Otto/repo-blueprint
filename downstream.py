@@ -51,7 +51,7 @@ import yaml
 from jinja2.sandbox import SandboxedEnvironment
 
 import reference
-from blueprint.migrate import MOVED, MOVED_NEXT, moved_lines
+from blueprint.migrate import moved_lines
 from blueprint.update import MARKERS
 
 ROOT = Path(__file__).resolve().parent
@@ -86,10 +86,6 @@ COMMITTER = (
     "-c",
     "commit.gpgsign=false",
 )
-
-# The files that a release removed, with those that join MOVED in the next release:
-# the lines of a repository that still name one show before the release.
-REMOVED = {**MOVED, **MOVED_NEXT}
 
 Fetch = Callable[[str], str]
 Sleep = Callable[[float], None]
@@ -355,7 +351,8 @@ def try_one(
         after = update(folder, head)
         result.changed = changes(folder)
         result.conflicts = conflicted(after)
-        result.moved = [item.describe() for item in moved_lines(folder, REMOVED)]
+        # The lines that still name a file of MOVED show before the release.
+        result.moved = [item.describe() for item in moved_lines(folder)]
         if base is not None:
             result.before = conflicted(before)
             result.touched = sorted(

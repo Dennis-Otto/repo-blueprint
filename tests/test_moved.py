@@ -13,7 +13,6 @@ from blueprint.cli import main
 from blueprint.migrate import (
     KEEP,
     MOVED,
-    MOVED_NEXT,
     OWNED,
     Named,
     move_lines,
@@ -245,9 +244,10 @@ def test_only_a_repository_of_the_blueprint_is_searched(tmp_path: Path) -> None:
     root = repository(tmp_path, {"README.md": f"{SCAN}\n"})
     (root / OWNED).unlink()
     assert not moved_lines(root, REMOVED)
-    # An empty list searches nothing, as MOVED before its first entry.
+    # An empty list searches nothing; without a list, the search takes MOVED.
     assert not moved_lines(repository(tmp_path / "2", {"README.md": SCAN}), {})
-    assert not moved_lines(repository(tmp_path / "3", {"README.md": SCAN}))
+    [item] = moved_lines(repository(tmp_path / "3", {"README.md": SCAN}))
+    assert (item.removed, item.new) == (SCAN, QUICK)
 
 
 def test_the_files_of_git_are_searched_and_only_text(tmp_path: Path) -> None:
@@ -289,10 +289,10 @@ def test_the_fix_keeps_the_line_endings_and_the_rest_of_the_line(
 
 
 def test_the_first_entries_are_the_workflows_of_release_1_22_0() -> None:
-    # Secret scan and Dependency review joined Quick checks (#1026); the bot of main
-    # knows the pages of **/*.md from the next release on, so they wait in MOVED_NEXT.
-    assert MOVED_NEXT == {SCAN: QUICK, REVIEW: QUICK}
-    assert not MOVED
+    # Secret scan and Dependency review joined Quick checks (#1026). Release 1.23.0
+    # brought **/*.md to the writes of the step Files of the project, so the bot of
+    # main may commit the fix of a page, and the search looks for them now.
+    assert MOVED == {SCAN: QUICK, REVIEW: QUICK}
 
 
 def test_the_command_fails_for_a_page_and_moves_it_with_fix(

@@ -26,12 +26,14 @@ Option 4.
 - **The fix:** a page of Markdown outside `.github/` fails the step *Files of the project* and names each line; `migrate --fix` changes only the path, or the name of the workflow, so the words of the project stay, such as the label *Secret scan* of a badge that now shows *Quick checks*. The fix bot commits it onto the update: such a page decides nothing that a workflow runs, so [decision 0142](0142-the-fix-bot-commits-nothing-that-runs-with-rights-where-nobody-reads-its-commit.md) allows the commit, and the writes of the step name `**/*.md`.
 - **What it only reports:** a line that the bot may not or cannot change, under `.github/`, in a workflow, in a file that isn't Markdown, or without a successor, is a warning in the log and an open step of `blueprint.py checklist`. It fails nothing, so no update waits for a person over a comment, as option 2 of decision 0143 has it.
 - **Declining:** a line that keeps the old name on purpose, such as on a page about the history of the project, says `blueprint: keep` in a comment and is neither changed nor reported.
-- **Downstream** runs the search on each repository that it updates, with the entries of the next release too, and lists the lines below each repository, so the author of the pull request sees them before the release.
+- **Downstream** runs the search on each repository that it updates and lists the lines below each repository, so the author of the pull request sees them before the release.
 - **No `--trust`, no `_migrations` of Copier:** the code runs in the checks of the update, as every migration does.
 
 ## Two releases
 
 The fix bot of a repository reads what it may write from the catalog of its own `main`, the release before ([decision 0142](0142-the-fix-bot-commits-nothing-that-runs-with-rights-where-nobody-reads-its-commit.md)). So the release that brings this mechanism brings `**/*.md` to the writes of the step and keeps the first entries, the two workflows of 1.22.0, in `MOVED_NEXT`, which the search leaves alone and which the guard and Downstream count. The next release moves them to `MOVED`; from then on a new entry goes to `MOVED` at once, since every repository knows the writes. Without that order, the first update would fail the step on a README that the bot of `main` may not commit, and wait for a person.
+
+Release 1.23.0 brought the writes, and every repository but issue-assistant took it. The release after it moves the two entries to `MOVED` and drops `MOVED_NEXT`, which has no use left: a new entry goes to `MOVED` at once, and the guard and Downstream count `MOVED` alone ([#1050](https://github.com/Dennis-Otto/repo-blueprint/issues/1050)). A repository that comes to it from a release before 1.23.0 updates as before; only a page of its own that still names a removed file fails the step, and a person runs `migrate --fix` there, since its bot doesn't know the writes yet.
 
 ## Consequences
 
