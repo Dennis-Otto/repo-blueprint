@@ -12,7 +12,11 @@ name: Downstream
 # for the update to main, since the repositories change on their own. The weekly run
 # fails on such answers as well, since a warning in a green run reaches nobody, and
 # keeps those of each repository for the fix bot, which brings them to main in its
-# pull request of the fixes of main.
+# pull request of the fixes of main. A push to main that changes tests/answers/, such
+# as the merge of that pull request, runs it on main again: main turns green within
+# minutes once the new answers hold, and fails again when they don't, since this is no
+# required check and its run in the pull request proves nothing by the merge
+# (decision 1061).
 #
 # No required check: a conflict can be the right change, with a line in the changelog
 # that says how a repository resolves it. The Variants workflow makes a repository with
@@ -39,6 +43,11 @@ on:
       - docs/images/diagrams/how-a-repository-looks-after-itself*.svg
       - docs/images/diagrams/from-a-change-to-a-release*.svg
       - downstream.py
+      - tests/answers/**
+  # Only the answers: a push of anything else waits for the weekly run.
+  push:
+    branches: [main]
+    paths:
       - tests/answers/**
   schedule:
     - cron: "40 5 * * 3"

@@ -1,6 +1,6 @@
 # Try every change of the template on the answers and the files of the repositories that take the blueprint, before its release
 
-- Status: accepted, amended by [0100](0100-a-pull-request-runs-only-the-variants-whose-project-it-changes.md), by which a pull request runs only the adopted legs whose project it changes
+- Status: accepted, amended by [0100](0100-a-pull-request-runs-only-the-variants-whose-project-it-changes.md), by which a pull request runs only the adopted legs whose project it changes, and by [1061](1061-downstream-runs-on-main-after-a-push-of-new-answers.md), with which a push to `main` that changes `tests/answers/` runs Downstream on `main` as well
 - Date: 2026-10-18
 
 ## Context

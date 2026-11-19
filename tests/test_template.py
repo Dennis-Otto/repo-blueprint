@@ -22589,8 +22589,10 @@ ON_PUSH_TO_MAIN = {
     # a run that started ends, and only the newest of those that wait for it runs.
     "waits": {"diagrams.yml", "docs.yml", "labels.yml", "release.yml"},
     # A push of a few files starts them, or their jobs wait for each other on their
-    # own; OpenSSF Scorecard publishes its results, in one short job.
+    # own; OpenSSF Scorecard publishes its results, in one short job. Downstream runs
+    # on a push of new answers only, and each run tells whether they hold (#1061).
     "runs": {
+        "downstream.yml",
         "findings.yml",
         "renovate.yml",
         "scorecard.yml",
@@ -22612,6 +22614,13 @@ RENDERS_ONE_AT_A_TIME = {
     "group": "${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch'"
     " && 'render' || github.run_id }}",
     "cancel-in-progress": False,
+}
+# A newer push of a pull request cancels its older run; every other run, that of a
+# push among them, is in a group of its own.
+ONE_GROUP_PER_PULL_REQUEST = {
+    "group": "${{ github.workflow }}-${{ github.event.pull_request.number"
+    " || github.run_id }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
 }
 
 
@@ -22652,8 +22661,13 @@ def test_a_push_to_main_cancels_only_the_checks_of_the_commit_before(
             assert cancels_a_push(concurrency["cancel-in-progress"])
         elif sides[name] == "runs":
             # Or, for the screenshot bot, only its runs by hand wait in one group:
-            # a push only plans, in a group of its own.
-            assert concurrency in (None, RENDERS_ONE_AT_A_TIME), path
+            # a push only plans, in a group of its own; or, for Downstream, only the
+            # runs of a pull request cancel each other.
+            assert concurrency in (
+                None,
+                RENDERS_ONE_AT_A_TIME,
+                ONE_GROUP_PER_PULL_REQUEST,
+            ), path
         else:
             # Every push to main is in the same group, whose newest run replaces the
             # older one or waits for it.
@@ -26717,7 +26731,18 @@ INCLUDE = re.compile(r"""(?:\[%-?\s*include\s+|replaced\()["']([^"']+)["']""")
 def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
     workflow = (ROOT / ".github/workflows/downstream.yml").read_text(encoding="utf-8")
     events = triggers(workflow)
-    assert set(events) == {"pull_request", "schedule", "workflow_dispatch"}
+    assert set(events) == {"pull_request", "push", "schedule", "workflow_dispatch"}
+    # A push of new answers to main, such as the merge of the fix bot's pull request
+    # after a failed weekly run, runs it on main again, so that main turns green once
+    # they hold (#1061); a push of anything else runs no Downstream.
+    assert events["push"] == [
+        "    branches: [main]",
+        "    paths:",
+        "      - tests/answers/**",
+    ]
+    assert paths_of(workflow, "push") == ["tests/answers/**"]
+    # No newer push cancels the run of a push, which tells whether its answers hold.
+    assert parse(workflow)["concurrency"] == ONE_GROUP_PER_PULL_REQUEST
     # In the pull requests that change what a repository gets from the blueprint.
     paths = paths_of(workflow, "pull_request")
     for pattern in (
