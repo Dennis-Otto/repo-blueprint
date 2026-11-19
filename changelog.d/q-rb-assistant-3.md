@@ -1,0 +1,3 @@
+### Bug fixes
+
+- A first analysis of the issue assistant that Harden-Runner stopped now gets its second try within minutes instead of a day later: `.github/issue-assistant/config.toml` sets `[failures] workflow = "bot-health.yml"`, so `issue-assistant.yml` becomes the variant of the issue assistant 1.15.0 with a last job that starts *Bot health* with the run when a job of its first attempt failed. The bot runs the failed jobs once more when Harden-Runner stopped one, which posts the analysis that the first attempt kept, without running the AI engine again. A run by hand, a second attempt and a fork start nothing, and the job may start a workflow and nothing else.
