@@ -129,7 +129,6 @@ from blueprint.migrate import (
     LINK_HOSTS,
     MIGRATIONS,
     MOVED,
-    MOVED_NEXT,
     NEXT,
     NO_BOT_FIXES_LABEL,
     contribution_labels,
@@ -10346,9 +10345,8 @@ def test_each_removed_file_is_gone_and_its_successor_is_there(
     # and the file that took its place is there wherever the old one is gone. A file
     # that one kind loses and the others keep is gone only from that kind: the guard
     # of the Variants workflow asks for its entry all the same.
-    removed = {**MOVED, **MOVED_NEXT}
-    assert removed
-    for old, new in removed.items():
+    assert MOVED
+    for old, new in MOVED.items():
         gone = [kind for kind in KINDS if not (projects[kind] / old).exists()]
         assert gone, old
         for kind in gone:
@@ -10357,7 +10355,7 @@ def test_each_removed_file_is_gone_and_its_successor_is_there(
 
 def test_a_new_repository_names_no_removed_file(projects: dict[str, Path]) -> None:
     for kind in KINDS:
-        assert not moved_lines(projects[kind], {**MOVED, **MOVED_NEXT}), kind
+        assert not moved_lines(projects[kind]), kind
 
 
 def test_the_update_points_the_badge_of_a_removed_workflow_at_its_successor(
@@ -10367,9 +10365,8 @@ def test_the_update_points_the_badge_of_a_removed_workflow_at_its_successor(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # As five repositories had their READMEs after release 1.22.0: the badge of Secret
-    # scan, which Quick checks replaced. Once MOVED has the entries, the step Files of
-    # the project fails on the update and the fix bot commits migrate --fix onto it.
-    monkeypatch.setattr("blueprint.migrate.MOVED", MOVED_NEXT)
+    # scan, which Quick checks replaced. The step Files of the project fails on the
+    # update with the entries of MOVED, and the fix bot commits migrate --fix onto it.
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     project = shutil.copytree(projects["generic"], tmp_path / "generic")
     address = f"https://github.com/{OWNER}/demo-project/actions/workflows"
