@@ -3,10 +3,11 @@
 
     python3 weekly.py --owner Dennis-Otto --out report.md
 
-For the seven days before now, it shows for every public repository that is no fork
-and not archived what it released, how many pull requests it merged and how many of
-them were updates of dependencies, how many issues were opened and closed, how many
-runs failed on main and the median time of its CI. It prints the title of the report
+For the last full calendar week in UTC, from Monday 00:00 to the next Monday 00:00,
+it shows for every public repository that is no fork and not archived what it
+released, how many pull requests it merged and how many of them were updates of
+dependencies, how many issues were opened and closed, how many runs failed on main
+and the median time of its CI. It prints the title of the report
 and writes its text. It reports nothing that isn't public anyway: no finding of code
 scanning and no alert of Dependabot. The Weekly report workflow posts it in the
 discussions of the blueprint.
@@ -29,6 +30,8 @@ from dashboard import ci_workflow, median_minutes, repositories, workflow_files
 
 # The titles of updates of dependencies, as Renovate and Dependabot write them.
 UPDATE = re.compile(r"^(?:fix|chore|build)\(deps(?:-dev)?\): ")
+# The releases of one page, newest first.
+PAGE = 100
 
 
 @dataclass
@@ -61,21 +64,49 @@ def when(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
-def collect(api: Api, repo: str, since: datetime) -> Week:
-    """The week of repo from since to now. Every search starts at the moment since,
-    not at the start of its day, so that one report counts no hour of the last."""
+def week_before(now: datetime) -> tuple[datetime, datetime]:
+    """The last full calendar week in UTC at the moment now: from the Monday 00:00
+    before to the last Monday 00:00 at or before now, which it leaves out. Whatever
+    hour GitHub starts the run at, and on whatever day it runs by hand, the week is
+    the same, and two reports in a row meet exactly."""
+    midnight = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    until = midnight - timedelta(days=midnight.weekday())
+    return until - timedelta(days=7), until
+
+
+def stamp(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def collect(api: Api, repo: str, since: datetime, until: datetime) -> Week:
+    """The week of repo from since to until, which it leaves out, so that a report
+    counts no hour of the last and leaves none out between them."""
     week = Week(repo)
-    stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for release in api.get(f"repos/{repo}/releases?per_page=30") or []:
-        published = release.get("published_at")
-        if published and when(published) >= since:
-            week.releases.append((release["tag_name"], release["html_url"]))
-    merged = f"repo:{repo} is:pr is:merged merged:>={stamp}"
+    page = 1
+    while True:
+        # A week with more releases than a page reads on, since the run may come days
+        # after the end of the week; it stops at a page that reaches before since.
+        releases = api.get(f"repos/{repo}/releases?per_page={PAGE}&page={page}") or []
+        older = False
+        for release in releases:
+            published = release.get("published_at")
+            if not published:
+                continue
+            if when(published) < since:
+                older = True
+            elif when(published) < until:
+                week.releases.append((release["tag_name"], release["html_url"]))
+        if older or len(releases) < PAGE:
+            break
+        page += 1
+    # A range of the search takes both of its ends, so it ends a second before until.
+    window = f"{stamp(since)}..{stamp(until - timedelta(seconds=1))}"
+    merged = f"repo:{repo} is:pr is:merged merged:{window}"
     week.merged = count(api, merged)
     week.updates = sum(1 for pull in search(api, merged) if UPDATE.match(pull["title"]))
-    week.opened = count(api, f"repo:{repo} is:issue created:>={stamp}")
-    week.closed = count(api, f"repo:{repo} is:issue closed:>={stamp}")
-    created = urllib.parse.quote(f">={stamp}")
+    week.opened = count(api, f"repo:{repo} is:issue created:{window}")
+    week.closed = count(api, f"repo:{repo} is:issue closed:{window}")
+    created = urllib.parse.quote(window)
     failed = api.get(
         f"repos/{repo}/actions/runs?branch=main&status=failure&created={created}&per_page=1"
     )
@@ -96,13 +127,14 @@ def collect(api: Api, repo: str, since: datetime) -> Week:
     return week
 
 
-def render(weeks: list[Week], owner: str, since: datetime, now: datetime) -> str:
+def render(weeks: list[Week], owner: str, since: datetime, until: datetime) -> str:
     def name(repo: str) -> str:
         return f"[{repo.split('/', 1)[1]}](https://github.com/{repo})"
 
     lines = [
-        f"What the public repositories of {owner} released, merged and fixed from "
-        f"{since:%Y-%m-%d} to {now:%Y-%m-%d}, from public data alone.",
+        f"What the public repositories of {owner} released, merged and fixed in the "
+        f"week from Monday {since:%Y-%m-%d}, 00:00 UTC, to Monday {until:%Y-%m-%d}, "
+        "00:00 UTC, from public data alone.",
         "",
         "| Repository | Releases | Pull requests merged | Updates among them "
         "| Issues opened | Issues closed | Failed runs on main | CI, median |",
@@ -151,22 +183,21 @@ def main(
         "--owner", required=True, help="the account of the repositories"
     )
     parser.add_argument("--out", type=Path, required=True, help="the report to write")
-    parser.add_argument("--days", type=int, default=7, help="the length of the week")
     arguments = parser.parse_args(argv)
     api = api or Api()
-    now = now or datetime.now(UTC)
-    since = now - timedelta(days=arguments.days)
+    since, until = week_before(now or datetime.now(UTC))
     try:
         weeks = [
-            collect(api, repo, since) for repo in repositories(api, arguments.owner)
+            collect(api, repo, since, until)
+            for repo in repositories(api, arguments.owner)
         ]
     except GitHubError as error:
         print(f"weekly.py: {error}", file=sys.stderr)
         return 2
     arguments.out.write_text(
-        render(weeks, arguments.owner, since, now), encoding="utf-8"
+        render(weeks, arguments.owner, since, until), encoding="utf-8"
     )
-    print(f"The week of {since:%Y-%m-%d} to {now:%Y-%m-%d}")
+    print(f"The week of {since:%Y-%m-%d} to {until:%Y-%m-%d}")
     return 0
 
 

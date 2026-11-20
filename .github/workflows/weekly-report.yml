@@ -1,8 +1,9 @@
 name: Weekly report
 
 # The weekly report of the owner's public repositories: every Monday it posts what
-# they released, merged and fixed in the week (weekly.py) in the discussions of the
-# blueprint. Everything it reports is public anyway, so the job's own token reads it.
+# they released, merged and fixed in the last calendar week in UTC (weekly.py) in the
+# discussions of the blueprint. Everything it reports is public anyway, so the job's
+# own token reads it.
 # This workflow belongs to the blueprint alone.
 # https://github.com/Dennis-Otto/repo-blueprint
 
@@ -151,11 +152,14 @@ jobs:
             -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id discussionCategories(first: 50) { nodes { id name } } } }' \
             --jq '.data.repository | "\(.id) \(.discussionCategories.nodes[] | select(.name == "General") | .id)"')
-          # A job that hung after this step gets a second try, which must not post twice.
+          # A job that hung after this step gets a second try, and bot health or a person
+          # may start it again later in the week: none of them must post twice. It looks
+          # among the reports in General alone, since the announcements of the releases
+          # push a report out of the newest discussions of every category within days.
           # shellcheck disable=SC2016
           titles="$(gh api --header "$API_VERSION_HEADER" graphql \
-            -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
-            -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussions(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { title } } } }' \
+            -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F category="$category" \
+            -f query='query($owner: String!, $name: String!, $category: ID!) { repository(owner: $owner, name: $name) { discussions(first: 10, categoryId: $category, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { title } } } }' \
             --jq '.data.repository.discussions.nodes[].title')"
           if grep -Fxq "$TITLE" <<<"$titles"; then
             echo "The report is posted already."
