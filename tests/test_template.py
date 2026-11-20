@@ -117,6 +117,7 @@ from blueprint.checklist import (
     bot_tools_allowed,
     social_preview,
 )
+from blueprint.coach import PREFIX as COACH_PREFIX
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.dependency_release import DAILY
 from blueprint.fixes import fixers, signed_off, watched
@@ -21481,6 +21482,53 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
         for call in calls
     )
     assert "\n".join(FLAKY_ROWS) in summary
+
+
+def coached_first(*messages: str) -> list[dict[str, str]]:
+    """The annotations of a failed job whose step *Explain the failure* added the PR
+    coach's explanation of the check, which GitHub happened to list first."""
+    return [
+        {
+            "annotation_level": "failure",
+            "title": f"{COACH_PREFIX}The tests",
+            "message": "One of the tests failed:\nrun them  with pytest.",
+        },
+        *annotations_of_a_job(*messages),
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_jobs_own_error_before_the_coachs(
+    tmp_path: Path,
+) -> None:
+    # #1065: the row of each job showed the coach's explanation of what the check
+    # usually finds, which came first in the list, instead of the error that the job
+    # reported or the line of pytest in its log.
+    _, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "repos/o/r/check-runs/11/annotations": coached_first(EXITED),
+            "repos/o/r/check-runs/15/annotations": coached_first(
+                EXITED, "Error: the image   could not\nbe pulled"
+            ),
+            "repos/o/r/check-runs/16/annotations": coached_first(EXITED),
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # The job's own error and the line of pytest win; a job that reported nothing of
+    # its own, such as Links, gets the coach's explanation before the exit code.
+    assert "\n".join(FLAKY_ROWS[:3]) in summary
+    assert (
+        "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
+        f" | `Build the website` | {NOTHING} | `One of the tests failed: run them with"
+        " pytest.` |"
+    ) in summary
 
 
 @WITH_JQ

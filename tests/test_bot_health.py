@@ -74,6 +74,7 @@ from blueprint.bot_health import (
     watch_run,
     watch_stop,
 )
+from blueprint.coach import PREFIX as COACH_PREFIX
 from blueprint.github import Api, GitHubError
 
 ROOT = Path(__file__).parents[1]
@@ -150,8 +151,8 @@ def never_started(number: int, name: str) -> dict[str, Any]:
     return {**job_of_a_run(number, name, "failure", []), "runner_name": None}
 
 
-def failure(level: str, message: str) -> dict[str, str]:
-    return {"annotation_level": level, "message": message}
+def failure(level: str, message: str, title: str = "") -> dict[str, str]:
+    return {"annotation_level": level, "message": message, "title": title}
 
 
 class FakeGitHub:
@@ -2201,6 +2202,60 @@ def test_the_failed_jobs_name_their_place_and_their_first_error(
     # Only the annotation that every failed step gets: better than none.
     assert found_all[0].error == "Process completed with exit code 2."
     assert found_all[1].error == ""
+
+
+def test_the_first_error_is_the_jobs_own_before_the_coachs_and_the_exit_code(
+    github: FakeGitHub,
+) -> None:
+    run = Run.of(run_of(1, attempt=2))
+    github.jobs[(1, 2)] = [
+        job_of_a_run(1, "downstream", "failure", [("Run", "failure")])
+    ]
+    exit_code = failure("failure", "Process completed with exit code 1.")
+    coach = failure(
+        "failure",
+        "The update of a repository … failed, or leaves a conflict …",
+        f"{COACH_PREFIX}The update of the repositories that take the blueprint",
+    )
+    own = failure(
+        "failure",
+        "description differs from the answers of Dennis-Otto/homedarts-for-autodarts",
+    )
+    # The step *Explain the failure* runs last, but GitHub happened to list it first.
+    github.annotations[1] = [
+        coach,
+        exit_code,
+        failure("warning", "A warning is no error"),
+        {"annotation_level": "failure", "message": "No title at all"},
+        own,
+    ]
+
+    (found,) = failures(api_of(github), REPO, run)
+
+    assert found.error == "No title at all"
+
+    github.annotations[1] = [coach, exit_code, own]
+
+    assert failures(api_of(github), REPO, run)[0].error == own["message"]
+
+    # A job that reported nothing of its own, such as Links: the coach's explanation
+    # says more than the exit code.
+    github.annotations[1] = [exit_code, coach]
+
+    assert failures(api_of(github), REPO, run)[0].error == coach["message"]
+
+    github.annotations[1] = [exit_code]
+
+    assert failures(api_of(github), REPO, run)[0].error == exit_code["message"]
+
+    # Another error of the coach, such as the one about signatures, has no PR coach in
+    # its title: it is an error of the job.
+    github.annotations[1] = [
+        coach,
+        failure("failure", "Unsigned", "No verified signature"),
+    ]
+
+    assert failures(api_of(github), REPO, run)[0].error == "Unsigned"
 
 
 def test_text_of_a_run_stays_plain_code_in_a_table() -> None:
