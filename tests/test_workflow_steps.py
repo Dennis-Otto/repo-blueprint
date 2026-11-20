@@ -3287,7 +3287,8 @@ def test_the_weekly_report_is_posted_in_the_general_discussions(
                 "R_1 DIC_2\n",
             ),
             Answer(
-                r"api graphql -F owner=o -F name=r -f query=query.*discussions\(.*",
+                r"api graphql -F owner=o -F name=r -F category=DIC_2"
+                r" -f query=query.*discussions\(first: 10, categoryId: \$category,.*",
                 "The week before\n",
             ),
             Answer(
@@ -3309,7 +3310,8 @@ def test_the_weekly_report_is_posted_in_the_general_discussions(
 def test_a_second_try_of_the_weekly_report_does_not_post_it_again(
     tmp_path: Path,
 ) -> None:
-    # A job that hung after its last step runs once more.
+    # A job that hung after its last step runs once more, or bot health or a person
+    # starts it again later in the week.
     done = run_step(
         tmp_path,
         "weekly-report.yml",
@@ -3320,8 +3322,11 @@ def test_a_second_try_of_the_weekly_report_does_not_post_it_again(
                 r"api graphql -F owner=o -F name=r -f query=query.*discussionCategories.*",
                 "R_1 DIC_2\n",
             ),
+            # The announcements of more than ten releases came after it, in a category
+            # of their own: the lookup asks for General alone.
             Answer(
-                r"api graphql -F owner=o -F name=r -f query=query.*discussions\(.*",
+                r"api graphql -F owner=o -F name=r -F category=DIC_2"
+                r" -f query=query.*discussions\(first: 10, categoryId: \$category,.*",
                 "The week\nThe week before\n",
             ),
         ],
