@@ -4,9 +4,10 @@
     python3 weekly.py --owner Dennis-Otto --out report.md
 
 For the last full calendar week in UTC, from Monday 00:00 to the next Monday 00:00,
-it shows for every public repository that is no fork and not archived what it released, how many pull requests it merged and how many of
-them were updates of dependencies, how many issues were opened and closed, how many
-runs failed on main and the median time of its CI. It prints the title of the report
+it shows for every public repository that is no fork and not archived what it
+released, how many pull requests it merged and how many of them were updates of
+dependencies, how many issues were opened and closed, how many runs failed on main
+and the median time of its CI. It prints the title of the report
 and writes its text. It reports nothing that isn't public anyway: no finding of code
 scanning and no alert of Dependabot. The Weekly report workflow posts it in the
 discussions of the blueprint.

@@ -2,7 +2,8 @@ name: Weekly report
 
 # The weekly report of the owner's public repositories: every Monday it posts what
 # they released, merged and fixed in the last calendar week in UTC (weekly.py) in the
-# discussions of the blueprint. Everything it reports is public anyway, so the job's own token reads it.
+# discussions of the blueprint. Everything it reports is public anyway, so the job's
+# own token reads it.
 # This workflow belongs to the blueprint alone.
 # https://github.com/Dennis-Otto/repo-blueprint
 
