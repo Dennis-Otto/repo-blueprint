@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.23.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.0...v1.23.1) (2026-11-20)
+
+
+### Bug fixes
+
+* **bot-health:** name the job's own first error before the PR coach's explanation ([#1067](https://github.com/Dennis-Otto/repo-blueprint/issues/1067)) ([5a20edd](https://github.com/Dennis-Otto/repo-blueprint/commit/5a20edd54aa72f9d7ddab62259d91ad8baab8521))
+* **bot-health:** the issue assistant's caller starts Bot health after a stopped first analysis ([#1063](https://github.com/Dennis-Otto/repo-blueprint/issues/1063)) ([dfc807e](https://github.com/Dennis-Otto/repo-blueprint/commit/dfc807e49412b90340d36f30ecb17eed34323939))
+* **deps:** update the issue assistant to v1.15.0 ([#1059](https://github.com/Dennis-Otto/repo-blueprint/issues/1059)) ([b991d9b](https://github.com/Dennis-Otto/repo-blueprint/commit/b991d9b7bb4710fde499265a3b1c1c04858b3b59))
+* **downstream:** run on main after a push of new answers ([#1064](https://github.com/Dennis-Otto/repo-blueprint/issues/1064)) ([b17db58](https://github.com/Dennis-Otto/repo-blueprint/commit/b17db58ca3cbb5b9cb380a1aea938b4a02b0c46f))
+* **update:** the update points the pages at Quick checks where they still name the workflows of 1.22.0 ([#1062](https://github.com/Dennis-Otto/repo-blueprint/issues/1062)) ([f2e16ba](https://github.com/Dennis-Otto/repo-blueprint/commit/f2e16baeac26014d8a0bee9f85e75dfbbbb5ec3f))
+* **weekly:** count the calendar week in UTC, so two reports meet exactly ([#1068](https://github.com/Dennis-Otto/repo-blueprint/issues/1068)) ([b1c96af](https://github.com/Dennis-Otto/repo-blueprint/commit/b1c96af3280f553dfdef3c2a970669aa7590d132))
+
 ## [1.23.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.22.0...v1.23.0) (2026-11-19)
 
 ### Features
