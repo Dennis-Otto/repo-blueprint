@@ -7,6 +7,16 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.23.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.0...v1.23.1) (2026-11-20)
+
+### Bug fixes
+
+- A first analysis of the issue assistant that Harden-Runner stopped now gets its second try within minutes instead of a day later: `.github/issue-assistant/config.toml` sets `[failures] workflow = "bot-health.yml"`, so `issue-assistant.yml` becomes the variant of the issue assistant 1.15.0 with a last job that starts *Bot health* with the run when a job of its first attempt failed. The bot runs the failed jobs once more when Harden-Runner stopped one, which posts the analysis that the first attempt kept, without running the AI engine again. A run by hand, a second attempt and a fork start nothing, and the job may start a workflow and nothing else.
+- Downstream runs on `main` after a push that changes `tests/answers/`, so a failure of its weekly run that the fix bot healed turns green within minutes and opens no issue of the bot-health bot.
+- An issue of bot health, its comment when a run fails in another place, and a row of the report of flaky tests name the error that the failed job reported, such as the test that failed or the answers that differ, instead of the PR coach's general explanation of the check. The coach's explanation shows only when the job reported no error of its own, before the bare exit code.
+- The update now points the pages of your project at *Quick checks* where they still name the workflows *Secret scan* or *Dependency review*, which release 1.22.0 replaced: the badge of a README and a link of a page of Markdown are fixed on the update's pull request by the fix bot (a project that updates from a release before 1.23.0 runs `python3 .github/blueprint.py migrate --fix` itself once if the step *Files of the project* names such a page), and a comment under `.github/`, such as the first line of `.github/dependency-review.yml`, becomes a step of `blueprint.py checklist`. A line that keeps the old name on purpose says `blueprint: keep` in a comment.
+- The weekly report in the discussions counts the last full calendar week in UTC, from Monday 00:00 to the next Monday 00:00, instead of the seven days before its run. GitHub starts the run hours late, at a different hour each Monday, so two reports in a row counted the hours between their starts twice or not at all: the release v1.2.1 of 26 October 2026 was in neither report. Now the week stays the same whenever the run starts, also when bot health or a person starts it later in the week, and a week with more releases than one page of GitHub's list counts them all. A second run finds the week's report among the discussions of General, which the announcements of the releases no longer push out of reach, and posts nothing. The first report after this change counts once more the hours of its Monday before the last report ran.
+
 ## [1.23.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.22.0...v1.23.0) (2026-11-19)
 
 ### Features
