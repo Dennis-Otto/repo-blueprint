@@ -30,6 +30,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 - `check (github-action)`: `scripts/check.sh` mit den Werkzeugen von Python.
 - `action`: die Action selbst, wie `action-test.yml` sie ausführt.
+- `fuzz`: jedes Ziel in `fuzz/` eine Minute lang, wie `fuzz.yml` es ausführt, wenn der Pull Request den Code, die Ziele oder die Werkzeuge ändert; jeder andere Pull Request besteht sie in Sekunden.
 - `lint`, `diagrams`, `docs`, `conventional title`, `codeql`, `dependency-review` und `gitleaks`, die jede Art braucht: jeder Linter in einem Job, die Bilder der Diagramme, der strenge Build der Website, der Titel des Pull Requests mit seinem Eintrag im Changelog, CodeQL, die Prüfung neuer Abhängigkeiten und der Secret-Scan.
 
 ## Auslieferung

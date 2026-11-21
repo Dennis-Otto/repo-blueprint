@@ -1,6 +1,6 @@
 # Run a check only where it can change a result
 
-- Status: accepted, amended by [0073](0073-zizmor-analyzes-every-pull-request-and-each-new-alert-stops-the-merge.md), with which zizmor analyzes every pull request, the release pull request too, since the rules of `main` wait for its analysis
+- Status: accepted, amended by [0073](0073-zizmor-analyzes-every-pull-request-and-each-new-alert-stops-the-merge.md), with which zizmor analyzes every pull request, the release pull request too, since the rules of `main` wait for its analysis, and by [1074](1074-a-pull-request-that-changes-what-the-fuzzing-reads-waits-for-it.md), with which the fuzzing is a required check that fuzzes only a pull request that changes what it reads
 - Date: 2026-10-13
 
 ## Context

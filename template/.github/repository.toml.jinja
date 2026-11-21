@@ -118,7 +118,10 @@ patterns_allowed = [
 [branch]
 required_checks = [
   "check ({= ci_workflow =})",[% if project_type == 'github-action' %]
-  "action",[% endif %][% if stack == 'home-assistant' %]
+  "action",[% endif %][% if project_type in ['python-package', 'github-action'] %]
+  # The fuzzing of every target, which passes in seconds when the pull request
+  # changes nothing that the targets read.
+  "fuzz",[% endif %][% if stack == 'home-assistant' %]
   # HACS and hassfest.
   "home-assistant",[% endif %]
   # Every linter, the workflows, the licenses, the Markdown, the issue assistant
