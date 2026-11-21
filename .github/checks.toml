@@ -1206,8 +1206,8 @@ that only this repository gives, has a table that bestpractices.dev can't take o
 the repository doesn't show: a criterion that the site doesn't know, a key other than
 `status` and `justification`, a status for a criterion that `.bestpractices.json`
 answers, a criterion of its own without both, a status other than Met, Unmet or N/A or
-an N/A that the criterion doesn't allow, Met without the link that it needs, a link to a
-file or a heading that the checkout doesn't have, a justification too long for one link
+an N/A that the criterion doesn't allow, Met without the link that it needs, a link that
+doesn't use https, a link to a file or a heading that the checkout doesn't have, a justification too long for one link
 of the issue, or one that only repeats `.bestpractices.json`; the log names each."""
 why = """The weekly run of *Links* forces these answers onto the public entry with the
 links of its issue: a wrong one becomes a false statement in public, and one that the

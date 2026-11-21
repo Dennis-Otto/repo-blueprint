@@ -826,6 +826,31 @@ def test_what_is_no_answer_of_the_project_file_stays_out(tmp_path: Path) -> None
     assert "security_review_status" not in given
 
 
+def test_what_verify_fails_on_never_keeps_the_issue_open(tmp_path: Path) -> None:
+    # A criterion that the site doesn't know, and a status for one that
+    # .bestpractices.json answers, as on main after a check that was skipped.
+    root = with_own_answers(
+        repository(tmp_path),
+        '[no_such_criterion]\nstatus = "Met"\njustification = "x"\n'
+        '[test]\nstatus = "Unmet"\n',
+    )
+
+    given, own = best_practices.answers(root)
+
+    assert own == set()
+    assert given["test_status"] == "Met"
+    assert not any(name.startswith("no_such_criterion") for name in given)
+    client = FakeClient([{"number": 9, "body": MARKER}])
+    keep_issue(client, BLUEPRINT, root, opener=Site(current_entry()))
+    assert client.changes == [
+        (
+            "PATCH",
+            f"repos/{BLUEPRINT}/issues/9",
+            {"state": "closed", "state_reason": "completed"},
+        )
+    ]
+
+
 # A checkout for --verify: its .bestpractices.json answers test and contribution, and
 # it has the files and the heading that the answers link.
 REPO = "https://github.com/o/r/blob/main"
@@ -987,6 +1012,30 @@ def test_the_check_of_the_project_file_passes_what_the_site_takes(
     assert best_practices.verify(root) == best_practices.Verification([])
     with_own_answers(root, EMPTY)
     assert best_practices.verify(root) == best_practices.Verification([], [], 0)
+
+
+def test_a_link_to_a_heading_counts_as_github_finds_it(tmp_path: Path) -> None:
+    # A heading with an umlaut, as a browser copies its link, one in capitals, and a
+    # repeated heading, which GitHub numbers from -1 on.
+    links = (
+        f"{REPO}/CONTRIBUTING.md#pr%C3%BCfungen-und-der-pr-coach, "
+        f"{REPO}/CONTRIBUTING.md#Tests and {REPO}/CONTRIBUTING.md#tests-1"
+    )
+    root = verifiable(tmp_path, f'[contribution]\njustification = "Ours: {links}."\n')
+    (root / "CONTRIBUTING.md").write_text(
+        "# Guide\n\n## Prüfungen und der PR-Coach\n\n## Tests\n\n## Tests\n",
+        encoding="utf-8",
+    )
+
+    assert best_practices.verify(root) == best_practices.Verification([], [], 1)
+    with_own_answers(
+        root,
+        f'[contribution]\njustification = "Ours: {REPO}/CONTRIBUTING.md#tests-2"\n',
+    )
+    assert best_practices.verify(root).problems == [
+        ".github/bestpractices.project.toml: [contribution] links "
+        "CONTRIBUTING.md#tests-2, a heading that the file doesn't have."
+    ]
 
 
 def test_the_fix_removes_only_what_repeats_the_file(tmp_path: Path) -> None:

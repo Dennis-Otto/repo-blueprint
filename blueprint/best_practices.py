@@ -161,14 +161,20 @@ def answers(root: Path) -> tuple[dict[str, Json], frozenset[str]]:
     """The answers of the repository: those of .bestpractices.json, with each answer
     of the project file in place of the file's own for the same field and after them
     those that only the project file gives; and the fields that the project file
-    gives, which are the project's own."""
+    gives, which are the project's own. As --verify demands, it takes no criterion
+    that the site doesn't know, which would keep the issue open for ever, and only the
+    justification of a criterion that .bestpractices.json answers."""
     merged = file_answers(root)
+    answered = answered_criteria(merged)
+    known = criteria()
     own: set[str] = set()
     for criterion, table in own_answers(root).items():
-        if not isinstance(table, dict):
+        if not isinstance(table, dict) or criterion not in known:
             continue
         for key in KEYS:
             value = table.get(key)
+            if key == "status" and criterion in answered:
+                continue
             if isinstance(value, str):
                 merged[f"{criterion}_{key}"] = value
                 own.add(f"{criterion}_{key}")
@@ -179,12 +185,17 @@ def anchors(markdown: str) -> set[str]:
     """The anchors of the headings of a Markdown file, as GitHub makes them: from the
     text that a heading shows, so of a link in it only its text, as of the version
     that heads each release of the changelog."""
-    return {
-        re.sub(
+    found: set[str] = set()
+    seen: dict[str, int] = {}
+    for title in re.findall(r"^#{1,6} (.+)$", markdown, re.MULTILINE):
+        anchor = re.sub(
             r"[^\w\- ]", "", LINK_IN_HEADING.sub(r"\1", title).strip().lower()
         ).replace(" ", "-")
-        for title in re.findall(r"^#{1,6} (.+)$", markdown, re.MULTILINE)
-    }
+        # GitHub gives a repeated heading the suffix -1, -2 and so on.
+        count = seen.get(anchor, 0)
+        seen[anchor] = count + 1
+        found.add(f"{anchor}-{count}" if count else anchor)
+    return found
 
 
 def read_entry(
@@ -636,7 +647,9 @@ def missing_headings(text: str, repo: str, root: Path) -> tuple[str, ...]:
     missing: list[str] = []
     for link, anchor in pattern.findall(text):
         path = urllib.parse.unquote(link)
-        anchor = anchor.rstrip(TRAILING)
+        # A browser copies a heading with an umlaut percent-encoded, and GitHub
+        # finds a heading whatever the case of its anchor.
+        anchor = urllib.parse.unquote(anchor.rstrip(TRAILING)).lower()
         target = root / path
         if not target.is_file() or anchor == "readme":
             continue
