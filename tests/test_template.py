@@ -451,22 +451,48 @@ def runs_for(patterns: list[str], changed: list[str]) -> bool:
 
 
 def files_of(root: Path) -> list[str]:
-    """The files of a repository, by their paths from its root."""
+    """The files of a repository, by their paths from its root: of the blueprint those
+    that its Git has, of a rendered project every file on disk."""
     if root == ROOT:
-        listed = subprocess.run(
-            ["git", "ls-files", "-z"],
-            cwd=ROOT,
-            capture_output=True,
-            check=True,
-            text=True,
-            env=git_environment(ROOT),
-        ).stdout
-        return [name for name in listed.split("\0") if name]
+        return files_of_the_blueprint()
+    return files_on_disk(root)
+
+
+def files_on_disk(root: Path) -> list[str]:
+    """Every file in a folder, by its path from there, but those of a folder .git."""
     return [
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
         if path.is_file() and ".git" not in path.relative_to(root).parts
     ]
+
+
+def files_of_the_blueprint(root: Path = ROOT) -> list[str]:
+    """The files of the blueprint: those that its Git has, or, in a copy of it that is
+    no checkout of its own, those on disk that its .gitignore leaves in. The mutation
+    tests run in such a copy, mutants/, inside the checkout, where Git would answer for
+    the checkout and list none of the files of the copy."""
+    prefix = subprocess.run(
+        ["git", "rev-parse", "--show-prefix"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        env=git_environment(root),
+    )
+    if prefix.returncode == 0 and not prefix.stdout.strip():
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+            text=True,
+            env=git_environment(root),
+        ).stdout
+        return [name for name in listed.split("\0") if name]
+    ignored = pathspec.PathSpec.from_lines(
+        "gitignore", (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    )
+    return [name for name in files_on_disk(root) if not ignored.match_file(name)]
 
 
 def step_named(found: str | Mapping[str, Any], name: str) -> dict[str, Any]:
@@ -23230,14 +23256,16 @@ def a_change(tmp_path: Path, before: Sequence[str], after: Sequence[str]) -> Pat
     repository = tmp_path / "repository"
     repository.mkdir()
 
-    def git(*arguments: str) -> None:
+    def git(*arguments: str, data: bytes = b"") -> str:
         identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
-        subprocess.run(
+        done = subprocess.run(
             ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
             cwd=repository,
+            input=data,
             capture_output=True,
             check=True,
         )
+        return done.stdout.decode("utf-8").strip()
 
     def commit(files: Sequence[str], message: str) -> None:
         for path in repository.iterdir():
@@ -23248,14 +23276,72 @@ def a_change(tmp_path: Path, before: Sequence[str], after: Sequence[str]) -> Pat
         for name in files:
             (repository / name).parent.mkdir(parents=True, exist_ok=True)
             (repository / name).write_text("x\n", encoding="utf-8", newline="\n")
-        # Also the files that a .gitignore of the repository names.
-        git("add", "--all", "--force")
-        git("commit", "--quiet", "--allow-empty", "-m", message)
+        # Into the index as they are, also those that a .gitignore names, and without
+        # opening a file: git add can't open one whose path is longer than 260
+        # characters on Windows, as the longest names of template/ are in a temporary
+        # folder there, unless core.longpaths is true, which a configuration of the
+        # machine can set to false over that of the repository.
+        git("read-tree", "--empty")
+        entries = "".join(f"100644 {blob}\t{name}\n" for name in files)
+        git("update-index", "--add", "--index-info", data=entries.encode("utf-8"))
+        parents = ["-p", "HEAD"] if commits else []
+        commits.append(git("commit-tree", git("write-tree"), *parents, "-m", message))
+        git("update-ref", "HEAD", commits[-1])
 
     git("init", "--quiet", "--initial-branch=main")
+    blob = git("hash-object", "-w", "--stdin", data=b"x\n")
+    commits: list[str] = []
     commit(before, "main")
     commit(after, "The merge of the pull request")
     return repository
+
+
+def test_a_change_holds_a_path_longer_than_windows_allows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The longest name of the blueprint, deep in folders, as in the temporary folder of
+    # a run on Windows: Git for Windows adds no path longer than 260 characters unless
+    # core.longpaths is true, which the runner doesn't say and the configuration of a
+    # machine can deny over that of the repository.
+    configuration = tmp_path / "gitconfig"
+    configuration.write_text("[core]\n\tlongpaths = false\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(configuration))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    name = "deep/" * 30 + max(files_of(ROOT), key=len)
+    repository = a_change(tmp_path, [], [name])
+    listed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+        cwd=repository,
+        capture_output=True,
+        check=True,
+        encoding="utf-8",
+    ).stdout
+    assert listed == f"{name}\0"
+
+
+def test_the_files_of_a_copy_of_the_blueprint_are_those_on_disk(
+    tmp_path: Path,
+) -> None:
+    # The copy of the mutation tests, mutants/, lies inside the checkout, whose Git
+    # lists none of its files: they are those on disk, without what .gitignore names.
+    subprocess.run(
+        ["git", "init", "--quiet"], cwd=tmp_path, capture_output=True, check=True
+    )
+    copy = tmp_path / "mutants"
+    for name in (
+        ".gitignore",
+        "blueprint.py",
+        "docs/index.md",
+        "blueprint/__pycache__/cli.cpython-314.pyc",
+        ".venv/bin/python",
+    ):
+        (copy / name).parent.mkdir(parents=True, exist_ok=True)
+        (copy / name).write_text("/.venv/\n__pycache__/\n", encoding="utf-8")
+    files = [".gitignore", "blueprint.py", "docs/index.md"]
+    assert sorted(files_of_the_blueprint(copy)) == files
+    # And so are they in a copy outside of every checkout.
+    shutil.rmtree(tmp_path / ".git")
+    assert sorted(files_of_the_blueprint(copy)) == files
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
