@@ -17008,8 +17008,8 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     assert variant["name"] == name
     assert variant["steps"][-1] == for_the_job(variant, explain_step(name))
     explained_under_their_comments(variants)
-    # zizmor and the scanners of the pull requests, which aren't required checks,
-    # explain theirs too, and so does the check of the rules of Renovate.
+    # zizmor and the scanners of the pull requests, which aren't required checks, and
+    # the fuzzing, explain theirs too, and so does the check of the rules of Renovate.
     for workflow, job, check in (
         ("zizmor", "zizmor", "zizmor"),
         ("links", "links", "links"),
@@ -22923,10 +22923,10 @@ RELEASE_PULL_REQUEST = (
     "!startsWith(github.head_ref, 'release-please--') || "
     "github.event.pull_request.head.repo.full_name != github.repository"
 )
-# The scanners of pull requests, by workflow and job, each for the files it reads.
-# zizmor is none of them: the rules of main wait for its analysis of every pull request.
+# The scanners of pull requests, by workflow and job, each with a path filter for the
+# files it reads. zizmor is none of them: the rules of main wait for its analysis of
+# every pull request, as they do for the fuzzing, which looks at the files itself.
 SCANNERS = {
-    "fuzz.yml": "fuzz",
     "osv-scanner.yml": "pull-request",
     "links.yml": "links",
 }
@@ -22937,7 +22937,7 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     # no scanner reads, and the pull requests it releases ran every check already.
     flows = workflows(ROOT)
     # The legs of the Variants wait for their plan, which it skips.
-    skipped = {"variants.yml": "plan", **SCANNERS}
+    skipped = {"variants.yml": "plan", "fuzz.yml": "fuzz", **SCANNERS}
     for name, job in skipped.items():
         assert RELEASE_PULL_REQUEST in condition_of(job_in(flows[name], job)), name
     # Every tool of the rule of code scanning analyzes it, or its merge would wait.
@@ -23169,14 +23169,10 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
     flows = workflows(root)
     scanners = [name for name in SCANNERS if name in flows]
     filters = {name: paths_of(flows[name], "pull_request") for name in scanners}
-    # Only Python projects are fuzzed.
-    python = project in ("blueprint", "python-package", "github-action")
-    assert ("fuzz.yml" in filters) == python
+    assert set(filters) == set(SCANNERS)
 
     def reads(scanner: str, path: str) -> bool:
         name = path.rsplit("/", 1)[-1]
-        if scanner == "fuzz.yml":
-            return path.endswith(".py") or path.startswith("fuzz/")
         if scanner == "osv-scanner.yml":
             return bool(re.search(r"requirements[^/]*\.txt$", name)) or name in (
                 "package-lock.json",
@@ -23207,6 +23203,248 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
         for scanner, patterns in filters.items():
             expected = scanner == "links.yml" and "README.md" in changed
             assert runs_for(patterns, changed) == expected, (scanner, changed)
+
+
+# The projects that are fuzzed: the blueprint, with targets of its own, and the kinds in
+# Python.
+FUZZED = ["blueprint", "python-package", "github-action"]
+LOOK_FOR_FUZZED_CHANGES = "Look for a change that the fuzzing reads"
+
+
+def fuzzing_reads(path: str) -> bool:
+    """Whether the fuzzing reads a file: the code, the targets, the tools of every
+    requirements*.txt and its own workflow."""
+    return (
+        path.endswith(".py")
+        or path.startswith("fuzz/")
+        or bool(re.fullmatch(r"requirements[^/]*\.txt", path.rsplit("/", 1)[-1]))
+        or path == ".github/workflows/fuzz.yml"
+    )
+
+
+def a_change(tmp_path: Path, before: Sequence[str], after: Sequence[str]) -> Path:
+    """A repository whose HEAD has the files after, on top of a commit with the files
+    before, as the checkout of a pull request leaves its merge commit on top of main.
+    Every file has the same text, so a file in both is unchanged and one that only
+    changes its name is a rename."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    def git(*arguments: str) -> None:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        subprocess.run(
+            ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+        )
+
+    def commit(files: Sequence[str], message: str) -> None:
+        for path in repository.iterdir():
+            if path.is_dir() and path.name != ".git":
+                shutil.rmtree(path)
+            elif path.is_file():
+                path.unlink()
+        for name in files:
+            (repository / name).parent.mkdir(parents=True, exist_ok=True)
+            (repository / name).write_text("x\n", encoding="utf-8", newline="\n")
+        # Also the files that a .gitignore of the repository names.
+        git("add", "--all", "--force")
+        git("commit", "--quiet", "--allow-empty", "-m", message)
+
+    git("init", "--quiet", "--initial-branch=main")
+    commit(before, "main")
+    commit(after, "The merge of the pull request")
+    return repository
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_fuzz_is_required_exactly_where_the_fuzzing_runs(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A pull request that changes what the targets read merges only once they passed
+    # for its last commit, and the kinds without fuzz.yml don't wait for its check.
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    fuzzed = (root / ".github/workflows/fuzz.yml").exists()
+    assert fuzzed == (project in FUZZED)
+    assert ("fuzz" in settings["branch"]["required_checks"]) == fuzzed
+
+
+def test_the_fuzzing_reports_on_every_pull_request_and_fuzzes_only_on_a_change() -> (
+    None
+):
+    text = (ROOT / ".github/workflows/fuzz.yml").read_text(encoding="utf-8")
+    # No path filter, so that its required check reports, and still no run after a
+    # merge.
+    assert triggers(text)["pull_request"] == []
+    assert set(triggers(text)) == {"pull_request", "schedule", "workflow_dispatch"}
+    fuzzing = parse(text)
+    assert fuzzing["permissions"] == {"contents": "read"}
+    job = job_in(fuzzing, "fuzz")
+    assert "permissions" not in job
+    # The release pull request of this repository skips the job, which passes the
+    # required check as well.
+    assert condition_of(job) == RELEASE_PULL_REQUEST
+    steps = job["steps"]
+    [checkout] = steps_using(job, "actions/checkout")
+    # The merge commit of the pull request and main, its first parent.
+    assert checkout["with"] == {"persist-credentials": False, "fetch-depth": 2}
+    look = step_in(job, LOOK_FOR_FUZZED_CHANGES)
+    assert look["id"] == "changes"
+    assert look["env"] == {"EVENT": "${{ github.event_name }}"}
+    assert steps.index(look) == steps.index(checkout) + 1
+    # Each step after it sets up or fuzzes only on a change, and the PR coach still
+    # explains a failure.
+    after = steps[steps.index(look) + 1 :]
+    assert after[-1] == explain_step("fuzz")
+    assert condition_of(after[-1]) == "failure()"
+    assert len(after) == 5
+    for step in after[:-1]:
+        assert condition_of(step) == "steps.changes.outputs.fuzz == 'true'", step
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("project", FUZZED)
+def test_the_fuzzing_looks_at_every_file_that_it_reads(
+    tmp_path: Path, projects: dict[str, Path], project: str
+) -> None:
+    # A pull request that brings every file of the repository lists exactly those that
+    # the fuzzing reads, however many there are: the paths of GitHub look at the first
+    # 300 only.
+    root = ROOT if project == "blueprint" else projects[project]
+    files = files_of(root)
+    done = workflow_steps.run_step(
+        tmp_path,
+        "fuzz.yml",
+        "fuzz",
+        LOOK_FOR_FUZZED_CHANGES,
+        env={"EVENT": "pull_request"},
+        root=root,
+        workspace=a_change(tmp_path, [], files),
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.outputs == {"fuzz": "true"}
+    group = "::group::The changed files that the fuzzing reads\n"
+    listed = done.stdout.split(group, 1)[1].split("::endgroup::\n", 1)[0]
+    assert sorted(listed.splitlines()) == sorted(filter(fuzzing_reads, files))
+    assert done.summary == ""
+
+
+# The files of main and of the pull request, the event, and whether it fuzzes.
+TARGET = "fuzz/fuzz_demo.py"
+FUZZING_CHANGES: dict[str, tuple[list[str], list[str], str, bool]] = {
+    "code": ([TARGET], [TARGET, "src/demo/core.py"], "pull_request", True),
+    "target": ([], [TARGET], "pull_request", True),
+    # git lists the old name of a file that a rename moved.
+    "rename": ([TARGET, "top.py"], [TARGET, "top.txt"], "pull_request", True),
+    "deletion": ([TARGET, "top.py"], [TARGET], "pull_request", True),
+    "lock file": ([TARGET], [TARGET, "requirements-fuzz.txt"], "pull_request", True),
+    "tools": (
+        [TARGET],
+        [TARGET, "stacks/fuzz/requirements.txt"],
+        "pull_request",
+        True,
+    ),
+    "workflow": (
+        [TARGET],
+        [TARGET, ".github/workflows/fuzz.yml"],
+        "pull_request",
+        True,
+    ),
+    "no requirements file": (
+        [TARGET],
+        [TARGET, "x-requirements.txt"],
+        "pull_request",
+        False,
+    ),
+    "documents": (
+        [TARGET],
+        [TARGET, "README.md", "docs/index.md"],
+        "pull_request",
+        False,
+    ),
+    "another workflow": (
+        [TARGET],
+        [TARGET, ".github/workflows/lint.yml", "package.json"],
+        "pull_request",
+        False,
+    ),
+    # The release pull request of a fork, or of a project that releases otherwise.
+    "release": (
+        [TARGET],
+        [
+            TARGET,
+            "CHANGELOG.md",
+            "changelog.d/dark-mode.md",
+            "version.txt",
+            ".release-please-manifest.json",
+        ],
+        "pull_request",
+        False,
+    ),
+    "schedule": ([TARGET], [TARGET], "schedule", True),
+    "by hand": ([TARGET], [TARGET], "workflow_dispatch", True),
+    # A python-package without its example has nothing to fuzz.
+    "no target": ([], ["src/demo/core.py"], "pull_request", False),
+    "no target every week": ([], ["src/demo/core.py"], "schedule", False),
+}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("change", FUZZING_CHANGES)
+def test_the_fuzzing_runs_in_the_pull_requests_that_change_what_it_reads(
+    tmp_path: Path, change: str
+) -> None:
+    before, after, event, fuzzes = FUZZING_CHANGES[change]
+    done = workflow_steps.run_step(
+        tmp_path,
+        "fuzz.yml",
+        "fuzz",
+        LOOK_FOR_FUZZED_CHANGES,
+        env={"EVENT": event},
+        workspace=a_change(tmp_path, before, after),
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.outputs == {"fuzz": str(fuzzes).lower()}
+    # The summary of the check says in one line why it fuzzed nothing.
+    reason = (
+        "The repository has no target in fuzz/ to fuzz.\n"
+        if change.startswith("no target")
+        else "The pull request changes nothing that the fuzzing reads.\n"
+    )
+    assert done.summary == ("" if fuzzes else reason)
+    assert (reason in done.stdout) != fuzzes
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_fuzzing_fails_without_the_commit_below_the_merge(tmp_path: Path) -> None:
+    # A checkout without main below the merge commit can't tell what changed: the step
+    # fails rather than skip the fuzzing.
+    repository = a_change(tmp_path, [TARGET], [TARGET, "top.py"])
+    (repository / ".git/shallow").write_text(
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+        ).stdout,
+        encoding="utf-8",
+        newline="\n",
+    )
+    done = workflow_steps.run_step(
+        tmp_path,
+        "fuzz.yml",
+        "fuzz",
+        LOOK_FOR_FUZZED_CHANGES,
+        env={"EVENT": "pull_request"},
+        workspace=repository,
+    )
+    assert done.returncode != 0
+    assert done.outputs == {}
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])

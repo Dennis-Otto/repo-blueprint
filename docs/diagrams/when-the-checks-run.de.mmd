@@ -5,15 +5,15 @@ config:
 ---
 flowchart TB
     accTitle: Wann die Prüfungen laufen
-    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen und zizmor aus, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main Lint und die CI aus, für das, was kein Commit ändert, die Scanner vollständig, den Secret Scan der ganzen History, die SBOM und das neueste Python und Node.
+    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen aus, darunter das Fuzzing, das nur eine Änderung des Python-Codes, seiner Ziele oder seiner Werkzeuge fuzzt, und zizmor, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main Lint und die CI aus, für das, was kein Commit ändert, die Scanner vollständig, den Secret Scan der ganzen History, die SBOM und das neueste Python und Node.
 
     pr["Pull Request"]
     rpr["Release-Pull-Request<br>Changelog und Version"]
-    required["Vorgeschriebene Prüfungen und Analysen<br>Tests · Lint · Docs · CodeQL · zizmor<br>Dependency Review · Secret Scan"]
-    scanners["Scanner dessen, was er ändert<br>Lock-Dateien: OSV-Scanner<br>Python: Fuzzing · Dokumente: Links"]
+    required["Vorgeschriebene Prüfungen und Analysen<br>Tests · Lint · Docs · CodeQL · zizmor<br>Dependency Review · Secret Scan<br>Fuzzing einer Änderung des Python-Codes"]
+    scanners["Scanner dessen, was er ändert<br>Lock-Dateien: OSV-Scanner<br>Dokumente: Links"]
     main["main"]
     baseline["Was eine Vergleichsbasis hält oder veröffentlicht<br>Tests mit Abdeckung · neuestes Python und Node<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>Website · Release · Branch-Bot"]
-    weekly["Lint und die CI, für das, was kein Commit ändert<br>Scanner vollständig · 15 Minuten Fuzzing<br>Secret Scan der ganzen History<br>SBOM · neuestes Python und Node"]
+    weekly["Lint und die CI, für das, was kein Commit ändert<br>Scanner vollständig · 25 Minuten Fuzzing<br>Secret Scan der ganzen History<br>SBOM · neuestes Python und Node"]
 
     pr --> required
     pr -- "ändert, was sie lesen" --> scanners
