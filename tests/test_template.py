@@ -3197,6 +3197,8 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
             )
         if name == "SECURITY.md":
             own = as_an_action(own)
+        if name == ".bestpractices.json":
+            own = answers_of_an_action(own)
         if name == ".github/renovate-blueprint.json5":
             # The blueprint runs its blueprint.py from its root, where every
             # repository has it as .github/blueprint.py.
@@ -3239,6 +3241,39 @@ def as_an_action(security: str) -> str:
     )
     assert (supported, verified, website) == (1, 1, 1)
     return security
+
+
+def answers_of_an_action(answers: str) -> str:
+    """The answers of OpenSSF Best Practices of the blueprint as those of the GitHub
+    Action it is rendered as: the blueprint has no action.yml, and its Action test
+    workflow runs only by hand, so its own answers say how a repository receives it
+    and what tests every kind of project, where an action says how it is pinned and
+    that its required check runs it."""
+    files = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/"
+    delivered = (
+        ", where Copier renders a repository from the tag of a release, which the"
+        " blueprint bot of each repository verifies before every update",
+        ", where repositories that use the action pin the commit hash of a release",
+    )
+    tested = (
+        "; the Variants workflow renders every kind of project and runs its checks"
+        f" with their real tools: {files}.github/workflows/variants.yml",
+        "; the required check action, of the Action test workflow, runs the action"
+        f" itself: {files}.github/workflows/action-test.yml",
+    )
+    counts: dict[str, int] = {}
+    for criterion, (blueprint, action) in {
+        "delivery_mitm": delivered,
+        "osps_br_03_02": delivered,
+        "automated_integration_testing": tested,
+    }.items():
+        answers, counts[criterion] = re.subn(
+            rf'("{criterion}_justification": "[^"\n]*){re.escape(blueprint)}',
+            r"\g<1>" + action,
+            answers,
+        )
+    assert set(counts.values()) == {1}, counts
+    return answers
 
 
 @pytest.mark.parametrize("kind", ["python-package", "github-action"])
@@ -10683,6 +10718,9 @@ GUARANTEED = {
 }
 
 
+MAX_JUSTIFICATION = 8192
+
+
 def best_practices(project: Path) -> dict[str, str]:
     """The answers of .bestpractices.json, which may name each field only once."""
 
@@ -10732,6 +10770,9 @@ def proposed_criteria(project: Path, repository: str) -> set[str]:
     for criterion in criteria:
         justification = answers[f"{criterion}_justification"]
         assert answers[f"{criterion}_status"] == "Met", criterion
+        # The longest justification that bestpractices.dev takes: MAX_TEXT_LENGTH of
+        # app/models/project.rb of its badge app.
+        assert len(justification) <= MAX_JUSTIFICATION, criterion
         links = re.findall(r"https://\S+", justification)
         if BEST_PRACTICES[criterion]["met_url_required"]:
             assert links, criterion
@@ -10778,6 +10819,86 @@ def test_every_repository_proposes_its_answers_of_openssf_best_practices(
         assert top in ({}, "read-all") or (
             isinstance(top, dict) and set(top.values()) == {"read"}
         ), name
+
+
+# What the answers of each kind say that the files of the kind make true, beyond the
+# words of every kind, and which kinds say it: an answer of bestpractices.dev that
+# names it would otherwise lose it to the links of the bot (issue 1075).
+PYTHON_STACKS = {"home-assistant", "github-action", "python-package"}
+WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
+    # A Nextcloud app: its signed package, its standards, its tools and its store.
+    ("signed_releases", "certificate of the app", {"nextcloud-app"}),
+    ("delivery_mitm", "certificate of the app", {"nextcloud-app"}),
+    ("osps_br_03_02", "certificate of the app", {"nextcloud-app"}),
+    ("coding_standards", "PSR-1 and PSR-2", {"nextcloud-app"}),
+    ("coding_standards_enforced", ".php-cs-fixer.dist.php", {"nextcloud-app"}),
+    ("coding_standards_enforced", "error level 1 of psalm.xml", {"nextcloud-app"}),
+    ("external_dependencies", "appinfo/info.xml", {"nextcloud-app"}),
+    ("installation_development_quick", "composer install", {"nextcloud-app"}),
+    ("dependency_monitoring", "composer audit", {"nextcloud-app"}),
+    ("test", "lib/", {"nextcloud-app"}),
+    ("updateable_reused_components", ".nextcloudignore", {"nextcloud-app"}),
+    ("sites_password_security", "Nextcloud App Store", {"nextcloud-app"}),
+    # A Home Assistant integration: hassfest and HACS, and the oldest Home Assistant.
+    ("coding_standards", "hassfest", {"home-assistant"}),
+    ("coding_standards_enforced", "hassfest", {"home-assistant"}),
+    ("automated_integration_testing", "hassfest", {"home-assistant"}),
+    ("automated_integration_testing", "oldest Home Assistant", {"home-assistant"}),
+    ("delivery_mitm", "HACS", {"home-assistant"}),
+    ("sites_password_security", "HACS", {"home-assistant"}),
+    ("installation_development_quick", "requirements-test.txt", {"home-assistant"}),
+    # A GitHub Action: the required check that runs it, and the pinned commit.
+    ("automated_integration_testing", "action-test.yml", {"github-action"}),
+    ("delivery_mitm", "commit hash", {"github-action"}),
+    ("osps_br_03_02", "commit hash", {"github-action"}),
+    # A Chrome extension: the signature of its store.
+    ("signed_releases", "signs every package", {"chrome-extension"}),
+    ("delivery_mitm", "signs every package", {"chrome-extension"}),
+    # The tools of each stack.
+    ("coding_standards", "PEP 8", PYTHON_STACKS),
+    ("coding_standards_enforced", "ruff format --check", PYTHON_STACKS),
+    (
+        "installation_development_quick",
+        "requirements-dev.txt",
+        PYTHON_STACKS - {"home-assistant"},
+    ),
+    ("coding_standards", "Biome", set(NODE)),
+    ("coding_standards_enforced", "tsconfig.json", set(NODE)),
+    ("installation_development_quick", "npm ci --ignore-scripts", set(NODE)),
+    ("coding_standards", "hadolint", {"container"}),
+    ("coding_standards_enforced", "the CI hadolint", {"container"}),
+    # The written policy of the section Tests, which every kind but generic has.
+    ("test_policy_mandated", "CONTRIBUTING.md#tests", set(KINDS) - {"generic"}),
+    # What every kind says.
+    ("vulnerability_response_process", "credit for the reporter", set(KINDS)),
+    ("vulnerability_response_process", "at least every 14 days", set(KINDS)),
+    ("signed_releases", "publishes the website signs the provenance", set(KINDS)),
+    ("dependency_monitoring", "the dependency review", set(KINDS)),
+    ("coding_standards", "ShellCheck for the shell scripts", set(KINDS)),
+    ("installation_development_quick", "core.hooksPath .githooks", set(KINDS)),
+]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_answers_of_openssf_best_practices_say_what_each_kind_does(
+    projects: dict[str, Path], kind: str
+) -> None:
+    answers = best_practices(projects[kind])
+
+    for criterion, words, kinds in WORDS_OF_A_KIND:
+        answer = answers.get(f"{criterion}_justification", "")
+        assert (words in answer) == (kind in kinds), (criterion, words)
+    # The strict mode of mypy and the coverage of every line and branch are set by
+    # pyproject.toml and package.json, files of the project (decision 0129).
+    for answer in answers.values():
+        assert "strict mode of mypy" not in answer
+        assert "mypy checks in its strict mode" not in answer
+        assert "every line and branch" not in answer
+    # The page of the security policy shows what the answer of the store says.
+    security = (projects[kind] / "SECURITY.md").read_text(encoding="utf-8")
+    assert (
+        "The Chrome Web Store signs every package that it delivers" in security
+    ) == (kind == "chrome-extension")
 
 
 def test_the_answers_of_openssf_best_practices_follow_those_of_copier(

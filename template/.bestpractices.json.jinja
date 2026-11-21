@@ -21,7 +21,46 @@
   'php': ('composer.json', 'composer.json lists the direct dependencies, and composer.lock pins each'),
   'node': ('package.json', 'package.json lists the direct dependencies, and package-lock.json pins each with its hash'),
 }.get(stack) -%]
-[%- set registry = {'pypi': ' and from PyPI', 'npm': ' and from npm', 'ghcr': ' and from the GitHub Container Registry', 'nextcloud-appstore': ' and from the Nextcloud App Store', 'chrome-web-store': ' and from the Chrome Web Store'}.get(publish_to, '') -%]
+[#- The coding standards of each stack, besides those of every kind, which CONTRIBUTING.md
+    names, and the tools of scripts/check.sh that enforce them. Not the strict mode of
+    mypy: pyproject.toml, a file of the project, sets it. -#]
+[%- set python_standards = 'PEP 8 in the format of Ruff and type hints that mypy checks for Python' -%]
+[%- set standards = {
+  'python': python_standards,
+  'home-assistant': python_standards ~ ' and the rules of hassfest and HACS for the integration',
+  'php': 'the Nextcloud coding standard for PHP, which builds on PSR-1 and PSR-2, and Psalm at its strictest level',
+  'node': 'the strict mode of the TypeScript compiler and the recommended rules of Biome for TypeScript',
+  'container': 'the rules of hadolint for the Dockerfile',
+}.get(stack, '') -%]
+[%- set enforced = {
+  'python': 'ruff format --check, ruff check, mypy and ',
+  'home-assistant': 'ruff format --check, ruff check, mypy and ',
+  'php': 'php-cs-fixer with the Nextcloud coding standard of .php-cs-fixer.dist.php, Psalm at error level 1 of psalm.xml and ',
+  'node': 'Biome with the rules of biome.jsonc, where a warning fails as well, the TypeScript compiler with tsconfig.json and ',
+}.get(stack, '') -%]
+[#- What CONTRIBUTING.md#checks installs before the first run of scripts/check.sh. -#]
+[%- set setup = {
+  'python': 'a virtual environment with pip install --require-hashes -r requirements-dev.txt, then ',
+  'home-assistant': 'a virtual environment with pip install --require-hashes -r requirements-test.txt, then ',
+  'php': 'composer install, then ',
+  'node': 'npm ci --ignore-scripts, then ',
+}.get(stack, '') -%]
+[#- Where a release reaches its users besides GitHub, and what protects it there; a
+    store's words hold once the store has the app. -#]
+[%- set registry = {
+  'pypi': ' and from PyPI',
+  'npm': ' and from npm',
+  'ghcr': ' and from the GitHub Container Registry',
+  'hacs': ' and through HACS, which installs the zip of the GitHub release',
+  'nextcloud-appstore': ' and from the Nextcloud App Store, signed with the certificate of the app, which Nextcloud checks',
+  'chrome-web-store': ' and from the Chrome Web Store, which signs every package that it delivers',
+  'github-action': ', where repositories that use the action pin the commit hash of a release',
+}.get(publish_to, '') -%]
+[#- What signs a release besides GitHub and Sigstore. -#]
+[%- set signed = {
+  'nextcloud-appstore': '; the package is signed with the certificate of the app as well, which Nextcloud checks when it installs or updates the app, and has a detached signature',
+  'chrome-web-store': '; the Chrome Web Store signs every package that it delivers',
+}.get(publish_to, '') -%]
 [#- Every site of the project is on GitHub: the repository and, on GitHub Pages, the website. -#]
 [%- set on_github = not homepage or homepage.startswith('https://' ~ (owner | lower) ~ '.github.io/') -%]
 [%- set channels = 'GitHub Issues and pull requests' ~ (', and GitHub Discussions' if discussions else '') -%]
@@ -72,7 +111,7 @@
   "vulnerability_report_private_justification": "The private vulnerability reporting of GitHub, which the settings as code turn on and SECURITY.md names: {= repository =}/security/advisories/new",
 [%- if tests %]
   "test_status": "Met",
-  "test_justification": "An automated test suite, which scripts/check.sh runs with {= tests =} and its coverage, on a computer and in the CI: {= files =}scripts/check.sh",
+  "test_justification": "An automated test suite, which scripts/check.sh runs with {= tests =} and its coverage, on a computer and in the CI[% if stack == 'php' %], and which fails when a line of lib/ runs in no test[% endif %]: {= files =}scripts/check.sh",
   "test_invocation_status": "Met",
   "test_invocation_justification": "bash scripts/check.sh runs the tests with every other check, the same on a computer and in the CI: {= files =}CONTRIBUTING.md#checks",
   "test_continuous_integration_status": "Met",
@@ -126,32 +165,46 @@
   "documentation_current_justification": "The documentation changes in the pull request that changes what it describes, as the checklist of the pull request template asks, and the website is built and checked on every change: {= files =}.github/pull_request_template.md",
 [%- if on_github %]
   "sites_password_security_status": "Met",
-  "sites_password_security_justification": "The sites of the project are on GitHub and GitHub Pages; the project stores no passwords.",
+  "sites_password_security_justification": "The sites of the project are on GitHub and GitHub Pages[% if publish_to == 'nextcloud-appstore' %], and the page of the app in the Nextcloud App Store, which Nextcloud runs[% elif publish_to == 'hacs' %]; HACS installs from the GitHub releases and has no site of the project[% endif %]; the website has no sign-in, and the project stores no passwords.",
 [%- endif %]
   "vulnerability_response_process_status": "Met",
-  "vulnerability_response_process_justification": "SECURITY.md documents the process: private reporting, an acknowledgement within 7 days, a first assessment within 14 days, a fix within 90 days at the latest and the disclosure in an advisory: {= files =}SECURITY.md#what-happens-next",
+  "vulnerability_response_process_justification": "SECURITY.md documents the process: private reporting, an acknowledgement within 7 days, a first assessment within 14 days, a fix within 90 days at the latest, an update at least every 14 days when a fix takes longer, the disclosure in an advisory, and credit for the reporter in the advisory and the release notes: {= files =}SECURITY.md#what-happens-next",
   "coding_standards_status": "Met",
-  "coding_standards_justification": "CONTRIBUTING.md names the coding standards that contributions follow: {= files =}CONTRIBUTING.md#coding-standards",
+  "coding_standards_justification": "CONTRIBUTING.md names the coding standards that contributions follow: [% if standards %]{= standards =}; [% endif %]ShellCheck for the shell scripts, actionlint and zizmor for the workflows, markdownlint for Markdown and .editorconfig for every text file: {= files =}CONTRIBUTING.md#coding-standards",
   "coding_standards_enforced_status": "Met",
-  "coding_standards_enforced_justification": "scripts/check.sh and the Lint workflow check the coding standards on every pull request, which merges only when they pass: {= files =}scripts/check.sh",
+  "coding_standards_enforced_justification": "scripts/check.sh runs {= enforced =}ShellCheck[% if stack == 'container' %], the CI hadolint[% endif %], and the Lint workflow actionlint, markdownlint, REUSE and the DCO check[% if stack == 'home-assistant' %], and the required check home-assistant hassfest and HACS[% endif %], on every pull request, which merges only when they pass: {= files =}scripts/check.sh",
   "installation_development_quick_status": "Met",
-  "installation_development_quick_justification": "CONTRIBUTING.md shows how to run every check with bash scripts/check.sh, and the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: {= files =}CONTRIBUTING.md#checks",
+  "installation_development_quick_justification": "CONTRIBUTING.md shows how to set up everything to make and test changes: {= setup =}bash scripts/check.sh runs the checks, the same on a computer and in the CI, and git config core.hooksPath .githooks runs them before every push; the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: {= files =}CONTRIBUTING.md#checks",
 [%- if dependencies %]
   "external_dependencies_status": "Met",
-  "external_dependencies_justification": "{= dependencies[1] =}: {= files =}{= dependencies[0] =}",
+  "external_dependencies_justification": "{= dependencies[1] =}[% if stack == 'php' %]; appinfo/info.xml names the versions of Nextcloud and PHP that the app supports, and the Upstream workflow proposes each new major version of Nextcloud[% endif %]: {= files =}{= dependencies[0] =}",
 [%- endif %]
   "dependency_monitoring_status": "Met",
-  "dependency_monitoring_justification": "Renovate updates the dependencies, an update that fixes a vulnerability at once, and OSV-Scanner checks every lock file in the pull requests that change one, after every change of main and every week: {= files =}.github/workflows/osv-scanner.yml",
+  "dependency_monitoring_justification": "Renovate updates the dependencies, an update that fixes a vulnerability at once, and OSV-Scanner checks every lock file in the pull requests that change one, after every change of main and every week, and reports to code scanning, where the Findings workflow fails while a finding is neither fixed nor accepted with its reason; the dependency review checks each pull request for dependencies with known vulnerabilities[% if stack == 'php' %], and composer audit in scripts/check.sh checks the locked packages against the advisories of Packagist[% endif %]: {= files =}.github/workflows/osv-scanner.yml",
   "updateable_reused_components_status": "Met",
+[%- if stack == 'php' %]
+  "updateable_reused_components_justification": "The package of the app leaves vendor/ and composer.json out, as .nextcloudignore says, so it ships no package of Composer; the tools come from Composer, pinned in composer.lock, every action by its commit hash and every image by its digest, and Renovate updates them: {= files =}.nextcloudignore",
+[%- else %]
   "updateable_reused_components_justification": "Every dependency comes from its package manager, pinned in a lock file, every action by its commit hash and every image by its digest, and Renovate updates them: {= files =}GOVERNANCE.md#automation",
+[%- endif %]
 [%- if tests %]
   "automated_integration_testing_status": "Met",
+[%- if stack == 'home-assistant' %]
+  "automated_integration_testing_justification": "The CI runs scripts/check.sh with the whole test suite on every pull request and after every change of main, and reports its success or failure as a required check; the required check home-assistant validates the integration with HACS and hassfest and imports every module of it in the image of the oldest Home Assistant that hacs.json names: {= files =}.github/workflows/ci.yml",
+[%- elif project_type == 'github-action' %]
+  "automated_integration_testing_justification": "The CI runs scripts/check.sh with the whole test suite on every pull request and after every change of main, and reports its success or failure as a required check; the required check action, of the Action test workflow, runs the action itself: {= files =}.github/workflows/action-test.yml",
+[%- else %]
   "automated_integration_testing_justification": "The CI runs scripts/check.sh with the whole test suite on every pull request and after every change of main, and reports its success or failure as a required check: {= files =}scripts/check.sh",
 [%- endif %]
+[%- endif %]
   "test_policy_mandated_status": "Met",
+[%- if stack == 'generic' %]
   "test_policy_mandated_justification": "CONTRIBUTING.md has the written policy: changes need tests in the automated test suite, and the checks of scripts/check.sh pass: {= files =}CONTRIBUTING.md#requirements-for-changes",
+[%- else %]
+  "test_policy_mandated_justification": "CONTRIBUTING.md has the written policy: new functionality comes with tests in the automated test suite, in the same pull request, and every bug fix with a test that fails without the fix; a pull request without the tests it needs is not merged: {= files =}CONTRIBUTING.md#tests",
+[%- endif %]
   "signed_releases_status": "Met",
-  "signed_releases_justification": "Every release is immutable, GitHub signs an attestation that ties its tag to its commit and to every file, and the release workflow signs the build provenance of every file with Sigstore, without a long-lived key; SECURITY.md shows how to verify both: {= files =}SECURITY.md#verify-a-release",
+  "signed_releases_justification": "Every release is immutable, GitHub signs an attestation that ties its tag to its commit and to every file, and the release workflow signs the build provenance of every file with Sigstore, without a long-lived key{= signed =}; the job that publishes the website signs the provenance of what it publishes; SECURITY.md shows how to verify them: {= files =}SECURITY.md#verify-a-release",
   "version_tags_signed_status": "Met",
   "version_tags_signed_justification": "The release workflow signs every release tag without a key with gitsign, and builds no release on a tag that it didn't sign: {= files =}SECURITY.md#how-the-project-keeps-itself-secure",
   "small_tasks_status": "Met",
