@@ -29,6 +29,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 The ruleset *Protect main* of `.github/repository.toml` lets a pull request merge once these checks pass:
 
 - `check (python)`: `scripts/check.sh` with the tools of Python.
+- `fuzz`: every target in `fuzz/` for a minute, as `fuzz.yml` runs it, when the pull request changes the code, the targets or the tools; any other pull request passes it in seconds.
 - `lint`, `diagrams`, `docs`, `conventional title`, `codeql`, `dependency-review` and `gitleaks`, which every kind needs: every linter in one job, the pictures of the diagrams, the strict build of the website, the title of the pull request with its entry in the changelog, CodeQL, the review of new dependencies and the secret scan.
 
 ## Delivery

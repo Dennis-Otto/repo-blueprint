@@ -28,7 +28,7 @@ Die Mutationstests zeigen die Zeilen, die die Tests ausführen, aber nicht prüf
 
 ## Fuzzing
 
-Für ein Python-Paket oder eine GitHub Action: abdeckungsgesteuertes Fuzzing jedes Ziels in `fuzz/`, je eine Minute in jedem Pull Request, der den Code, die Ziele oder die Werkzeuge ändert, und jede Woche 25 Minuten, die sich alle Ziele teilen; ein Fund lässt den Lauf scheitern, mit der Eingabe, die ihn auslöste, im Log.
+Für ein Python-Paket oder eine GitHub Action: abdeckungsgesteuertes Fuzzing jedes Ziels in `fuzz/`, je eine Minute in jedem Pull Request, der den Code, die Ziele oder die Werkzeuge ändert, und jede Woche 25 Minuten, die sich alle Ziele teilen; ein Fund lässt den Lauf scheitern, mit der Eingabe, die ihn auslöste, im Log. Ihre Prüfung `fuzz` ist vorgeschrieben: Ein Pull Request, der den Code, die Ziele oder die Werkzeuge ändert, wird erst gemergt, wenn das Fuzzing für seinen letzten Commit bestanden hat, und jeder andere Pull Request besteht sie in Sekunden, ohne Fuzzing.
 
 **Womit:** `fuzz.yml`: Atheris.
 

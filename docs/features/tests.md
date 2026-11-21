@@ -28,7 +28,7 @@ The mutation tests show the lines that the tests run but don't check: once a wee
 
 ## Fuzzing
 
-For a Python package or a GitHub Action: coverage-guided fuzzing of every target in `fuzz/`, a minute each in every pull request that changes the code, the targets or the tools, and every week 25 minutes shared by all targets; a finding fails the run, with the input that caused it in the log.
+For a Python package or a GitHub Action: coverage-guided fuzzing of every target in `fuzz/`, a minute each in every pull request that changes the code, the targets or the tools, and every week 25 minutes shared by all targets; a finding fails the run, with the input that caused it in the log. Its check `fuzz` is required: a pull request that changes the code, the targets or the tools merges only once the fuzzing has passed for its last commit, and any other pull request passes it in seconds, without fuzzing.
 
 **How:** `fuzz.yml`: Atheris.
 

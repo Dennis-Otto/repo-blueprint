@@ -30,6 +30,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 - `check (github-action)`: `scripts/check.sh` with the tools of Python.
 - `action`: the action itself, as `action-test.yml` runs it.
+- `fuzz`: every target in `fuzz/` for a minute, as `fuzz.yml` runs it, when the pull request changes the code, the targets or the tools; any other pull request passes it in seconds.
 - `lint`, `diagrams`, `docs`, `conventional title`, `codeql`, `dependency-review` and `gitleaks`, which every kind needs: every linter in one job, the pictures of the diagrams, the strict build of the website, the title of the pull request with its entry in the changelog, CodeQL, the review of new dependencies and the secret scan.
 
 ## Delivery
