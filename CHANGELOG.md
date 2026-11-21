@@ -9,15 +9,13 @@ requests when there is none.
 
 ## [1.24.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.2...v1.24.0) (2026-11-21)
 
-
 ### Features
 
-* the answers of .bestpractices.json say what each kind of project does ([#1077](https://github.com/Dennis-Otto/repo-blueprint/issues/1077)) ([ae09345](https://github.com/Dennis-Otto/repo-blueprint/commit/ae093458a9951160c3d28e6f1a1ccbb5e2f7430b))
-
+- **Richer answers for bestpractices.dev:** the answers that `.bestpractices.json` proposes now name what each kind of project really does, such as the signed package of a Nextcloud app with its coding standard, hassfest and HACS for a Home Assistant integration, the pinned commit of a GitHub Action and the store's signature for a Chrome extension, and every repository tells how it answers a report and how its website is signed. Saving the links of the issue *The answers on bestpractices.dev differ from .bestpractices.json* no longer drops these answers from an entry, and `SECURITY.md` of a Chrome extension says that the Chrome Web Store signs every package that it delivers.
 
 ### Bug fixes
 
-* **fuzz:** a pull request that changes what the fuzzing reads waits for it ([#1076](https://github.com/Dennis-Otto/repo-blueprint/issues/1076)) ([e05ce1c](https://github.com/Dennis-Otto/repo-blueprint/commit/e05ce1ceb54a398cafede3c076afb90b8e6746e1))
+- A pull request of a Python package or a GitHub Action that changes the code, the targets in `fuzz/` or the tools of a `requirements*.txt` merges only once the fuzzing has passed for its last commit. Before, the fuzzing was no required check, so auto-merge merged most such pull requests while it still ran, and a finding came after the code was on `main`. The check `fuzz` now reports on every pull request: one that changes nothing that the fuzzing reads, such as the documentation, passes it in seconds without fuzzing, and its summary says why. An existing repository has nothing to do: the update brings the workflow, and the settings bot adds the required check after its merge.
 
 ## [1.23.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.1...v1.23.2) (2026-11-20)
 

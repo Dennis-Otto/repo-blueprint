@@ -1,3 +1,0 @@
-### Bug fixes
-
-- A pull request of a Python package or a GitHub Action that changes the code, the targets in `fuzz/` or the tools of a `requirements*.txt` merges only once the fuzzing has passed for its last commit. Before, the fuzzing was no required check, so auto-merge merged most such pull requests while it still ran, and a finding came after the code was on `main`. The check `fuzz` now reports on every pull request: one that changes nothing that the fuzzing reads, such as the documentation, passes it in seconds without fuzzing, and its summary says why. An existing repository has nothing to do: the update brings the workflow, and the settings bot adds the required check after its merge.
