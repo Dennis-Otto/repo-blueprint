@@ -1,0 +1,15 @@
+# The answers of OpenSSF Best Practices (https://www.bestpractices.dev) that only the
+# blueprint can give, on top of its .bestpractices.json, which it keeps equal to its
+# rendering as a GitHub Action. A repository made from it gets this file empty, with
+# the comment of template/.github/bestpractices.project.toml, and fills it with its own:
+# blueprint.py best-practices --verify, a step of scripts/check.sh, checks it, and the
+# weekly run of Links compares the public entry with both files (decision 1088).
+
+[test]
+justification = "pytest, with GitHub simulated by the tests, covers every line and branch of blueprint.py and the other tools of the blueprint, and the tests of the template render all nine kinds of projects and check their files; the Variants workflow runs the checks of each rendered kind with its real tools: https://github.com/Dennis-Otto/repo-blueprint/tree/main/tests"
+
+[test_continuous_integration]
+justification = "On every pull request and after every change of main, the required check of CI (python) runs scripts/check.sh, with pytest and its gate of 100 % line and branch coverage, Ruff, mypy and the tests that render all nine kinds of projects; Lint runs actionlint and REUSE on every pull request, and Variants runs the checks of each kind that a pull request changes, and of every kind once a week: https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/ci-python.yml"
+
+[version_tags_signed]
+justification = "Every release tag since v0.6.0 is an annotated tag that the release workflow signs without a key with gitsign: Sigstore certifies the identity of the release workflow, and the workflow Release verification checks the signature and that identity after every release, and those of the latest release every week: https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/sign-tag.sh https://github.com/Dennis-Otto/repo-blueprint/releases/tag/v0.6.0"

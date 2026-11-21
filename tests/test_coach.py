@@ -416,6 +416,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Changelog fragments",
         "Records of decisions",
         "Accepted advisories",
+        "Answers for bestpractices.dev",
         "Lock files",
         "Lock files match their sources",
         "Translations",
@@ -469,6 +470,7 @@ def test_each_step_of_the_blueprint_says_whether_it_can_pass_when_it_runs_again(
         "Lock files",
         "Changelog fragments",
         "Explanations of the checks",
+        "Answers for bestpractices.dev",
     ):
         assert step in final, step
     # What downloads, starts a browser or runs tests can pass when it runs again: an

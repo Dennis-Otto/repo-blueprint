@@ -84,6 +84,7 @@ from blueprint import (
 )
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
+from blueprint.best_practices import PROJECT_ANSWERS, anchors
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     COLLISION,
@@ -5250,7 +5251,7 @@ def decisions_step(check: str) -> str:
 
 def advisories_step(check: str) -> str:
     start = check.index('step "Accepted advisories"')
-    return check[start : check.index('step "Lock files"', start)]
+    return check[start : check.index('\nstep "', start) + 1]
 
 
 def locks_step(check: str) -> str:
@@ -10763,22 +10764,6 @@ def best_practices(project: Path) -> dict[str, str]:
     return answers
 
 
-# A link of Markdown in a heading, such as [1.0.0](https://…/compare/v0.13.3...v1.0.0).
-LINK_IN_HEADING = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-
-
-def anchors(markdown: str) -> set[str]:
-    """The anchors of the headings of a Markdown file, as GitHub makes them: from the
-    text that a heading shows, so of a link in it only its text, as of the version
-    that heads each release of the changelog."""
-    return {
-        re.sub(
-            r"[^\w\- ]", "", LINK_IN_HEADING.sub(r"\1", title).strip().lower()
-        ).replace(" ", "-")
-        for title in re.findall(r"^#{1,6} (.+)$", markdown, re.MULTILINE)
-    }
-
-
 def proposed_criteria(project: Path, repository: str) -> set[str]:
     """The criteria that the .bestpractices.json of a project answers, once each of
     them is an answer that bestpractices.dev takes and every file that it names, with
@@ -11205,6 +11190,83 @@ def test_the_weekly_run_of_links_compares_the_entry_on_bestpractices_dev(
     assert done.stdout.splitlines()[-1] == (
         "The README shows no badge of bestpractices.dev: nothing to compare."
     )
+
+
+# It runs the copy of blueprint.py in a rendered project, which the mutation tests don't
+# change.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_has_a_file_of_its_own_answers_of_bestpractices_dev(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # .bestpractices.json belongs to the blueprint, which renders it anew with every
+    # update: an answer that only the repository can give goes into a file of the
+    # project, which each kind gets with its comment alone (decision 1088).
+    project = projects[kind]
+    own = (project / PROJECT_ANSWERS).read_text(encoding="utf-8")
+    assert own == (ROOT / "template" / PROJECT_ANSWERS).read_text(encoding="utf-8")
+    assert tomllib.loads(own) == {}
+    assert "never into .bestpractices.json" not in own
+    assert (
+        "Never change that file: an\n# answer of this repository alone goes here"
+        in (own)
+    )
+    # The step of scripts/check.sh passes on it, with the repository's own copy of
+    # blueprint.py.
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert 'step "Answers for bestpractices.dev"' in check
+    assert '"$python" "$tool" best-practices --verify\n' in check
+    done = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "best-practices", "--verify"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    assert done.stdout.splitlines()[-1] == (
+        f"{PROJECT_ANSWERS} gives no answer of its own: the answers are those of "
+        ".bestpractices.json."
+    )
+    # A file of the project: no update overwrites it, a pull request that changes it
+    # gets no notice, and AGENTS.md lists it and says what goes there.
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert ".bestpractices.json" in owned.splitlines()
+    assert PROJECT_ANSWERS not in owned.splitlines()
+    assert pathspec.PathSpec.from_lines("gitignore", files_of_the_project()).match_file(
+        PROJECT_ANSWERS
+    )
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert PROJECT_ANSWERS in listed_files_of_the_project(agents)
+    assert f"go into `{PROJECT_ANSWERS}`, never into `.bestpractices.json`" in agents
+
+
+def test_an_update_keeps_the_answers_of_the_repository_for_bestpractices_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    releases = GuideReleases(tmp_path, monkeypatch)
+    template = releases.blueprint / "template" / PROJECT_ANSWERS
+    template.parent.mkdir()
+    shutil.copy(ROOT / "template" / PROJECT_ANSWERS, template)
+    releases.release("v1.0.0", releases.current)
+    releases.copy("v1.0.0", "generic")
+    own = releases.project / PROJECT_ANSWERS
+    answered = own.read_text(encoding="utf-8") + (
+        '\n[security_review]\nstatus = "Met"\njustification = "A review of 2026."\n'
+    )
+    own.write_text(answered, encoding="utf-8", newline="\n")
+    releases.commit(releases.project)
+
+    # A release that changes the comment of the file reaches only new repositories.
+    template.write_text(
+        template.read_text(encoding="utf-8") + "# A new line of the blueprint.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    releases.release("v2.0.0", releases.current)
+    releases.update("v2.0.0")
+
+    assert own.read_text(encoding="utf-8") == answered
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -17530,6 +17592,7 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Changelog fragments",
         "Records of decisions",
         "Accepted advisories",
+        "Answers for bestpractices.dev",
         "Lock files",
         "Lock files match their sources",
         # The order, the stale texts and the copies of the catalogs.

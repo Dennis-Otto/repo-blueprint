@@ -169,6 +169,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
         ("Changelog fragments", "{blueprint} fragments --fix"),
         ("Records of decisions", "{blueprint} decisions --fix"),
         ("Accepted advisories", "{blueprint} advisories --fix"),
+        ("Answers for bestpractices.dev", "{blueprint} best-practices --verify --fix"),
         ("Lock files", "{blueprint} locks --fix"),
         ("Lock files match their sources", "{blueprint} locks --compile --fix"),
         ("Version", "{blueprint} fix version"),
