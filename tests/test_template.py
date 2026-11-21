@@ -11032,7 +11032,7 @@ SOURCES_OF_THE_ANSWERS: list[tuple[str, str, str, str]] = [
         "installation_development_quick",
         ".venv-docs",
         "CONTRIBUTING.md",
-        "`bash scripts/check.sh` builds the website strictly as well",
+        ".venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt",
     ),
     (
         "static_analysis_common_vulnerabilities",
@@ -11077,6 +11077,9 @@ def test_the_answers_of_openssf_best_practices_say_what_their_files_say(
                 criterion,
                 path,
             )
+    # The file of the website's tools that the quick set-up names is there.
+    if ".venv-docs" in answers["installation_development_quick_justification"]:
+        assert (project / ".github/docs-requirements.txt").is_file()
     # Each answer, with its status, fits into one link of the bot's issue, also where
     # the entry has an answer that the link has to replace.
     for name, justification in answers.items():
