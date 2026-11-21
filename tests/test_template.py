@@ -84,7 +84,13 @@ from blueprint import (
 )
 from blueprint.adopt import LABELS as ADOPTED_LABELS
 from blueprint.app import App, answered_app
-from blueprint.best_practices import PROJECT_ANSWERS, anchors
+from blueprint.best_practices import (
+    LIMIT,
+    PROJECT_ANSWERS,
+    Difference,
+    anchors,
+    edit_url,
+)
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     COLLISION,
@@ -10888,7 +10894,206 @@ WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
     ("dependency_monitoring", "the dependency review", set(KINDS)),
     ("coding_standards", "ShellCheck for the shell scripts", set(KINDS)),
     ("installation_development_quick", "core.hooksPath .githooks", set(KINDS)),
+    # What GOVERNANCE.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md, SECURITY.md, the settings
+    # as code and the Release verification make true for every kind (issue 1087).
+    ("governance", "project direction", set(KINDS)),
+    ("governance", "least permissions it needs", set(KINDS)),
+    ("roles_responsibilities", "which role and which access", set(KINDS)),
+    ("code_of_conduct", "private reporting to the maintainer", set(KINDS)),
+    ("dco", "part of the required check lint", set(KINDS)),
+    ("contribution_requirements", "a signature that GitHub verifies", set(KINDS)),
+    ("contribution_requirements", "a line under Unreleased", set(KINDS)),
+    ("contribution_requirements", "for new functionality", set(KINDS) - {"generic"}),
+    ("documentation_current", "true to the latest release", set(KINDS)),
+    ("documentation_current", "keeps an issue open", set(KINDS)),
+    ("test_policy_mandated", "GOVERNANCE.md asks every contributor", {"generic"}),
+    ("version_tags_signed", "the Release verification checks its", set(KINDS)),
+    ("signed_releases", "the Release verification checks both", set(KINDS)),
+    ("vulnerability_response_process", "a GitHub security advisory", set(KINDS)),
+    ("dependency_monitoring", "Dependabot alerts", set(KINDS)),
+    ("coding_standards_enforced", "zizmor's audit of the workflows", set(KINDS)),
+    ("coding_standards_enforced", "an exception to a rule be rare", set(KINDS)),
+    (
+        "static_analysis_common_vulnerabilities",
+        "after every change of main and every week",
+        set(KINDS),
+    ),
+    ("installation_development_quick", ".venv-docs", set(KINDS)),
+    # What the Psalm and the coverage of a Nextcloud app and the builds of the stores
+    # check.
+    ("static_analysis_common_vulnerabilities", "a header unescaped", {"nextcloud-app"}),
+    ("automated_integration_testing", "a line of lib/", {"nextcloud-app"}),
+    ("version_unique", "appinfo/info.xml in the signed package", {"nextcloud-app"}),
+    ("version_unique", "zip for HACS", {"home-assistant"}),
 ]
+# The words of each answer of issue 1087 beside those of the file that makes them true
+# in the rendered project, so that a change of the source fails the answer, and the
+# kinds whose answer has the words, as WORDS_OF_A_KIND lists them.
+SOURCES_OF_THE_ANSWERS: list[tuple[str, str, str, str]] = [
+    ("governance", "project direction", "GOVERNANCE.md", "and project direction."),
+    (
+        "governance",
+        "least permissions it needs",
+        "GOVERNANCE.md",
+        "Bots do the routine work, each with the least permissions it needs",
+    ),
+    (
+        "roles_responsibilities",
+        "which role and which access",
+        "GOVERNANCE.md",
+        "| Person | Role | Access |",
+    ),
+    (
+        "code_of_conduct",
+        "private reporting to the maintainer",
+        "CODE_OF_CONDUCT.md",
+        "Report behavior that violates this code privately to the maintainer",
+    ),
+    ("dco", "part of the required check lint", ".github/repository.toml", '"lint",'),
+    (
+        "contribution_requirements",
+        "a signature that GitHub verifies",
+        "CONTRIBUTING.md",
+        "a signature that GitHub verifies, as the rules of `main` require",
+    ),
+    (
+        "contribution_requirements",
+        "a line under Unreleased",
+        "CONTRIBUTING.md",
+        "a line under `## Unreleased` in `CHANGELOG.md` works as well",
+    ),
+    (
+        "contribution_requirements",
+        "for new functionality",
+        "CONTRIBUTING.md",
+        "A bug fix comes with a test that fails without the fix",
+    ),
+    (
+        "documentation_current",
+        "true to the latest release",
+        "GOVERNANCE.md",
+        "the documentation true to the latest release",
+    ),
+    (
+        "documentation_current",
+        "keeps an issue open",
+        ".github/workflows/links.yml",
+        "the weekly run keeps one issue with the broken links open",
+    ),
+    (
+        "test_policy_mandated",
+        "GOVERNANCE.md asks every contributor",
+        "GOVERNANCE.md",
+        "tests for every new function and every fix",
+    ),
+    (
+        "version_tags_signed",
+        "the Release verification checks its",
+        ".github/workflows/verify-release.yml",
+        "verify-tag",
+    ),
+    (
+        "signed_releases",
+        "the Release verification checks both",
+        ".github/workflows/verify-release.yml",
+        "is not signed.",
+    ),
+    (
+        "vulnerability_response_process",
+        "a GitHub security advisory",
+        "SECURITY.md",
+        "in a GitHub security advisory and the release notes",
+    ),
+    (
+        "dependency_monitoring",
+        "Dependabot alerts",
+        ".github/repository.toml",
+        "\ndependabot_alerts = true\n",
+    ),
+    (
+        "coding_standards_enforced",
+        "zizmor's audit of the workflows",
+        ".github/repository.toml",
+        '{ tool = "zizmor", alerts_threshold = "all"',
+    ),
+    (
+        "coding_standards_enforced",
+        "an exception to a rule be rare",
+        "CONTRIBUTING.md",
+        "An exception to a rule is rare",
+    ),
+    (
+        "static_analysis_common_vulnerabilities",
+        "after every change of main and every week",
+        ".github/workflows/codeql.yml",
+        "on:\n  push:\n    branches: [main]\n  pull_request:",
+    ),
+    (
+        "installation_development_quick",
+        ".venv-docs",
+        "CONTRIBUTING.md",
+        ".venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt",
+    ),
+    (
+        "static_analysis_common_vulnerabilities",
+        "a header unescaped",
+        "scripts/check.sh",
+        "# or a header unescaped",
+    ),
+    (
+        "automated_integration_testing",
+        "a line of lib/",
+        "scripts/check.sh",
+        'echo "Every line of lib/ is covered."',
+    ),
+    (
+        "version_unique",
+        "appinfo/info.xml in the signed package",
+        ".github/workflows/build-release.yml",
+        "- name: Check the version of the signed Nextcloud app\n"
+        "        if: env.PUBLISH_TO == 'nextcloud-appstore'",
+    ),
+    (
+        "version_unique",
+        "zip for HACS",
+        ".github/workflows/build-release.yml",
+        "The zip for HACS has no manifest.json of $domain $VERSION at its root.",
+    ),
+]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_answers_of_openssf_best_practices_say_what_their_files_say(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    answers = best_practices(project)
+    listed = {(criterion, words) for criterion, words, _ in WORDS_OF_A_KIND}
+
+    for criterion, words, path, source in SOURCES_OF_THE_ANSWERS:
+        assert (criterion, words) in listed, (criterion, words)
+        if words in answers.get(f"{criterion}_justification", ""):
+            assert source in (project / path).read_text(encoding="utf-8"), (
+                criterion,
+                path,
+            )
+    # The file of the website's tools that the quick set-up names is there.
+    if ".venv-docs" in answers["installation_development_quick_justification"]:
+        assert (project / ".github/docs-requirements.txt").is_file()
+    # Each answer, with its status, fits into one link of the bot's issue, also where
+    # the entry has an answer that the link has to replace.
+    for name, justification in answers.items():
+        if not name.endswith("_justification"):
+            continue
+        assert len(justification) < 1000, name
+        criterion = name.removesuffix("_justification")
+        both = [
+            Difference(
+                f"{criterion}_{field}", "passing", answers[f"{criterion}_{field}"], "?"
+            )
+            for field in ("status", "justification")
+        ]
+        assert len(edit_url("16429", "passing", both)) <= LIMIT, name
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10960,6 +11165,37 @@ def test_a_successor_alone_cannot_release_in_a_store(tmp_path: Path) -> None:
         "Psalm's taint analysis"
         in answers["static_analysis_common_vulnerabilities_justification"]
     )
+    assert "who can take the repository over" in answers["bus_factor_justification"]
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    assert "the successor can, once GitHub has confirmed it, transfer" in governance
+
+
+def test_a_successor_continues_a_project_outside_the_stores(tmp_path: Path) -> None:
+    # What GOVERNANCE.md says of the successor, the answers say too (issue 1087).
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="github-action",
+        successor=True,
+    )
+    criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
+    answers = best_practices(project)
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+
+    assert {"access_continuity", "bus_factor"} <= criteria
+    continuity = answers["access_continuity_justification"]
+    assert "should the owner die" in continuity
+    assert "or archive it" in continuity
+    assert (
+        "Should the owner die, the successor can, once GitHub has confirmed it,"
+        " transfer the repository to their own account or to an organization and"
+        " carry it on there with administrator access, or archive it."
+    ) in governance
+    # GOVERNANCE.md says that the bots go on only of the project as it runs today.
+    assert "bots" not in continuity
+    assert "who can take the repository over" in answers["bus_factor_justification"]
+    assert "the bus factor of the project is 2" in governance
 
 
 def package_that_publishes_nowhere(folder: Path, kind: str) -> Path:

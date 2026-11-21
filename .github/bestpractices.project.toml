@@ -5,6 +5,9 @@
 # blueprint.py best-practices --verify, a step of scripts/check.sh, checks it, and the
 # weekly run of Links compares the public entry with both files (decision 1088).
 
+[installation_development_quick]
+justification = "CONTRIBUTING.md shows how to set up everything to make and test changes: a virtual environment with pip install --require-hashes -r requirements-dev.txt, then bash scripts/check.sh runs the checks, the same on a computer and in the CI, and git config core.hooksPath .githooks runs them before every push; the tools of the website go into a virtual environment .venv-docs with pip install --require-hashes -r stacks/docs/requirements-docs.txt, and with them bash scripts/check.sh builds the website as well, as its section Website says; the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: https://github.com/Dennis-Otto/repo-blueprint/blob/main/CONTRIBUTING.md#checks"
+
 [test]
 justification = "pytest, with GitHub simulated by the tests, covers every line and branch of blueprint.py and the other tools of the blueprint, and the tests of the template render all nine kinds of projects and check their files; the Variants workflow runs the checks of each rendered kind with its real tools: https://github.com/Dennis-Otto/repo-blueprint/tree/main/tests"
 

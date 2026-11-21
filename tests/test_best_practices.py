@@ -797,8 +797,11 @@ def test_the_answers_are_the_file_and_the_project_file() -> None:
     given, own = best_practices.answers(root)
     template = json.loads((ROOT / ".bestpractices.json").read_text(encoding="utf-8"))
 
-    # The blueprint answers three criteria as only it can (decision 1088).
+    # The blueprint answers four criteria as only it can (decision 1088): it keeps the
+    # tools of its website in stacks/docs/, from where every repository gets them as
+    # .github/docs-requirements.txt (issue 1087).
     assert own == {
+        "installation_development_quick_justification",
         "test_justification",
         "test_continuous_integration_justification",
         "version_tags_signed_justification",
@@ -807,7 +810,13 @@ def test_the_answers_are_the_file_and_the_project_file() -> None:
     for name in own:
         assert given[name] != template[name]
     assert "v0.6.0" in str(given["version_tags_signed_justification"])
-    assert best_practices.verify(ROOT) == best_practices.Verification([], [], 3)
+    quick = "installation_development_quick_justification"
+    assert str(given[quick]) == str(template[quick]).replace(
+        ".github/docs-requirements.txt", "stacks/docs/requirements-docs.txt"
+    )
+    assert (ROOT / "stacks/docs/requirements-docs.txt").is_file()
+    assert not (ROOT / ".github/docs-requirements.txt").exists()
+    assert best_practices.verify(ROOT) == best_practices.Verification([], [], 4)
 
 
 def test_what_is_no_answer_of_the_project_file_stays_out(tmp_path: Path) -> None:
