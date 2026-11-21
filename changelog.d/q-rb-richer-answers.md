@@ -1,3 +1,0 @@
-### Features
-
-- **Richer answers for bestpractices.dev:** the answers that `.bestpractices.json` proposes now name what each kind of project really does, such as the signed package of a Nextcloud app with its coding standard, hassfest and HACS for a Home Assistant integration, the pinned commit of a GitHub Action and the store's signature for a Chrome extension, and every repository tells how it answers a report and how its website is signed. Saving the links of the issue *The answers on bestpractices.dev differ from .bestpractices.json* no longer drops these answers from an entry, and `SECURITY.md` of a Chrome extension says that the Chrome Web Store signs every package that it delivers.
