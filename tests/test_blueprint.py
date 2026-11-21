@@ -5432,7 +5432,10 @@ def test_one_badge_of_openssf_best_practices_leads_to_the_other(
         " rest. Save never replaces an answer that the entry gives: once the README"
         " shows a badge, the weekly run of Links opens the issue 'The answers on"
         " bestpractices.dev differ from .bestpractices.json' when an answer of the"
-        " file changes, with the links that take it in.",
+        " file changes, with the links that take it in. An answer that only this"
+        " repository can give goes into .github/bestpractices.project.toml, not into"
+        " .bestpractices.json: Save doesn't read it, and the links of that issue take"
+        " it in and force it back over an edit on the site.",
         f"Then add its badge to the README: {badge}",
     ]
 

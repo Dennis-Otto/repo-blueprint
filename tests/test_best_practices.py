@@ -6,6 +6,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -23,6 +24,7 @@ from blueprint.best_practices import (
     LABELS,
     LIMIT,
     MARKER,
+    PROJECT_ANSWERS,
     SITE,
     TITLE,
     Difference,
@@ -620,3 +622,536 @@ def test_the_command_compares_and_keeps_the_issue(
         "`.github/workflows/secret-scan.yml`, which the repository no longer has"
     ) in lines
     assert lines[-1].endswith("an issue with the links of the edit pages.")
+
+
+# The answers that only a repository can give, in .github/bestpractices.project.toml
+# (decision 1088).
+OWN = (
+    "pytest, and end-to-end tests in Docker: "
+    "https://github.com/Dennis-Otto/repo-blueprint/blob/main/tests/e2e/run.sh"
+)
+EMPTY = (ROOT / "template" / PROJECT_ANSWERS).read_text(encoding="utf-8")
+
+
+def with_own_answers(root: Path, text: str) -> Path:
+    """The checkout with its project file."""
+    (root / ".github").mkdir(exist_ok=True)
+    (root / PROJECT_ANSWERS).write_text(text, encoding="utf-8", newline="\n")
+    return root
+
+
+def current_entry() -> dict[str, Json]:
+    """The entry that gives every answer of the blueprint's file of 2026-11-18."""
+    return {
+        entry_field(name): value
+        for name, value in saved("repo-blueprint.answers").items()
+    }
+
+
+def proposals(text: str, level: str) -> dict[str, str]:
+    """The fields that the link of a level in the text of an issue proposes."""
+    (link,) = re.findall(rf"\((https://\S+/{level}/edit\?[^)]+)\)", text)
+    return query(link)
+
+
+def test_an_answer_of_the_project_file_replaces_the_one_of_the_file(
+    tmp_path: Path,
+) -> None:
+    root = with_own_answers(
+        repository(tmp_path), f'{EMPTY}\n[test]\njustification = "{OWN}"\n'
+    )
+    # The file that the template's words link.
+    (root / "scripts").mkdir()
+    (root / "scripts/check.sh").write_text("pytest\n", encoding="utf-8")
+    template = saved("repo-blueprint.answers")["test_justification"]
+    # The entry gives the blueprint's words, as after the links of #1075 were saved.
+    entry = current_entry()
+    client = FakeClient([])
+
+    outcome = keep_issue(client, BLUEPRINT, root, opener=Site(entry))
+
+    assert outcome.found == [
+        Difference("test_justification", "passing", OWN, str(template), (), True)
+    ]
+    ((method, path, sent),) = client.changes
+    assert (method, path) == ("POST", f"repos/{BLUEPRINT}/issues")
+    # The link forces the project's words over those of the template.
+    assert proposals(sent["body"], "passing") == {
+        "test_justification": OWN,
+        "overrides": "test_justification",
+    }
+    assert (
+        "- `test_justification` (passing, the project's own in "
+        "`.github/bestpractices.project.toml`) says something else on the site"
+    ) in sent["body"]
+    assert (
+        "differs from `.bestpractices.json` and `.github/bestpractices."
+        in (sent["body"])
+    )
+    assert "Change them in that file, not on the site" in sent["body"]
+    assert "the answers that neither file gives" in sent["body"]
+    assert outcome.warnings == [
+        "::warning title=The entry on bestpractices.dev is stale::1 answer(s) of "
+        ".bestpractices.json and .github/bestpractices.project.toml differ from the "
+        "entry of project 15284."
+    ]
+
+    # Once the entry gives the project's own answer, the issue closes.
+    entry["test_justification"] = OWN
+    closing = FakeClient([{"number": 9, "body": sent["body"]}])
+    done = keep_issue(closing, BLUEPRINT, root, opener=Site(entry))
+    assert closing.changes == [
+        (
+            "PATCH",
+            f"repos/{BLUEPRINT}/issues/9",
+            {"state": "closed", "state_reason": "completed"},
+        )
+    ]
+    assert done.summary == [
+        "The entry of project 15284 gives every answer of .bestpractices.json and "
+        ".github/bestpractices.project.toml.",
+        "Closed #9.",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("found", "forced"), [("", None), ("Unmet", "security_review_status")]
+)
+def test_a_criterion_that_only_the_project_file_answers_gets_its_own_level(
+    tmp_path: Path, found: str, forced: str | None
+) -> None:
+    root = with_own_answers(
+        repository(tmp_path),
+        '[security_review]\nstatus = "Met"\njustification = "A review of 2026."\n',
+    )
+    entry = current_entry()
+    if found:
+        entry["security_review_status"] = found
+        entry["security_review_justification"] = "A review of 2025."
+    client = FakeClient([])
+
+    outcome = keep_issue(client, BLUEPRINT, root, opener=Site(entry))
+
+    assert [(item.name, item.level, item.own) for item in outcome.found] == [
+        ("security_review_status", "gold", True),
+        ("security_review_justification", "gold", True),
+    ]
+    ((_, _, sent),) = client.changes
+    fields = proposals(sent["body"], "gold")
+    assert fields.pop("security_review_status") == "Met"
+    assert fields.pop("security_review_justification") == "A review of 2026."
+    # Only an answer that the entry gives is forced.
+    assert fields.get("overrides") == (
+        None if forced is None else f"{forced},security_review_justification"
+    )
+    assert "/passing/edit?" not in sent["body"]
+
+
+def test_without_answers_of_its_own_a_repository_gets_the_same_issue(
+    tmp_path: Path,
+) -> None:
+    # The project file as the template renders it, and none at all.
+    (tmp_path / "rendered").mkdir()
+    (tmp_path / "missing").mkdir()
+    rendered = with_own_answers(repository(tmp_path / "rendered"), EMPTY)
+    missing = repository(tmp_path / "missing")
+    issues: list[list[tuple[str, str, Json]]] = []
+    for root in (rendered, missing):
+        client = FakeClient([])
+        keep_issue(client, BLUEPRINT, root, opener=Site(saved("repo-blueprint.entry")))
+        issues.append(client.changes)
+
+    assert issues[0] == issues[1]
+    ((_, _, sent),) = issues[0]
+    assert ".github/bestpractices.project.toml" not in sent["body"]
+    assert "differs from `.bestpractices.json` in 55 answer(s)" in sent["body"]
+
+
+def test_a_project_file_that_is_no_toml_leaves_the_issue_as_it_is(
+    tmp_path: Path,
+) -> None:
+    root = with_own_answers(repository(tmp_path), "[test\n")
+    site = Site(saved("repo-blueprint.entry"))
+    client = FakeClient([{"number": 9, "body": MARKER}])
+
+    outcome = keep_issue(client, BLUEPRINT, root, opener=site)
+
+    assert site.requests == []
+    assert client.changes == []
+    assert outcome.summary[0].startswith(
+        ".github/bestpractices.project.toml is no TOML"
+    )
+    assert outcome.summary[0].endswith(
+        "so the issue stays as it is until the file passes blueprint.py "
+        "best-practices --verify."
+    )
+    assert outcome.warnings[0].startswith(
+        "::warning title=.github/bestpractices.project.toml is no TOML::"
+    )
+
+
+# It reads the blueprint's own files, which the copy of the mutation tests lacks.
+@pytest.mark.mutation_unsafe
+def test_the_answers_are_the_file_and_the_project_file() -> None:
+    root = ROOT
+    given, own = best_practices.answers(root)
+    template = json.loads((ROOT / ".bestpractices.json").read_text(encoding="utf-8"))
+
+    # The blueprint answers three criteria as only it can (decision 1088).
+    assert own == {
+        "test_justification",
+        "test_continuous_integration_justification",
+        "version_tags_signed_justification",
+    }
+    assert set(given) == set(template)
+    for name in own:
+        assert given[name] != template[name]
+    assert "v0.6.0" in str(given["version_tags_signed_justification"])
+    assert best_practices.verify(ROOT) == best_practices.Verification([], [], 3)
+
+
+def test_what_is_no_answer_of_the_project_file_stays_out(tmp_path: Path) -> None:
+    # What --verify fails on never reaches a link: a key that is no table, and a
+    # status that is no text.
+    root = with_own_answers(
+        repository(tmp_path),
+        'security_review = "Met"\n[test]\nstatus = 1\njustification = "Ours."\n',
+    )
+
+    given, own = best_practices.answers(root)
+
+    assert own == {"test_justification"}
+    assert given["test_justification"] == "Ours."
+    assert given["test_status"] == "Met"
+    assert "security_review_status" not in given
+
+
+def test_what_verify_fails_on_never_keeps_the_issue_open(tmp_path: Path) -> None:
+    # A criterion that the site doesn't know, and a status for one that
+    # .bestpractices.json answers, as on main after a check that was skipped.
+    root = with_own_answers(
+        repository(tmp_path),
+        '[no_such_criterion]\nstatus = "Met"\njustification = "x"\n'
+        '[test]\nstatus = "Unmet"\n',
+    )
+
+    given, own = best_practices.answers(root)
+
+    assert own == set()
+    assert given["test_status"] == "Met"
+    assert not any(name.startswith("no_such_criterion") for name in given)
+    client = FakeClient([{"number": 9, "body": MARKER}])
+    keep_issue(client, BLUEPRINT, root, opener=Site(current_entry()))
+    assert client.changes == [
+        (
+            "PATCH",
+            f"repos/{BLUEPRINT}/issues/9",
+            {"state": "closed", "state_reason": "completed"},
+        )
+    ]
+
+
+# A checkout for --verify: its .bestpractices.json answers test and contribution, and
+# it has the files and the heading that the answers link.
+REPO = "https://github.com/o/r/blob/main"
+TEMPLATE: dict[str, Json] = {
+    "$schema": "a key that is no answer",
+    "test_status": "Met",
+    "test_justification": f"pytest: {REPO}/scripts/check.sh",
+    "contribution_status": "Met",
+    "contribution_justification": f"The guide: {REPO}/CONTRIBUTING.md",
+}
+
+
+def verifiable(root: Path, own: str, template: dict[str, Json] | None = None) -> Path:
+    """A checkout with its README, .bestpractices.json and project file."""
+    (root / "README.md").write_text(README, encoding="utf-8")
+    (root / ".bestpractices.json").write_text(
+        json.dumps(TEMPLATE if template is None else template), encoding="utf-8"
+    )
+    (root / "scripts").mkdir()
+    (root / "scripts/check.sh").write_text("pytest\n", encoding="utf-8")
+    (root / "CONTRIBUTING.md").write_text("# Guide\n\n## Tests\n", encoding="utf-8")
+    return with_own_answers(root, own)
+
+
+@pytest.mark.parametrize(
+    ("own", "said"),
+    [
+        (
+            '[no_such_criterion]\nstatus = "Met"\njustification = "x"\n',
+            "[no_such_criterion] is no criterion of bestpractices.dev",
+        ),
+        (
+            'security_review = "Met"\n',
+            "[security_review] is no table with status and justification.",
+        ),
+        (
+            '[security_review]\nstatus = "Met"\njustification = "x"\nlevel = "gold"\n',
+            "[security_review] has the key level: a table gives only status and "
+            "justification.",
+        ),
+        (
+            '[security_review]\nstatus = true\njustification = "x"\n',
+            "[security_review]: status is no string.",
+        ),
+        (
+            f'[test]\nstatus = "Unmet"\njustification = "Ours: {REPO}/scripts/check.sh"\n',
+            "[test] gives a status, which .bestpractices.json gives for it",
+        ),
+        ("[test]\n", "[test] gives no justification."),
+        (
+            '[security_review]\nstatus = "Met"\n',
+            "[security_review] needs both status and justification, as "
+            ".bestpractices.json doesn't answer it.",
+        ),
+        (
+            '[security_review]\njustification = "A review."\n',
+            "[security_review] needs both status and justification",
+        ),
+        (
+            '[security_review]\nstatus = "Yes"\njustification = "x"\n',
+            "[security_review]: the status is Met, Unmet or N/A, not 'Yes'.",
+        ),
+        (
+            '[security_review]\nstatus = "N/A"\njustification = "x"\n',
+            "[security_review]: bestpractices.dev doesn't take N/A for it.",
+        ),
+        (
+            '[documentation_architecture]\nstatus = "Met"\n'
+            'justification = "In the README."\n',
+            "[documentation_architecture]: Met needs a link that shows it.",
+        ),
+        (
+            f'[test]\njustification = "pytest and Docker: {REPO}/tests/e2e/run.sh"\n',
+            "[test] links tests/e2e/run.sh, which the repository doesn't have.",
+        ),
+        (
+            f'[contribution]\njustification = "Ours: {REPO}/CONTRIBUTING.md#gone."\n',
+            "[contribution] links CONTRIBUTING.md#gone, a heading that the file "
+            "doesn't have.",
+        ),
+        (
+            f'[contribution]\njustification = "Ours: {REPO}/GONE.md#part"\n',
+            "[contribution] links GONE.md, which the repository doesn't have.",
+        ),
+        (
+            '[security_review]\nstatus = "Met"\n'
+            'justification = "See http://example.com/review"\n',
+            "[security_review] links http://example.com/review: a link uses https.",
+        ),
+        (
+            '[security_review]\nstatus = "Met"\njustification = "' + "x" * 8000 + '"\n',
+            "[security_review]: the justification is too long for one link of the "
+            "issue, which takes 8000 characters: ",
+        ),
+        (
+            f'[test]\njustification = " pytest: {REPO}/scripts/check.sh "\n',
+            "[test] repeats the justification of .bestpractices.json",
+        ),
+        ("[test\n", ".github/bestpractices.project.toml is no TOML: "),
+    ],
+    ids=[
+        "unknown criterion",
+        "no table",
+        "other key",
+        "no string",
+        "status of the file",
+        "nothing",
+        "no justification",
+        "no status",
+        "unknown status",
+        "N/A",
+        "no link",
+        "gone file",
+        "gone heading",
+        "gone Markdown file",
+        "http",
+        "too long",
+        "repeated",
+        "no TOML",
+    ],
+)
+def test_the_check_of_the_project_file_names_each_problem(
+    tmp_path: Path, own: str, said: str
+) -> None:
+    outcome = best_practices.verify(verifiable(tmp_path, own))
+
+    assert [problem for problem in outcome.problems if said in problem], (
+        outcome.problems
+    )
+    assert outcome.removed == []
+
+
+def test_the_check_of_the_project_file_passes_what_the_site_takes(
+    tmp_path: Path,
+) -> None:
+    own = (
+        f'{EMPTY}\n[test]\njustification = "pytest and Docker: {REPO}/scripts/check.sh '
+        f'and {REPO}/CONTRIBUTING.md#tests."\n\n'
+        # A link to a heading that GitHub draws itself, and one to another site.
+        f'[contribution]\njustification = """\nOurs: {REPO}/CONTRIBUTING.md#readme\n'
+        'and https://example.com/guide."""\n\n'
+        '[documentation_architecture]\nstatus = "N/A"\njustification = "No design."\n\n'
+        '[security_review]\nstatus = "Unmet"\njustification = "None yet."\n'
+    )
+    root = verifiable(tmp_path, own)
+
+    assert best_practices.verify(root) == best_practices.Verification([], [], 4)
+    # Without .bestpractices.json nothing names the repository, and without the badge
+    # a link counts with a number of five digits.
+    (root / ".bestpractices.json").unlink()
+    (root / "README.md").unlink()
+    outcome = best_practices.verify(root)
+    assert all(
+        "needs both status and justification" in item for item in outcome.problems
+    )
+    assert len(outcome.problems) == 2
+    # Without the project file, and with the one that the template renders, it passes.
+    (root / PROJECT_ANSWERS).unlink()
+    assert best_practices.verify(root) == best_practices.Verification([])
+    with_own_answers(root, EMPTY)
+    assert best_practices.verify(root) == best_practices.Verification([], [], 0)
+
+
+def test_a_link_to_a_heading_counts_as_github_finds_it(tmp_path: Path) -> None:
+    # A heading with an umlaut, as a browser copies its link, one in capitals, and a
+    # repeated heading, which GitHub numbers from -1 on.
+    links = (
+        f"{REPO}/CONTRIBUTING.md#pr%C3%BCfungen-und-der-pr-coach, "
+        f"{REPO}/CONTRIBUTING.md#Tests and {REPO}/CONTRIBUTING.md#tests-1"
+    )
+    root = verifiable(tmp_path, f'[contribution]\njustification = "Ours: {links}."\n')
+    (root / "CONTRIBUTING.md").write_text(
+        "# Guide\n\n## Prüfungen und der PR-Coach\n\n## Tests\n\n## Tests\n",
+        encoding="utf-8",
+    )
+
+    assert best_practices.verify(root) == best_practices.Verification([], [], 1)
+    with_own_answers(
+        root,
+        f'[contribution]\njustification = "Ours: {REPO}/CONTRIBUTING.md#tests-2"\n',
+    )
+    assert best_practices.verify(root).problems == [
+        ".github/bestpractices.project.toml: [contribution] links "
+        "CONTRIBUTING.md#tests-2, a heading that the file doesn't have."
+    ]
+
+
+def test_the_fix_removes_only_what_repeats_the_file(tmp_path: Path) -> None:
+    own = (
+        "# The answers of this repository.\n"
+        "\n"
+        "[test]\n"
+        'status = "Met"\n'
+        "# The words of the blueprint, on two lines.\n"
+        'justification = """\n'
+        f'pytest: {REPO}/scripts/check.sh"""\n'
+        "\n"
+        "[contribution]  # its own words\n"
+        '"status" = "Met"\n'
+        f'justification = "Our own guide: {REPO}/CONTRIBUTING.md#tests"\n'
+        "\n"
+        "[security_review]\n"
+        'status = "Met"\n'
+        'justification = "A review of 2026."\n'
+    )
+    root = verifiable(tmp_path, own)
+
+    outcome = best_practices.verify(root, fix=True)
+
+    assert outcome == best_practices.Verification(
+        [],
+        ["status of [test]", "justification of [test]", "status of [contribution]"],
+        2,
+    )
+    assert (root / PROJECT_ANSWERS).read_text(encoding="utf-8") == (
+        "# The answers of this repository.\n"
+        "\n"
+        "# The words of the blueprint, on two lines.\n"
+        "\n"
+        "[contribution]  # its own words\n"
+        f'justification = "Our own guide: {REPO}/CONTRIBUTING.md#tests"\n'
+        "\n"
+        "[security_review]\n"
+        'status = "Met"\n'
+        'justification = "A review of 2026."\n'
+    )
+    # Once fixed, nothing is left to remove.
+    again = best_practices.verify(root, fix=True)
+    assert again == best_practices.Verification([], [], 2)
+
+
+def test_the_fix_leaves_a_status_that_a_person_decides(tmp_path: Path) -> None:
+    # The template answers a criterion now that the project file answered as Unmet:
+    # one of them is wrong, which only a person knows.
+    own = f'[test]\nstatus = "Unmet"\njustification = "Ours: {REPO}/scripts/check.sh"\n'
+    root = verifiable(tmp_path, own)
+
+    outcome = best_practices.verify(root, fix=True)
+
+    assert outcome.removed == []
+    assert len(outcome.problems) == 1
+    assert (root / PROJECT_ANSWERS).read_text(encoding="utf-8") == own
+
+
+@pytest.mark.parametrize("fix", [False, True])
+def test_the_command_checks_the_project_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fix: bool
+) -> None:
+    root = verifiable(
+        tmp_path, f'[test]\njustification = "pytest: {REPO}/scripts/check.sh"\n'
+    )
+    command = ["best-practices", "--verify"] + (["--fix"] if fix else [])
+
+    code = main(command, root=root)
+
+    lines = capsys.readouterr().out.splitlines()
+    if fix:
+        assert code == 0
+        assert lines == [
+            ".github/bestpractices.project.toml: removed the justification of [test], "
+            "which only repeated the blueprint's.",
+            ".github/bestpractices.project.toml gives no answer of its own: the answers "
+            "are those of .bestpractices.json.",
+        ]
+        return
+    assert code == 1
+    assert lines[0].startswith(
+        ".github/bestpractices.project.toml: [test] repeats the justification"
+    )
+    assert lines[-1] == (
+        "python3 blueprint.py best-practices --verify --fix removes a status "
+        "Met and a justification that only repeat .bestpractices.json; the rest needs "
+        "a person, who knows what holds for this repository."
+    )
+    # Its own answer passes.
+    with_own_answers(
+        root, '[security_review]\nstatus = "Met"\njustification = "A review."\n'
+    )
+    assert main(["best-practices", "--verify"], root=root) == 0
+    assert capsys.readouterr().out == (
+        ".github/bestpractices.project.toml answers 1 criterion(s) as this "
+        "repository alone can.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [["--fix"], ["--verify", "--dry-run"], ["--fix", "--dry-run"]],
+)
+def test_the_options_of_the_check_go_together(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], arguments: list[str]
+) -> None:
+    assert main(["best-practices", *arguments], root=tmp_path) == 2
+    assert "--fix goes with --verify" in capsys.readouterr().err
+
+
+def test_a_project_file_that_is_no_text_fails_the_check(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / ".github").mkdir()
+    (tmp_path / PROJECT_ANSWERS).write_bytes(b"\xff\xfe")
+
+    assert main(["best-practices", "--verify"], root=tmp_path) == 2
+    assert capsys.readouterr().err.startswith("blueprint.py: ")

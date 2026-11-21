@@ -64,6 +64,7 @@ _skip_if_exists:
   - .github/screenshots-paths.txt
   - .github/repository.project.toml
   - .github/checks.project.toml
+  - .github/bestpractices.project.toml
   - .github/workflows/action-test.yml
   - /.lycheeignore
   - /pyproject.toml

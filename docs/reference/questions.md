@@ -546,7 +546,7 @@ The slot of the schedules of this repository, so that the scheduled workflows of
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 62 patterns of the files of a project</summary>
+<summary>The 63 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -581,6 +581,7 @@ After the first copy, these belong to the project: an update never overwrites th
 - `.github/screenshots-paths.txt`
 - `.github/repository.project.toml`
 - `.github/checks.project.toml`
+- `.github/bestpractices.project.toml`
 - `.github/workflows/action-test.yml`
 - `/.lycheeignore`
 - `/pyproject.toml`

@@ -8,7 +8,11 @@
     links of the issue that the weekly run of Links keeps while the public entry
     differs from the file (decision 1046). What depends on the
     software or on the people of a project is left out: bestpractices.dev keeps the
-    answers that a maintainer gives there for it. -#]
+    answers that a maintainer gives there for it. An answer that only one repository
+    can give goes into its .github/bestpractices.project.toml, never into this file,
+    which every update renders anew: a justification there replaces the one of the
+    same criterion here, the weekly run compares the entry with both files, and
+    blueprint.py best-practices --verify checks that one (decision 1088). -#]
 [%- set repository = 'https://github.com/' ~ owner ~ '/' ~ project_slug -%]
 [%- set files = repository ~ '/blob/main/' -%]
 [#- The test runner of the kinds whose scripts/check.sh runs a test suite. -#]
