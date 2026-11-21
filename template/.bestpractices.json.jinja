@@ -54,7 +54,7 @@
   'hacs': ' and through HACS, which installs the zip of the GitHub release',
   'nextcloud-appstore': ' and from the Nextcloud App Store, signed with the certificate of the app, which Nextcloud checks',
   'chrome-web-store': ' and from the Chrome Web Store, which signs every package that it delivers',
-  'github-action': ', where repositories that use the action pin the commit hash of a release',
+  'github-action': ', where the README asks each repository that uses the action to pin the commit hash of a release',
 }.get(publish_to, '') -%]
 [#- What signs a release besides GitHub and Sigstore. -#]
 [%- set signed = {
@@ -172,7 +172,7 @@
   "coding_standards_status": "Met",
   "coding_standards_justification": "CONTRIBUTING.md names the coding standards that contributions follow: [% if standards %]{= standards =}; [% endif %]ShellCheck for the shell scripts, actionlint and zizmor for the workflows, markdownlint for Markdown and .editorconfig for every text file: {= files =}CONTRIBUTING.md#coding-standards",
   "coding_standards_enforced_status": "Met",
-  "coding_standards_enforced_justification": "scripts/check.sh runs {= enforced =}ShellCheck[% if stack == 'container' %], the CI hadolint[% endif %], and the Lint workflow actionlint, markdownlint, REUSE and the DCO check[% if stack == 'home-assistant' %], and the required check home-assistant hassfest and HACS[% endif %], on every pull request, which merges only when they pass: {= files =}scripts/check.sh",
+  "coding_standards_enforced_justification": "scripts/check.sh runs {= enforced =}ShellCheck[% if stack == 'container' %], the CI hadolint[% endif %], and the Lint workflow actionlint, markdownlint, REUSE and the DCO check[% if stack == 'home-assistant' %], and the required check home-assistant runs hassfest and HACS[% endif %], on every pull request, which merges only when they pass: {= files =}scripts/check.sh",
   "installation_development_quick_status": "Met",
   "installation_development_quick_justification": "CONTRIBUTING.md shows how to set up everything to make and test changes: {= setup =}bash scripts/check.sh runs the checks, the same on a computer and in the CI, and git config core.hooksPath .githooks runs them before every push; the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: {= files =}CONTRIBUTING.md#checks",
 [%- if dependencies %]

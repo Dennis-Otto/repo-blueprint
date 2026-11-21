@@ -3253,7 +3253,8 @@ def answers_of_an_action(answers: str) -> str:
     delivered = (
         ", where Copier renders a repository from the tag of a release, which the"
         " blueprint bot of each repository verifies before every update",
-        ", where repositories that use the action pin the commit hash of a release",
+        ", where the README asks each repository that uses the action to pin the"
+        " commit hash of a release",
     )
     tested = (
         "; the Variants workflow renders every kind of project and runs its checks"
