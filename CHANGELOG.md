@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.24.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.2...v1.24.0) (2026-11-21)
+
+
+### Features
+
+* the answers of .bestpractices.json say what each kind of project does ([#1077](https://github.com/Dennis-Otto/repo-blueprint/issues/1077)) ([ae09345](https://github.com/Dennis-Otto/repo-blueprint/commit/ae093458a9951160c3d28e6f1a1ccbb5e2f7430b))
+
+
+### Bug fixes
+
+* **fuzz:** a pull request that changes what the fuzzing reads waits for it ([#1076](https://github.com/Dennis-Otto/repo-blueprint/issues/1076)) ([e05ce1c](https://github.com/Dennis-Otto/repo-blueprint/commit/e05ce1ceb54a398cafede3c076afb90b8e6746e1))
+
 ## [1.23.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.1...v1.23.2) (2026-11-20)
 
 ### Bug fixes
