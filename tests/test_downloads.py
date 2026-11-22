@@ -89,9 +89,9 @@ SHA256 = hashlib.sha256(ASSET).hexdigest()
 ARGUMENTS = ("o/tool", "v1.2.3", "tool_1.2.3_linux_amd64")
 OUTAGE = (
     "::error title=GitHub fails::tool_1.2.3_linux_amd64 of o/tool v1.2.3 can't be"
-    " downloaded: GitHub failed five times in two and a half minutes, an outage of"
-    " GitHub and not a problem of this change (https://www.githubstatus.com). Run the"
-    " job again once GitHub works."
+    " downloaded: GitHub failed five times in two and a half minutes, as in an outage"
+    " of GitHub or of the network of the runner, and not a problem of this change"
+    " (https://www.githubstatus.com). Run the job again once GitHub works."
 )
 
 

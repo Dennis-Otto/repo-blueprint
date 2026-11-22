@@ -125,7 +125,7 @@ from blueprint.checklist import (
     social_preview,
 )
 from blueprint.coach import PREFIX as COACH_PREFIX
-from blueprint.coach import Catalog, missing, undeclared
+from blueprint.coach import STEP_SUFFIX, Catalog, missing, undeclared
 from blueprint.dependency_release import DAILY
 from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api, GitHubError
@@ -8796,7 +8796,11 @@ def test_code_scanning_shows_the_paths_of_the_taint_analysis() -> None:
         condition_of(keep) == "always() && hashFiles('build/psalm-taint.sarif') != ''"
     )
     assert keep["with"]["path"] == "build/psalm-taint.sarif"
-    assert check["outputs"] == {"taint": "${{ steps.taint.outcome }}"}
+    # Kept at either try of the upload (#1095).
+    assert check["outputs"] == {
+        "taint": "${{ steps.taint-again.outcome == 'success' && 'success'"
+        " || steps.taint.outcome }}"
+    }
     # The job that runs the tools of Composer and the code of a pull request can't
     # write alerts; the one that uploads them runs no code of the app.
     assert "permissions" not in check
@@ -17290,6 +17294,15 @@ EXPLAIN_COMMENT = (
 )
 
 
+# The line of each step of the PR coach that passes without blueprint.py, as after a
+# checkout that failed: the flaky-test bot would count its exit as a command of the
+# code without a log (#1095).
+NO_BLUEPRINT_PY = (
+    '[[ -f "$script" ]] || { echo "No blueprint.py: the checkout failed, so the PR'
+    ' coach has nothing to explain."; exit 0; }'
+)
+
+
 def explain_step(check: str, python: str = "python3") -> dict[str, Any]:
     """The last step of the job of a check, parsed: the PR coach explains its
     failure."""
@@ -17299,6 +17312,7 @@ def explain_step(check: str, python: str = "python3") -> dict[str, Any]:
         "env": {"CHECK": check},
         "run": "script=.github/blueprint.py\n"
         '[[ -f "$script" ]] || script=blueprint.py\n'
+        f"{NO_BLUEPRINT_PY}\n"
         f'{python} "$script" coach explain "$CHECK"\n',
     }
 
@@ -17356,6 +17370,7 @@ def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> dict[str, A
         },
         "run": "script=.github/blueprint.py\n"
         '[[ -f "$script" ]] || script=blueprint.py\n'
+        f"{NO_BLUEPRINT_PY}\n"
         'mapfile -t parts < <(grep . <<<"$FAILED" || true)\n'
         'python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"\n',
     }
@@ -17540,8 +17555,9 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
         for index, step in enumerate(lint["steps"])
         if step.get("with", {}).get("name") == "fixes-lint"
     ]
-    assert len(fixes) == 1
-    assert fixes[0] < names.index("Explain the failure") == len(names) - 1
+    # The upload and its second try (#1095).
+    assert len(fixes) == 2
+    assert fixes[1] < names.index("Explain the failure") == len(names) - 1
     # The sign-off and the changed documents need the history.
     assert any(
         step.get("with", {}).get("fetch-depth") == 0
@@ -20449,8 +20465,9 @@ def run_after_the_checks(
 ) -> workflow_steps.StepResult:
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
     answers as gh_answers() says, these stubs of other commands, and these files of
-    the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
-    abc1234def of the branch feature of o/r, which ended on 12 October 2026, unless the
+    the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python), the workflow 3,
+    for the commit abc1234def of the branch feature of o/r, which ended on 12 October
+    2026, unless the
     variables say otherwise. The workflow is the blueprint's, or that of the project
     at root."""
     return workflow_steps.run_step(
@@ -20466,6 +20483,7 @@ def run_after_the_checks(
             "BRANCH": "feature",
             "HEAD_REPO": "o/r",
             "SHA": "abc1234def",
+            "WORKFLOW": "3",
             **variables,
         },
         stubs=stubs,
@@ -21978,8 +21996,22 @@ FLAKY_COUNTS = [
 ]
 FLAKY_INTRO = (
     "The flaky-test bot counts here every job and test that failed at first and then"
+    " passed without a change of the code, and a failure outside the code that came"
+    " back for the third time in 7 days, and describes each run in a comment, with the"
+    " step, the test and the error that failed. Fix the test or the cause, then close"
+    " this issue."
+)
+# The first sentence of an issue that a bot before #1095 opened, which counted every
+# failure as a test.
+OLDER_INTRO = (
+    "The flaky-test bot counts here every job and test that failed at first and then"
     " passed without a change of the code, and describes each run in a comment, with"
     " the step, the test and the error that failed. Fix the test, then close this issue."
+)
+# The mark of an issue that the bot opened or judged, which tells a failure of the code
+# from one outside it.
+FLAKY_MARK = (
+    "<!-- The flaky-test bot tells a failure of the code from one outside it. -->"
 )
 COUNTS_FROM = (
     "<!-- The flaky-test bot rewrites the counts from here to the next comment. -->"
@@ -22031,7 +22063,7 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
     # The body counts the jobs and tests, and the run gets a comment, as every later
     # one does.
     assert written["issue-create"] == "\n".join(
-        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS), ""]
+        [FLAKY_INTRO, "", FLAKY_MARK, "", *flaky_counts(*FLAKY_COUNTS), ""]
     )
     assert any(
         call.startswith("issue create --title Flaky tests --label maintenance ")
@@ -22233,7 +22265,7 @@ def test_the_flaky_test_bot_of_a_project_reads_a_log_with_colors(
 def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
     # A person edited the issue in the browser, which ends its lines with CRLF.
     before = [
-        FLAKY_INTRO,
+        OLDER_INTRO,
         "",
         "A note of the maintainer.",
         "",
@@ -22266,10 +22298,14 @@ def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
     assert written["issue-comment"] == FLAKY_REPORT
     assert any(call.startswith("issue view 7 --json body --jq .body") for call in calls)
     # The jobs and tests of this run count once more and come first, the others keep
-    # their counts below them, and the rest of the body stays as it was.
+    # their counts below them, and the rest of the body stays as it was, but for the
+    # first sentence and the mark of the bot that tells a failure outside the code.
     assert written["issue-edit"] == "\n".join(
         [
-            *before[:4],
+            FLAKY_INTRO,
+            *before[1:4],
+            FLAKY_MARK,
+            "",
             *flaky_counts(
                 FLAKY_COUNTS[0],
                 FLAKY_COUNTS[1].replace(" | 1 | ", " | 2 | "),
@@ -22317,7 +22353,7 @@ def test_the_flaky_test_bot_adds_the_counts_to_an_issue_that_has_none(
     )
 
     assert written["issue-edit"] == "\n".join(
-        [before, "", *flaky_counts(*FLAKY_COUNTS), ""]
+        [before, "", FLAKY_MARK, "", *flaky_counts(*FLAKY_COUNTS), ""]
     )
 
 
@@ -22328,7 +22364,7 @@ def test_the_flaky_test_bot_keeps_the_text_of_a_body_without_the_end_of_the_coun
     # A person deleted the end comment: their text below the table stays.
     lint = count_of("lint", "tests/test_x.py::test_y", 4, 2, 1)
     before = [
-        FLAKY_INTRO,
+        OLDER_INTRO,
         "",
         *flaky_counts(lint)[:-1],
         "A note of the maintainer, where the end was.",
@@ -22350,6 +22386,8 @@ def test_the_flaky_test_bot_keeps_the_text_of_a_body_without_the_end_of_the_coun
         [
             FLAKY_INTRO,
             "",
+            FLAKY_MARK,
+            "",
             *flaky_counts(*FLAKY_COUNTS, lint),
             "A note of the maintainer, where the end was.",
             "",
@@ -22369,7 +22407,9 @@ def test_the_flaky_test_bot_keeps_the_hundred_latest_counts(tmp_path: Path) -> N
             **FIRST_ATTEMPT,
             "issue list": [{"number": 7, "title": "Flaky tests"}],
             "issue view 7": {
-                "body": "\n".join([FLAKY_INTRO, "", *flaky_counts(*older)])
+                "body": "\n".join(
+                    [FLAKY_INTRO, "", FLAKY_MARK, "", *flaky_counts(*older)]
+                )
             },
             "issue edit 7": "",
         },
@@ -22377,8 +22417,24 @@ def test_the_flaky_test_bot_keeps_the_hundred_latest_counts(tmp_path: Path) -> N
     )
 
     assert written["issue-edit"] == "\n".join(
-        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS, *older[:95]), ""]
+        [
+            FLAKY_INTRO,
+            "",
+            FLAKY_MARK,
+            "",
+            *flaky_counts(*FLAKY_COUNTS, *older[:95]),
+            "",
+        ]
     )
+
+
+def only_looked_for_the_issue(calls: list[str]) -> bool:
+    """Whether gh did nothing with an issue but look for that of flaky tests, which a
+    run without a row of its own does, in case an issue holds only failures outside
+    the code."""
+    return [call.split(" --")[0] for call in calls if call.startswith("issue ")] == [
+        "issue list"
+    ]
 
 
 @WITH_JQ
@@ -22404,13 +22460,14 @@ def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
             "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
             "repos/o/r/check-runs/11/annotations": annotations_of_a_job(RACED),
             "repos/o/r/check-runs/12/annotations": annotations_of_a_job(RACED),
+            "issue list": [],
         },
         URL="https://github.com/o/r/actions/runs/5",
     )
 
     assert "nothing to report" in summary
     assert not written
-    assert not any(call.startswith("issue ") for call in calls)
+    assert only_looked_for_the_issue(calls)
 
 
 @WITH_JQ
@@ -22440,7 +22497,7 @@ def test_the_flaky_test_bot_reports_no_job_that_failed_because_others_were_cance
 
     assert "nothing to report" in summary
     assert not written
-    assert not any(call.startswith("issue ") for call in calls)
+    assert only_looked_for_the_issue(calls)
     assert not any("/logs" in call for call in calls)
 
 
@@ -22488,7 +22545,808 @@ EVERY_STEP_PASSED = (
     ("Run actions/checkout", "skipped"),
     ("Complete job", "success"),
 )
-RUNNER_FAULT = "### The runner's fault"
+# The section of the summary with the jobs that failed outside the code.
+OUTSIDE = "### Outside the code"
+
+
+def logged(*lines: str) -> str:
+    """A log of a job as GitHub gives it, with a timestamp before each line."""
+    return "".join(
+        f"2026-11-22T08:52:{index % 60:02}.0000000Z {line}\n"
+        for index, line in enumerate(lines)
+    )
+
+
+def command(*script: str, printed: Sequence[str] = ()) -> list[str]:
+    """The section of a step that runs a command, as the runner writes it: its first
+    line after ##[group]Run, the whole command and its shell in the group, then what
+    it printed."""
+    return [
+        f"##[group]Run {script[0]}",
+        *script,
+        "shell: /usr/bin/bash -e {0}",
+        "env:",
+        "  GH_TELEMETRY: false",
+        "##[endgroup]",
+        *printed,
+    ]
+
+
+def action(uses: str, *printed: str) -> list[str]:
+    """The section of a step that runs an action, with its inputs in the group."""
+    return [
+        f"##[group]Run {uses}",
+        "with:",
+        "  retention-days: 14",
+        "##[endgroup]",
+        *printed,
+    ]
+
+
+# The runner's last line, after a job that ended in time or hung after its work.
+CLEANUP = "Cleaning up orphan processes"
+UPLOAD_ACTION = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+LOST = (
+    "Failed to CreateArtifact: Unable to make request: ETIMEDOUT If you are using"
+    " self-hosted runners, please make sure your runner has access to all GitHub"
+    " endpoints: https://docs.github.com/en/actions/hosting-your-own-runners"
+)
+# The section of the step Explain the failure, which follows every failure.
+COACHED = command(
+    "script=.github/blueprint.py",
+    '[[ -f "$script" ]] || script=blueprint.py',
+    'python3 "$script" coach explain "$CHECK"',
+    printed=(
+        "PR coach: The checks of scripts/check.sh",
+        "##[error]One of the checks of `scripts/check.sh` failed, such as the format,"
+        " the lint or the types of the code",
+    ),
+)
+# The log of the job check (python) of run 45004845410 of Dennis-Otto/repo-blueprint,
+# cut to the runner's lines: scripts/check.sh passed, and the upload of the coverage
+# report timed out (#1090).
+UPLOAD_LOST = [
+    *action("step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a"),
+    *action("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"),
+    *command(
+        "uv pip install --system --require-hashes -r requirements-dev.txt",
+        printed=("Installed 120 packages",),
+    ),
+    *command("bash scripts/check.sh", printed=("All checks passed!",)),
+    *command(
+        'coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"',
+        'coverage xml -o "$RUNNER_TEMP/coverage.xml"',
+        printed=("Wrote XML report to /home/runner/work/_temp/coverage.xml",),
+    ),
+    *action(
+        UPLOAD_ACTION,
+        "With the provided path, there will be 1 file uploaded",
+        "##[error]Failed to CreateArtifact: Unable to make request: ETIMEDOUT",
+        "If you are using self-hosted runners, please make sure your runner has access",
+    ),
+    *command(
+        "# The head of the pull request, onto which the bot commits, not its merge",
+        printed=("395 files left unchanged",),
+    ),
+    *action(UPLOAD_ACTION, "No files were found with the provided path"),
+    *COACHED,
+    "Post job cleanup.",
+    "[command]/usr/bin/git version",
+    "Post job cleanup.",
+    "[harden-runner] post-step",
+]
+# Its annotations: the PR coach's explanation of the check, a warning of a page of the
+# repository, and the error of the upload.
+UPLOAD_LOST_ANNOTATIONS = [
+    {
+        "annotation_level": "failure",
+        "title": f"{COACH_PREFIX}The checks of scripts/check.sh",
+        "path": ".github",
+        "message": "One of the checks of `scripts/check.sh` failed.",
+    },
+    {
+        "annotation_level": "warning",
+        "title": "Pages in one column",
+        "path": "docs/decisions/README.md",
+        "message": "a cell of a Markdown table with 52 words, more than 30",
+    },
+    {"annotation_level": "failure", "title": "", "path": ".github", "message": LOST},
+]
+# The time ran out in a command of the tests, as in Dennis-Otto/issue-assistant#516.
+CANCELLED_IN_THE_TESTS = logged(
+    *action("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"),
+    *command("bash scripts/check.sh", printed=("tests ......  [ 96%]",)),
+    "##[error]The operation was canceled.",
+    *COACHED,
+    "Post job cleanup.",
+    CLEANUP,
+)
+
+
+def report_of_one_job(
+    tmp_path: Path,
+    job: dict[str, object],
+    annotations: list[dict[str, str]],
+    log: str | None,
+    **answers: object,
+) -> workflow_steps.StepResult:
+    """Runs the report for a run whose only job that failed at first is this one, job
+    11 of CI (python), with these annotations and this log; None is a log that GitHub
+    no longer has. No issue is open, unless the answers open one."""
+    logs: dict[str, object] = (
+        {"repos/o/r/actions/jobs/11/logs.error": "HTTP 404: Not Found"}
+        if log is None
+        else {"repos/o/r/actions/jobs/11/logs": log}
+    )
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {"jobs": [job]},
+            "repos/o/r/check-runs/11/annotations": annotations,
+            **logs,
+            "repos/o/r/actions/workflows/3/runs": {"workflow_runs": []},
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+            **answers,
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+def failed(*text: str) -> list[dict[str, str]]:
+    """Annotations of a job of the level failure, without a title, at no file."""
+    return [{"annotation_level": "failure", "message": message} for message in text]
+
+
+SETUP_UV = "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2"
+CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("steps", "annotations", "log", "where"),
+    [
+        # The upload of the coverage report timed out after scripts/check.sh passed,
+        # as in #1090.
+        (
+            ("Keep the coverage report",),
+            UPLOAD_LOST_ANNOTATIONS,
+            logged(*UPLOAD_LOST, CLEANUP),
+            f"Run {UPLOAD_ACTION}",
+        ),
+        # A download of an artifact.
+        (
+            ("Take the website",),
+            failed(
+                "Unable to download artifact(s): Unable to make request: ECONNRESET"
+            ),
+            logged(
+                *action(CHECKOUT_ACTION),
+                *action(
+                    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+                    "##[error]Unable to download artifact(s): Unable to make request:"
+                    " ECONNRESET",
+                ),
+                CLEANUP,
+            ),
+            "Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+        ),
+        # A runner that hung after the work of the job, which shows none of its steps.
+        (
+            (),
+            failed(OUT_OF_TIME),
+            logged(*command("bash scripts/check.sh"), "All checks passed!", CLEANUP),
+            "the runner, after the work of the job",
+        ),
+        # The same job, whose log GitHub no longer has.
+        ((), failed(OUT_OF_TIME), None, "the runner, which left no log"),
+        # A checkout that failed, and the PR coach's copy of a project that exits
+        # without blueprint.py.
+        (
+            ("Run actions/checkout@v7",),
+            failed(
+                "The process '/usr/bin/git' failed with exit code 128",
+                "Process completed with exit code 2.",
+            ),
+            logged(
+                *action(
+                    CHECKOUT_ACTION,
+                    "##[error]The process '/usr/bin/git' failed with exit code 128",
+                ),
+                *command(
+                    'python3 .github/blueprint.py coach explain "$CHECK"',
+                    printed=(
+                        "python3: can't open file '.github/blueprint.py'",
+                        "##[error]Process completed with exit code 2.",
+                    ),
+                ),
+                CLEANUP,
+            ),
+            f"Run {CHECKOUT_ACTION}",
+        ),
+        # The set-up of uv, with its log and without.
+        (
+            (f"Run {SETUP_UV}",),
+            failed("Failed to download uv: ETIMEDOUT"),
+            logged(
+                *action(CHECKOUT_ACTION),
+                *action(SETUP_UV, "##[error]Failed to download uv: ETIMEDOUT"),
+                *COACHED,
+                CLEANUP,
+            ),
+            f"Run {SETUP_UV}",
+        ),
+        (
+            (f"Run {SETUP_UV}",),
+            failed("Failed to download uv: ETIMEDOUT"),
+            None,
+            f"Run {SETUP_UV}",
+        ),
+        # A post step, after the last command.
+        (
+            (f"Post Run {SETUP_UV}",),
+            failed("Failed to save the cache: ECONNRESET"),
+            logged(
+                *command("bash scripts/check.sh", printed=("All checks passed!",)),
+                "Post job cleanup.",
+                "##[error]Failed to save the cache: ECONNRESET",
+                CLEANUP,
+            ),
+            "Post job cleanup",
+        ),
+    ],
+    ids=[
+        "upload",
+        "download",
+        "hung",
+        "hung without a log",
+        "checkout",
+        "setup-uv",
+        "setup-uv without a log",
+        "post step",
+    ],
+)
+def test_the_flaky_test_bot_reports_no_job_that_failed_outside_the_code(
+    tmp_path: Path,
+    steps: tuple[str, ...],
+    annotations: list[dict[str, str]],
+    log: str | None,
+    where: str,
+) -> None:
+    # #1095: a job that failed outside the code, which nothing in the repository can
+    # fix, opened the issue of flaky tests, as #1090 did for a timeout of GitHub's
+    # artifact service.
+    conclusion = "cancelled" if annotations == failed(OUT_OF_TIME) else "failure"
+    job = job_of_a_run(11, "check (python)", conclusion)
+    job["steps"] = [{"name": step, "conclusion": "failure"} for step in steps]
+    done = report_of_one_job(tmp_path, job, annotations, log)
+
+    assert "nothing to report" in done.summary
+    assert not written_by(done)
+    assert only_looked_for_the_issue(done.commands)
+    assert (
+        f"::notice::The job check (python) failed outside the code, in {where}, and"
+        " passed when it ran again"
+    ) in done.stdout
+    lines = done.summary.splitlines()
+    at = lines.index(OUTSIDE)
+    assert lines[at + 4 : at + 6] == [
+        "| Job | Step | Where it broke | Error |",
+        "| --- | --- | --- | --- |",
+    ]
+    assert lines[at + 6].startswith(
+        "| [`check (python)`](https://github.com/o/r/actions/runs/5/job/11) | "
+    )
+    assert f"| `{where}` |" in lines[at + 6]
+    # It looked back over the runs of the week before, which had no such job.
+    assert any(
+        call.startswith(
+            "api --method GET repos/o/r/actions/workflows/3/runs"
+            " -f created=>=2026-10-05T09:20:00Z -f status=success -f per_page=100"
+            " -f page=1 "
+        )
+        for call in done.commands
+    )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("steps", "annotations", "log"),
+    [
+        # A command of the job exited, besides the upload that failed.
+        (
+            ("Run the checks", "Keep the coverage report"),
+            [*UPLOAD_LOST_ANNOTATIONS, *failed(EXITED)],
+            logged(
+                *command("bash scripts/check.sh", printed=(f"##[error]{EXITED}",)),
+                *action(UPLOAD_ACTION, f"##[error]{LOST}"),
+                *COACHED,
+                CLEANUP,
+            ),
+        ),
+        # A test failed next to the upload.
+        (
+            ("Keep the coverage report",),
+            [
+                *UPLOAD_LOST_ANNOTATIONS,
+                {
+                    "annotation_level": "failure",
+                    "title": "pytest: tests/test_a.py::test_one",
+                    "path": "tests/test_a.py",
+                    "message": "AssertionError: no",
+                },
+            ],
+            logged(*UPLOAD_LOST, CLEANUP),
+        ),
+        # A step of scripts/check.sh stopped, which the PR coach names in a notice.
+        (
+            ("Keep the coverage report",),
+            [
+                *UPLOAD_LOST_ANNOTATIONS,
+                {
+                    "annotation_level": "notice",
+                    "title": f"{COACH_PREFIX}Tests, with every line and branch"
+                    f" covered{STEP_SUFFIX}",
+                    "path": ".github",
+                    "message": "A test failed.",
+                },
+            ],
+            logged(*UPLOAD_LOST, CLEANUP),
+        ),
+        # A finding at a file of the repository.
+        (
+            ("Lint the Markdown",),
+            [
+                {
+                    "annotation_level": "failure",
+                    "title": "MD013",
+                    "path": "README.md",
+                    "message": "Line length",
+                }
+            ],
+            None,
+        ),
+        # The time ran out in a command of the tests.
+        ((), failed(OUT_OF_TIME), CANCELLED_IN_THE_TESTS),
+        # A local action, one of the repository itself, and a container.
+        (
+            ("Run the end-to-end tests",),
+            failed("The demo didn't start"),
+            logged(
+                *action("./.github/actions/e2e", "##[error]The demo didn't start"),
+                CLEANUP,
+            ),
+        ),
+        (
+            ("Run the end-to-end tests",),
+            failed("The demo didn't start"),
+            logged(
+                *action(
+                    "o/r/.github/actions/e2e@main", "##[error]The demo didn't start"
+                ),
+                CLEANUP,
+            ),
+        ),
+        (
+            ("Run the end-to-end tests",),
+            failed("The demo didn't start"),
+            logged(
+                *action("docker://alpine:3.22", "##[error]The demo didn't start"),
+                CLEANUP,
+            ),
+        ),
+        # A named step, without a log.
+        (("Keep the coverage report",), failed(LOST), None),
+        # A log without an error that doesn't end in the runner's cleanup: the runner
+        # was lost in the middle of a test.
+        (
+            (),
+            failed(OUT_OF_TIME),
+            logged(*command("bash scripts/check.sh"), "tests .."),
+        ),
+        # An end-to-end test that exited, which names no test.
+        (
+            ("Run the browser tests",),
+            failed(EXITED),
+            logged(
+                *command(
+                    "bash tests/e2e/browser.sh",
+                    printed=("Open the board", f"##[error]{EXITED}"),
+                ),
+                *COACHED,
+                CLEANUP,
+            ),
+        ),
+    ],
+    ids=[
+        "exited",
+        "test",
+        "step of check.sh",
+        "finding",
+        "cancelled in a command",
+        "local action",
+        "own action",
+        "container",
+        "named step without a log",
+        "lost runner",
+        "end-to-end test",
+    ],
+)
+def test_the_flaky_test_bot_reports_a_job_that_failed_in_the_code(
+    tmp_path: Path,
+    steps: tuple[str, ...],
+    annotations: list[dict[str, str]],
+    log: str | None,
+) -> None:
+    # A failure of the code keeps its row, also when an upload failed next to it.
+    conclusion = "cancelled" if annotations == failed(OUT_OF_TIME) else "failure"
+    job = job_of_a_run(11, "check (python)", conclusion)
+    job["steps"] = [{"name": step, "conclusion": "failure"} for step in steps]
+    done = report_of_one_job(tmp_path, job, annotations, log)
+
+    rows = [
+        line
+        for line in written_by(done)["issue-comment"].splitlines()
+        if line.startswith("| [")
+    ]
+    assert len(rows) == 1
+    assert rows[0].startswith(
+        "| [`check (python)`](https://github.com/o/r/actions/runs/5/job/11) | "
+    )
+    assert OUTSIDE not in done.summary
+    # Only a failure outside the code looks back.
+    assert not any("/workflows/3/runs" in call for call in done.commands)
+
+
+def run_of_the_week(
+    number: int, created: str, *jobs: dict[str, object], first: str = "failure"
+) -> dict[str, object]:
+    """A run of the workflow in the week before that passed at its second attempt, with
+    the jobs of its first attempt, which ended with first, as the answers of the API."""
+    return {
+        f"repos/o/r/actions/runs/{number}/attempts/1": {"conclusion": first},
+        f"repos/o/r/actions/runs/{number}/attempts/1/jobs": {"jobs": list(jobs)},
+        "run": {"id": number, "run_attempt": 2, "created_at": created},
+    }
+
+
+def week_of(*runs: dict[str, object]) -> dict[str, object]:
+    """The answers of the runs of the workflow of the week before: these, the run
+    itself, and one that passed at its first attempt."""
+    answers: dict[str, object] = {}
+    listed: list[object] = [
+        {"id": 5, "run_attempt": 2, "created_at": "2026-10-12T09:00:00Z"},
+        {"id": 40, "run_attempt": 1, "created_at": "2026-10-11T09:00:00Z"},
+    ]
+    for run in runs:
+        listed.append(run["run"])
+        answers.update({key: value for key, value in run.items() if key != "run"})
+    return {"repos/o/r/actions/workflows/3/runs": {"workflow_runs": listed}, **answers}
+
+
+def lost_upload(
+    number: int, name: str = "check (node)", **kind: str
+) -> dict[str, object]:
+    """A job of a first attempt whose upload of the coverage report failed."""
+    job = job_of_a_run(number, name, kind.get("conclusion", "failure"))
+    job["steps"] = [{"name": "Keep the coverage report", "conclusion": "failure"}]
+    return job
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("runs", "row"),
+    [
+        # Two runs before, one of another value of the matrix: the third time.
+        (
+            (
+                run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
+                run_of_the_week(
+                    32, "2026-10-06T08:00:00Z", lost_upload(320, "check (python)")
+                ),
+            ),
+            True,
+        ),
+        # One run only.
+        ((run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),), False),
+        # Another job, and a run of 8 days before.
+        (
+            (
+                run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310, "lint")),
+                run_of_the_week(32, "2026-10-04T08:00:00Z", lost_upload(320)),
+                run_of_the_week(33, "2026-10-10T08:00:00Z", lost_upload(330)),
+            ),
+            False,
+        ),
+        # A first attempt that a newer run cancelled as a whole.
+        (
+            (
+                run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
+                run_of_the_week(
+                    32, "2026-10-10T08:00:00Z", lost_upload(320), first="cancelled"
+                ),
+            ),
+            False,
+        ),
+        # A job that was cancelled without its time limit.
+        (
+            (
+                run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
+                run_of_the_week(
+                    32,
+                    "2026-10-10T08:00:00Z",
+                    lost_upload(320, conclusion="cancelled"),
+                ),
+            ),
+            False,
+        ),
+    ],
+    ids=[
+        "third time",
+        "second time",
+        "other job or older",
+        "cancelled run",
+        "cancelled job",
+    ],
+)
+def test_the_flaky_test_bot_reports_a_failure_outside_the_code_that_keeps_coming_back(
+    tmp_path: Path, runs: tuple[dict[str, object], ...], row: bool
+) -> None:
+    # A cause outside the code that stays, such as a mirror that fails or a pin that
+    # expired, is the maintainer's to fix after all.
+    job = lost_upload(11, "check (python)")
+    done = report_of_one_job(
+        tmp_path,
+        job,
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        **week_of(*runs),
+        **{"repos/o/r/check-runs/320/annotations": failed(CANCELLED)},
+    )
+
+    written = written_by(done)
+    if not row:
+        assert not written
+        assert OUTSIDE in done.summary
+        return
+    assert [
+        line for line in written["issue-comment"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`check (python)`](https://github.com/o/r/actions/runs/5/job/11)"
+        " | `Keep the coverage report` | `outside the code`"
+        f" | `{LOST[:149]}\N{HORIZONTAL ELLIPSIS}` |"
+    ]
+    assert (
+        "**Outside the code, for the third time in 7 days at least:**"
+        " `check (python)` (3 runs)."
+    ) in written["issue-comment"]
+    assert (
+        f"| `CI (python) / check (python)` | `outside the code` | 1 | {LAST_RUN} |"
+        in written["issue-create"].splitlines()
+    )
+    assert OUTSIDE not in done.summary
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_looks_back_over_a_thousand_runs_at_most(
+    tmp_path: Path,
+) -> None:
+    # The report has five minutes.
+    page = [
+        {"id": 100 + number, "run_attempt": 1, "created_at": "2026-10-11T08:00:00Z"}
+        for number in range(100)
+    ]
+    done = report_of_one_job(
+        tmp_path,
+        lost_upload(11, "check (python)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        **{"repos/o/r/actions/workflows/3/runs": {"workflow_runs": page}},
+    )
+
+    pages = [call for call in done.commands if "/workflows/3/runs" in call]
+    assert [re.findall(r"-f page=(\d+)", call)[0] for call in pages] == [
+        str(number) for number in range(1, 11)
+    ]
+    assert (
+        "The runs before reached back only to 2026-10-11T08:00:00Z, 1,000 runs."
+        in done.summary
+    )
+
+
+# The comment of the bot before #1095 on the issue of flaky tests, for the run of #1090.
+OLDER_BODY = (
+    "**CI (python)** failed at first and passed when it ran again, on `main` at"
+    " abc1234 ([the run](https://github.com/o/r/actions/runs/4)):\n\n| Job | Step | Test"
+    " | Error |\n| --- | --- | --- | --- |\n| [`check (python)`]"
+    f"(https://github.com/o/r/actions/runs/4/job/21) | `Keep the coverage report` | {NOTHING}"
+    " | `Failed to CreateArtifact` |"
+)
+OLDER_COMMENT: dict[str, object] = {
+    "author": {"login": "github-actions"},
+    "body": OLDER_BODY,
+}
+
+
+def older_issue(*comments: dict[str, object], body: str = "") -> dict[str, object]:
+    """The open issue 7 of flaky tests, which a bot before #1095 opened, with these
+    comments."""
+    return {
+        "issue list": [{"number": 7, "title": "Flaky tests"}],
+        "issue view 7": {
+            "body": body
+            or "\n".join(
+                [
+                    OLDER_INTRO,
+                    "",
+                    *flaky_counts(count_of("check (python)", "", 1, 4, 11)),
+                ]
+            ),
+            "comments": list(comments),
+        },
+        "issue edit 7": "",
+        "issue close 7": "",
+    }
+
+
+def the_job_of_an_older_row(
+    number: int, annotations: list[dict[str, str]], log: str | None
+) -> dict[str, object]:
+    """The answers of the API for a job that a row of an older comment links."""
+    logs: dict[str, object] = (
+        {f"repos/o/r/actions/jobs/{number}/logs.error": "HTTP 404: Not Found"}
+        if log is None
+        else {f"repos/o/r/actions/jobs/{number}/logs": log}
+    )
+    return {
+        f"repos/o/r/actions/jobs/{number}": lost_upload(number, "check (python)"),
+        f"repos/o/r/check-runs/{number}/annotations": annotations,
+        **logs,
+    }
+
+
+HUNG = logged(*command("bash scripts/check.sh"), "All checks passed!", CLEANUP)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_closes_an_issue_that_holds_only_failures_outside_the_code(
+    tmp_path: Path,
+) -> None:
+    # #1090 holds nothing to fix: its only row is a timeout of the artifact service.
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(11, "check (python)", "cancelled", ("Set up job", "success")),
+        failed(OUT_OF_TIME),
+        HUNG,
+        **older_issue(
+            OLDER_COMMENT,
+            {
+                "author": {"login": "someone"},
+                "body": "| Job | Step | /actions/runs/1/job/99",
+            },
+        ),
+        **the_job_of_an_older_row(
+            21, UPLOAD_LOST_ANNOTATIONS, logged(*UPLOAD_LOST, CLEANUP)
+        ),
+    )
+
+    closed = [call for call in done.commands if call.startswith("issue close 7")]
+    assert len(closed) == 1
+    assert "nothing to fix here" in closed[0]
+    assert "issue-edit" not in written_by(done)
+    # Only the row of the bot, not a comment of a person.
+    assert not any("jobs/99" in call for call in done.commands)
+    assert "closed it" in done.summary
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_marks_an_issue_that_holds_a_failure_of_the_code(
+    tmp_path: Path,
+) -> None:
+    test_row: dict[str, object] = {
+        "author": {"login": "github-actions"},
+        "body": OLDER_BODY.replace("job/21", "job/22"),
+    }
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(11, "check (python)", "cancelled", ("Set up job", "success")),
+        failed(OUT_OF_TIME),
+        HUNG,
+        **older_issue(OLDER_COMMENT, test_row),
+        **the_job_of_an_older_row(
+            21, UPLOAD_LOST_ANNOTATIONS, logged(*UPLOAD_LOST, CLEANUP)
+        ),
+        **the_job_of_an_older_row(22, failed(EXITED), CANCELLED_IN_THE_TESTS),
+    )
+
+    assert not any(call.startswith("issue close") for call in done.commands)
+    # The counts stay as they are; the mark and the first sentence are new.
+    assert written_by(done)["issue-edit"] == "\n".join(
+        [
+            FLAKY_INTRO,
+            "",
+            FLAKY_MARK,
+            "",
+            *flaky_counts(count_of("check (python)", "", 1, 4, 11)),
+            "",
+        ]
+    )
+
+
+@WITH_JQ
+@pytest.mark.parametrize("rows", [0, 21])
+def test_the_flaky_test_bot_closes_no_issue_that_it_cannot_judge_whole(
+    tmp_path: Path, rows: int
+) -> None:
+    # A comment without a row, or more rows than the bot judges in the time of the job.
+    body = OLDER_BODY
+    comment: dict[str, object] = {
+        "author": {"login": "github-actions"},
+        "body": "\n".join(
+            [body.split("\n| [")[0]]
+            + [
+                f"| [`job {number}`](https://github.com/o/r/actions/runs/4/job/{number})"
+                f" | `Run` | {NOTHING} | {NOTHING} |"
+                for number in range(100, 100 + rows)
+            ]
+        ),
+    }
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(11, "check (python)", "cancelled", ("Set up job", "success")),
+        failed(OUT_OF_TIME),
+        HUNG,
+        **older_issue(comment),
+    )
+
+    assert not any(call.startswith("issue close") for call in done.commands)
+    assert not any("/actions/jobs/1" in call for call in done.commands)
+    assert FLAKY_MARK in written_by(done)["issue-edit"]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_judges_an_issue_once(tmp_path: Path) -> None:
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(11, "check (python)", "cancelled", ("Set up job", "success")),
+        failed(OUT_OF_TIME),
+        HUNG,
+        **older_issue(
+            OLDER_COMMENT,
+            body="\n".join([FLAKY_INTRO, "", FLAKY_MARK, "", *flaky_counts()]),
+        ),
+    )
+
+    assert [
+        call.split(" --")[0] for call in done.commands if call.startswith("issue ")
+    ] == [
+        "issue list",
+        "issue view 7",
+    ]
+    assert not any("/actions/jobs/21" in call for call in done.commands)
+    assert not written_by(done)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_closes_no_issue_in_a_run_with_a_row(tmp_path: Path) -> None:
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(11, "check (python)", "failure", ("Run the checks", "failure")),
+        failed(EXITED),
+        CANCELLED_IN_THE_TESTS,
+        **older_issue(OLDER_COMMENT),
+    )
+
+    assert not any(call.startswith("issue close") for call in done.commands)
+    assert "issue-comment" in written_by(done)
+    # The row of the older comment isn't judged: the run has a row of its own.
+    assert not any("/actions/jobs/21" in call for call in done.commands)
+    assert FLAKY_MARK in written_by(done)["issue-edit"]
 
 
 @WITH_JQ
@@ -22520,7 +23378,7 @@ def test_the_flaky_test_bot_reports_no_job_that_ran_out_of_time_after_its_steps(
     assert done.returncode == 0, done.stderr
     assert "nothing to report" in done.summary
     assert not written_by(done)
-    assert not any(call.startswith("issue ") for call in done.commands)
+    assert only_looked_for_the_issue(done.commands)
     # No log to read for a test that didn't fail.
     assert not any("/logs" in call for call in done.commands)
     assert (
@@ -22528,29 +23386,33 @@ def test_the_flaky_test_bot_reports_no_job_that_ran_out_of_time_after_its_steps(
         " its steps had passed"
     ) in done.stdout
     lines = done.summary.splitlines()
-    at = lines.index(RUNNER_FAULT)
+    at = lines.index(OUTSIDE)
     assert lines[at + 4 : at + 7] == [
-        "| Job |",
-        "| --- |",
-        "| [`the network block (100 %)`](https://github.com/o/r/actions/runs/5/job/11) |",
+        "| Job | Step | Where it broke | Error |",
+        "| --- | --- | --- | --- |",
+        "| [`the network block (100 %)`](https://github.com/o/r/actions/runs/5/job/11)"
+        f" | {NOTHING} | `the runner, after every step had passed` | `{OUT_OF_TIME}` |",
     ]
 
 
 @WITH_JQ
 @pytest.mark.parametrize(
-    "steps",
+    ("steps", "logs"),
     [
         # The step that ran when the time was up.
-        (("Set up job", "success"), ("Run the tests", "cancelled")),
+        ((("Set up job", "success"), ("Run the tests", "cancelled")), {}),
         # One that GitHub left without an end.
-        (("Set up job", "success"), ("Run the tests", None)),
-        # None at all: nothing tells that the work was done.
-        (),
+        ((("Set up job", "success"), ("Run the tests", None)), {}),
+        # None at all, and a log in which the time ran out in a command of the
+        # tests, as in Dennis-Otto/issue-assistant#516.
+        ((), {"repos/o/r/actions/jobs/12/logs": CANCELLED_IN_THE_TESTS}),
     ],
     ids=["cancelled", "unfinished", "none"],
 )
 def test_the_flaky_test_bot_reports_a_job_that_ran_out_of_time_in_a_step(
-    tmp_path: Path, steps: tuple[tuple[str, str | None], ...]
+    tmp_path: Path,
+    steps: tuple[tuple[str, str | None], ...],
+    logs: dict[str, str],
 ) -> None:
     job = job_of_a_run(12, "test (3.12)", "cancelled")
     job["steps"] = [{"name": step, "conclusion": result} for step, result in steps]
@@ -22568,6 +23430,7 @@ def test_the_flaky_test_bot_reports_a_job_that_ran_out_of_time_in_a_step(
             },
             "repos/o/r/check-runs/11/annotations": annotations_of_a_job(OUT_OF_TIME),
             "repos/o/r/check-runs/12/annotations": annotations_of_a_job(OUT_OF_TIME),
+            **logs,
             "issue list": [],
             "issue create": "https://github.com/o/r/issues/9\n",
         },
@@ -22583,9 +23446,9 @@ def test_the_flaky_test_bot_reports_a_job_that_ran_out_of_time_in_a_step(
         f" | {step} | {NOTHING} | `{OUT_OF_TIME}` |"
     ]
     assert "lint" not in written["issue-create"]
-    assert RUNNER_FAULT in summary
+    assert OUTSIDE in summary
     assert "| [`lint`](https://github.com/o/r/actions/runs/5/job/11) |" in summary
-    assert summary.index(RUNNER_FAULT) < summary.index("### Flaky")
+    assert summary.index(OUTSIDE) < summary.index("### Flaky")
 
 
 @WITH_JQ
@@ -22619,25 +23482,60 @@ def test_the_flaky_test_bot_reports_no_job_that_harden_runner_stopped(
 
     assert "nothing to report" in summary
     assert written == {}
-    assert not any(call.startswith("issue ") for call in calls)
+    assert only_looked_for_the_issue(calls)
 
 
 # What the error of the variants says, which only sums up the jobs that it needs.
 SUMS_UP = "this job only sums up the jobs that it needs"
 
 
+def explained(*messages: str) -> list[dict[str, str]]:
+    """The annotations of a failed job of a check, with the PR coach's explanation of
+    the check, as a real one has them."""
+    return [
+        {
+            "annotation_level": "failure",
+            "title": f"{COACH_PREFIX}A new repository of one kind",
+            "path": ".github",
+            "message": "A new repository of one kind failed its checks.",
+        },
+        *annotations_of_a_job(*messages),
+    ]
+
+
 @WITH_JQ
+@pytest.mark.parametrize("with_logs", [False, True], ids=["without logs", "with logs"])
 def test_the_flaky_test_bot_reports_no_check_that_github_kept_failing(
-    tmp_path: Path,
+    tmp_path: Path, with_logs: bool
 ) -> None:
     # As in Dennis-Otto/repo-blueprint#970: the runner of a variant didn't reach
     # api.github.com for minutes, so its check of the allowed actions said so, and the
     # variants failed with it. Neither is a flaky test; a test that failed in another
-    # job of the same run still is.
+    # job of the same run still is. The PR coach's explanation of each check is no
+    # error of its own (#1095).
     unavailable = check_unavailable(
         GitHubError(0, 'Post "https://api.github.com/graphql": i/o timeout'),
         "read what the actions of the workflows run in turn",
     )
+    sums_up = f"A job that this one needs ended with failure; {SUMS_UP}."
+    logs = {
+        "repos/o/r/actions/jobs/11/logs": logged(
+            *command(
+                "python3 blueprint.py settings check --actions",
+                printed=(f"##[error]{unavailable}", f"##[error]{EXITED}"),
+            ),
+            *COACHED,
+            CLEANUP,
+        ),
+        "repos/o/r/actions/jobs/12/logs": logged(
+            *command(
+                'echo "::error::$TEXT"',
+                printed=(f"##[error]{sums_up}", f"##[error]{EXITED}"),
+            ),
+            *COACHED,
+            CLEANUP,
+        ),
+    }
     calls, summary, written = run_a_bot_after_the_checks(
         tmp_path,
         "report",
@@ -22667,13 +23565,10 @@ def test_the_flaky_test_bot_reports_no_check_that_github_kept_failing(
                     ),
                 ]
             },
-            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
-                unavailable, EXITED
-            ),
-            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(
-                f"A job that this one needs ended with failure; {SUMS_UP}.", EXITED
-            ),
+            "repos/o/r/check-runs/11/annotations": explained(unavailable, EXITED),
+            "repos/o/r/check-runs/12/annotations": explained(sums_up, EXITED),
             "repos/o/r/check-runs/13/annotations": annotations_of_a_job(EXITED),
+            **(logs if with_logs else {}),
             "repos/o/r/actions/jobs/13/logs": (
                 "FAILED tests/test_a.py::test_one - AssertionError: no\n"
             ),
@@ -24157,6 +25052,9 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
         "if": "${{ !cancelled() && steps.build.outcome == 'success'"
         " && (github.event_name == 'pull_request'"
         " || steps.site.outputs.keep == 'true') }}",
+        # A second try follows when GitHub's artifact service fails (#1095).
+        "id": "website",
+        "continue-on-error": True,
         "timeout-minutes": 5,
         "with": {
             "name": WEBSITE_ARTIFACT,
@@ -24601,7 +25499,11 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
         assert asked["env"]["PAGE_URL"] == "${{ needs.deploy.outputs.page_url }}"
         assert "Ask the published" not in " ".join(names_of(deploy))
         assert taken["uses"].startswith("actions/download-artifact@")
-        assert taken["with"]["name"] == "github-pages"
+        # The check docs names the artifact of the try of its upload that kept it
+        # (#1095).
+        assert taken["with"]["name"] == (
+            "${{ needs.docs.outputs.pages }}" if name == "docs" else "github-pages"
+        )
         assert attested["uses"].startswith("actions/attest-build-provenance@")
         assert attested["with"]["subject-path"] == (
             "${{ runner.temp }}/pages/artifact.tar"
@@ -27188,6 +28090,196 @@ def test_a_hung_download_of_uv_gives_way_to_a_second_attempt() -> None:
     assert retried == ["variants.yml: plan", "variants.yml: variant"]
 
 
+# The artifacts that only a report or a bot reads, and that the next run writes again:
+# when GitHub's artifact service fails twice to keep one, the job warns and passes.
+KEPT_FOR_A_REPORT = {"coverage", "psalm-taint", "website", "fixes-docs"}
+UPLOADS = ("actions/upload-artifact@", "actions/upload-pages-artifact@")
+STATUS = re.compile(r"^(?:\$\{\{ )?(always\(\)|failure\(\)|!cancelled\(\))")
+
+
+def jobs_of_the_required_checks() -> list[tuple[str, str, dict[str, Any]]]:
+    """Each job of a workflow of the blueprint that is a required check of the
+    blueprint or of a repository made from it, by its name: its workflow, its id and
+    the job."""
+    kinds = [
+        path.stem.removeprefix("ci-")
+        for path in (ROOT / ".github/workflows").glob("ci-*.yml")
+    ]
+    names: set[str] = set()
+    for settings in (
+        ".github/repository.toml",
+        "template/.github/repository.toml.jinja",
+    ):
+        text = (ROOT / settings).read_text(encoding="utf-8")
+        listed = text.split("required_checks = [", 1)[1].split("\n]", 1)[0]
+        for name in re.findall(r'^\s*"([^"]+)",', listed, re.MULTILINE):
+            names |= {name.replace("{= ci_workflow =}", kind) for kind in kinds}
+    found = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for job_id, job in workflow_steps.workflow(path.name)["jobs"].items():
+            if job.get("name", job_id) in names:
+                found.append((path.name, job_id, job))
+    return found
+
+
+def test_every_upload_of_a_required_check_has_a_second_try() -> None:
+    # #1095: the artifact client of actions/upload-artifact tries no network error
+    # again, so a timeout of GitHub's artifact service failed the check (python) of
+    # #1090 after scripts/check.sh had passed. A second try, half a minute later,
+    # keeps the artifact; it overwrites what the first may have left behind, and the
+    # one of GitHub Pages, which overwrites nothing, takes another name.
+    pairs = []
+    for name, job_id, job in jobs_of_the_required_checks():
+        steps = job.get("steps") or []
+        paired: set[int] = set()
+        for index, first in enumerate(steps):
+            uses = first.get("uses", "")
+            if not uses.startswith(UPLOADS) or index in paired:
+                continue
+            wait, second = steps[index + 1], steps[index + 2]
+            where = f"{name}: {job_id}: {first['name']}"
+            assert second["name"] == f"{first['name']} once more", where
+            paired.add(index + 2)
+            assert first["continue-on-error"] is True, where
+            assert first["timeout-minutes"] >= 5, where
+            assert second["timeout-minutes"] == first["timeout-minutes"], where
+            assert second["uses"] == uses, where
+            found = STATUS.match(condition_of(first))
+            status = f"{found[1]} && " if found else ""
+            failed = f"{status}steps.{first['id']}.outcome == 'failure'"
+            assert condition_of(second).removeprefix("${{ ").removesuffix(" }}") == (
+                failed
+            ), where
+            assert condition_of(wait) == condition_of(second), where
+            assert wait["run"] == "sleep 30", where
+            artifact = first["with"].get("name", "github-pages")
+            if uses.startswith("actions/upload-pages-artifact@"):
+                assert second["with"] == {**first["with"], "name": "github-pages-again"}
+            else:
+                assert second["with"] == {**first["with"], "overwrite": True}, where
+            kept_for_a_report = artifact in KEPT_FOR_A_REPORT
+            assert second.get("continue-on-error", False) is kept_for_a_report, where
+            if kept_for_a_report:
+                said = steps[index + 3]
+                assert condition_of(said).removeprefix("${{ ").removesuffix(" }}") == (
+                    f"{status}steps.{second['id']}.outcome == 'failure'"
+                ), where
+                assert (
+                    "::warning title=GitHub's artifact service failed::" in said["run"]
+                )
+                assert "failed twice" in said["run"]
+            pairs.append(f"{name}: {job_id}: {artifact}")
+        # No job of a required check waits for an artifact.
+        assert not any(
+            step.get("uses", "").startswith("actions/download-artifact@")
+            for step in steps
+        ), f"{name}: {job_id}"
+    assert sorted(pairs) == sorted(
+        [
+            *(
+                f"ci-{kind}.yml: check: coverage"
+                for kind in ("github-action", "home-assistant", "node", "php", "python")
+            ),
+            "ci-php.yml: check: psalm-taint",
+            *(
+                f"ci-{kind}.yml: check: fixes-check"
+                for kind in (
+                    "container",
+                    "generic",
+                    "github-action",
+                    "home-assistant",
+                    "node",
+                    "php",
+                    "python",
+                )
+            ),
+            "docs.yml: docs: fixes-docs",
+            "docs.yml: docs: website",
+            "docs.yml: docs: github-pages",
+            "lint.yml: lint: fixes-lint",
+            "lint.yml: diagrams: diagrams",
+        ]
+    )
+
+
+def test_the_website_is_published_from_the_try_that_kept_it() -> None:
+    docs = workflow_steps.job("docs.yml", "docs")
+    assert docs["outputs"]["pages"] == (
+        "${{ steps.pages-again.outcome == 'success' && 'github-pages-again'"
+        " || 'github-pages' }}"
+    )
+    deploy = workflow_steps.job("docs.yml", "deploy")
+    published = workflow_steps.step(
+        "docs.yml", "deploy", "Publish the website on GitHub Pages"
+    )
+    assert published["with"] == {"artifact_name": "${{ needs.docs.outputs.pages }}"}
+    signed = workflow_steps.step(
+        "docs.yml", "deploy", "Take the website that GitHub Pages publishes"
+    )
+    assert signed["with"]["name"] == "${{ needs.docs.outputs.pages }}"
+    assert deploy["needs"] == "docs"
+
+
+def test_the_report_of_the_taint_analysis_counts_from_either_try() -> None:
+    # Its first try fails with continue-on-error even when the second kept it.
+    check = workflow_steps.job("ci-php.yml", "check")
+    assert check["outputs"]["taint"] == (
+        "${{ steps.taint-again.outcome == 'success' && 'success' || steps.taint.outcome }}"
+    )
+    assert "needs.check.outputs.taint == 'success'" in condition_of(
+        workflow_steps.job("ci-php.yml", "taint-report")
+    )
+
+
+def test_the_diagrams_that_differ_are_reported_when_they_could_not_be_kept() -> None:
+    report = workflow_steps.step(
+        "lint.yml", "diagrams", "Report the diagrams that differ"
+    )
+    assert condition_of(report) == (
+        "${{ !cancelled() && steps.draw.outputs.stale == 'true' }}"
+    )
+
+
+def test_the_pr_coach_passes_without_blueprint_py(tmp_path: Path) -> None:
+    # After a checkout that failed, the step that explains the failure found no
+    # blueprint.py, and its exit of 2 looked like a command of the code that failed to
+    # the flaky-test bot when GitHub kept the log no longer (#1095).
+    explained = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for job_id, job in workflow_steps.workflow(path.name)["jobs"].items():
+            for step in job.get("steps") or []:
+                script = step.get("run", "")
+                if 'coach explain "' not in script:
+                    continue
+                lines = [line.strip() for line in script.splitlines()]
+                guard = lines.index(
+                    '[[ -f "$script" ]] || { echo "No blueprint.py: the checkout'
+                    ' failed, so the PR coach has nothing to explain."; exit 0; }'
+                )
+                assert lines[guard - 1] == '[[ -f "$script" ]] || script=blueprint.py'
+                assert guard < next(
+                    index
+                    for index, line in enumerate(lines)
+                    if 'coach explain "' in line
+                ), f"{path.name}: {job_id}"
+                explained.append(path.name)
+    assert len(explained) == 31
+    done = workflow_steps.run_step(
+        tmp_path,
+        "ci-python.yml",
+        "check",
+        "Explain the failure",
+        env={"CHECK": "check (python)"},
+        stubs={"python3": "echo called >&2; exit 2"},
+    )
+    assert done.returncode == 0, done.stderr
+    assert (
+        "No blueprint.py: the checkout failed, so the PR coach has nothing to explain."
+        in done.stdout
+    )
+    assert "called" not in done.stderr
+
+
 @pytest.fixture
 def retrying_docker(tmp_path: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Runs the step of the Variants that puts a docker in front of the runner's,
@@ -27675,7 +28767,8 @@ def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
         assert any(fnmatch.fnmatch(name, pattern) for pattern in paths), name
     parsed = parse(workflow)
     assert parsed["permissions"] == {"contents": "read"}
-    assert "write" not in workflow
+    # No permission to write, although the second try of its upload overwrites.
+    assert not re.search(r"\bwrite\b", workflow)
     job = job_in(parsed, "downstream")
     [checkout] = steps_using(job, "actions/checkout")
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
@@ -27706,10 +28799,17 @@ def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
     )
     assert take["run"].startswith("python3 downstream.py --answers\n")
     assert 'fix keep "$RUNNER_TEMP/fixes"' in take["run"]
-    [keep] = steps_using(job, "actions/upload-artifact")
+    # With a second try when GitHub's artifact service fails, as in the required
+    # checks (#1095).
+    keep, again = steps_using(job, "actions/upload-artifact")
     assert condition_of(keep) == "${{ !cancelled() && steps.fix.outcome == 'success' }}"
     assert keep["with"]["name"] == "fixes-downstream"
     assert keep["with"]["if-no-files-found"] == "ignore"
+    assert keep["continue-on-error"] is True
+    assert condition_of(again) == (
+        "${{ !cancelled() && steps.fixes.outcome == 'failure' }}"
+    )
+    assert again["with"] == {**keep["with"], "overwrite": True}
     assert job["steps"][-1] == explain_step("downstream")
     explained_under_their_comments(workflow)
     # No required check: a conflict can be the right change.
