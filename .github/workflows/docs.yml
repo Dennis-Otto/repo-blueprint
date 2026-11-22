@@ -570,7 +570,9 @@ jobs:
         with:
           artifact_name: ${{ needs.docs.outputs.pages }}
       # The provenance of what GitHub Pages publishes, artifact.tar of the artifact
-      # github-pages, signed with Sigstore for this workflow and its commit, as the
+      # that the job docs names in its output pages (github-pages, or
+      # github-pages-again after a second try), signed with Sigstore for this
+      # workflow and its commit, as the
       # release workflow signs every release. This job signs it, not the job docs,
       # which runs the code of pull requests and gets no id-token. SECURITY.md shows
       # how gh attestation verify checks it.
