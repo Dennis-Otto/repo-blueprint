@@ -6841,15 +6841,19 @@ class PullRequest(NamedTuple):
 
 
 def a_pull_request_on_a_newer_main(
-    tmp_path: Path, changes: dict[str, str | None], *signed_off: bool
+    tmp_path: Path,
+    changes: dict[str, str | None],
+    *signed_off: bool,
+    author: str = "Dev <dev@example.com>",
 ) -> PullRequest:
     """A pull request whose branch starts on a newer main than the base that its event
     names, as the branch of the release bot does when the bot builds it again. Main got
     a squash commit since that base, which deletes docs/old.md and adds docs/main.md and
     whose sign-off names another address than GitHub gives its author. The first commit
-    of the pull request makes the changes; each one has a sign-off or not. A change of
-    None deletes the file, one that starts with -> moves it. origin/main is the base
-    branch, HEAD the merge commit that the checkout of a pull request leaves."""
+    of the pull request makes the changes; each one, by the author, has a sign-off or
+    not. A change of None deletes the file, one that starts with -> moves it.
+    origin/main is the base branch, HEAD the merge commit that the checkout of a pull
+    request leaves."""
     repository = tmp_path / "repository"
     repository.mkdir()
 
@@ -6900,7 +6904,9 @@ def a_pull_request_on_a_newer_main(
             path.write_text(content, encoding="utf-8", newline="\n")
     commits = [
         commit(
-            f"Commit {number} of the pull request", *(["--signoff"] if signed else [])
+            f"Commit {number} of the pull request",
+            f"--author={author}",
+            *(["--signoff"] if signed else []),
         )
         for number, signed in enumerate(signed_off, start=1)
     ]
@@ -7093,12 +7099,18 @@ def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
 
 
 def check_the_sign_offs(
-    tmp_path: Path, *signed_off: bool
+    tmp_path: Path,
+    *signed_off: bool,
+    author: str = "Dev <dev@example.com>",
+    opened_by: str = "dev",
 ) -> tuple[PullRequest, subprocess.CompletedProcess[str]]:
-    """Runs the DCO check, as GitHub does, on a pull request whose commits each have a
-    sign-off or not, on a newer main than the base that its event names."""
+    """Runs the DCO check, as GitHub does, on a pull request that the login opened_by
+    opened and whose commits by the author each have a sign-off or not, on a newer main
+    than the base that its event names."""
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
-    pull_request = a_pull_request_on_a_newer_main(tmp_path, {}, *signed_off)
+    pull_request = a_pull_request_on_a_newer_main(
+        tmp_path, {}, *signed_off, author=author
+    )
     (tmp_path / "step.sh").write_text(
         script_of(job_in(lint, "lint"), "Check the sign-off of every commit"),
         encoding="utf-8",
@@ -7112,7 +7124,7 @@ def check_the_sign_offs(
             **os.environ,
             "BASE_REF": "main",
             "HEAD_SHA": pull_request.commits[-1],
-            "PR_AUTHOR": "dev",
+            "PR_AUTHOR": opened_by,
         },
         capture_output=True,
         encoding="utf-8",
@@ -7147,6 +7159,54 @@ def test_the_sign_off_check_fails_a_commit_of_the_pull_request_without_one(
         f"::error::Commit {unsigned} lacks the sign-off "
         "'Signed-off-by: Dev <dev@example.com>'. Commit with git commit -s."
     ) in result.stdout
+
+
+BOT = "release-app[bot]"
+BOT_AUTHOR = f"{BOT} <1+{BOT}@users.noreply.github.com>"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("signed_off", [(False,), (False, False)])
+def test_the_sign_off_check_lets_a_bot_s_own_commits_through_in_its_pull_request(
+    tmp_path: Path, signed_off: tuple[bool, ...]
+) -> None:
+    # A bot can't sign the certificate, which the answers of bestpractices.dev and
+    # CONTRIBUTING.md say (issue 1092).
+    pull_request, result = check_the_sign_offs(
+        tmp_path, *signed_off, author=BOT_AUTHOR, opened_by=BOT
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    for commit in pull_request.commits:
+        assert f"Accepted commit {commit} of {BOT} without a sign-off." in result.stdout
+    assert f"Checked the sign-off of {len(signed_off)} commit(s)." in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("author", "opened_by", "lacking"),
+    [
+        # A person's commit in the pull request of a bot.
+        ("Dev <dev@example.com>", BOT, "Dev <dev@example.com>"),
+        # A commit in the name of the bot in a person's pull request.
+        (BOT_AUTHOR, "dev", BOT_AUTHOR),
+        # A commit in the name of another bot in the pull request of a bot.
+        (BOT_AUTHOR, "other-app[bot]", BOT_AUTHOR),
+    ],
+)
+def test_the_sign_off_check_lets_no_other_commit_through_without_one(
+    tmp_path: Path, author: str, opened_by: str, lacking: str
+) -> None:
+    pull_request, result = check_the_sign_offs(
+        tmp_path, False, author=author, opened_by=opened_by
+    )
+
+    assert result.returncode == 1
+    assert (
+        f"::error::Commit {pull_request.commits[0]} lacks the sign-off "
+        f"'Signed-off-by: {lacking}'. Commit with git commit -s."
+    ) in result.stdout
+    assert "Accepted commit" not in result.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -10887,6 +10947,13 @@ WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
     ("coding_standards_enforced", "the CI hadolint", {"container"}),
     # The written policy of the section Tests, which every kind but generic has.
     ("test_policy_mandated", "CONTRIBUTING.md#tests", set(KINDS) - {"generic"}),
+    (
+        "test_policy_mandated",
+        "in the automated test suite",
+        set(KINDS) - {"generic"},
+    ),
+    # The policy of generic, whose CONTRIBUTING.md names no test suite (issue 1092).
+    ("test_policy_mandated", "changes need tests,", {"generic"}),
     # What every kind says.
     ("vulnerability_response_process", "credit for the reporter", set(KINDS)),
     ("vulnerability_response_process", "at least every 14 days", set(KINDS)),
@@ -10901,6 +10968,12 @@ WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
     ("roles_responsibilities", "which role and which access", set(KINDS)),
     ("code_of_conduct", "private reporting to the maintainer", set(KINDS)),
     ("dco", "part of the required check lint", set(KINDS)),
+    # The commits that the check DCO lets through without one (issue 1092).
+    ("dco", "a bot's own commits", set(KINDS)),
+    ("osps_le_01_01", "a bot's own commits", set(KINDS)),
+    # The merge commits, which it doesn't read, such as those of the branch bot.
+    ("dco", "other than a merge", set(KINDS)),
+    ("osps_le_01_01", "other than a merge", set(KINDS)),
     ("contribution_requirements", "a signature that GitHub verifies", set(KINDS)),
     ("contribution_requirements", "a line under Unreleased", set(KINDS)),
     ("contribution_requirements", "for new functionality", set(KINDS) - {"generic"}),
@@ -10950,6 +11023,43 @@ SOURCES_OF_THE_ANSWERS: list[tuple[str, str, str, str]] = [
         "Report behavior that violates this code privately to the maintainer",
     ),
     ("dco", "part of the required check lint", ".github/repository.toml", '"lint",'),
+    *(
+        (criterion, "a bot's own commits", path, source)
+        for criterion in ("dco", "osps_le_01_01")
+        for path, source in (
+            (
+                ".github/workflows/lint.yml",
+                'if [[ "$PR_AUTHOR" == *"[bot]" && "$name" == "$PR_AUTHOR" ]]; then',
+            ),
+            (
+                "CONTRIBUTING.md",
+                "A bot's own commits in its own pull request, such as an update of a"
+                " dependency, of the blueprint or a release, need none, since a bot"
+                " can't sign the certificate; the check *DCO* lets only those through,"
+                " and reads no merge commit, which only brings the base branch in.",
+            ),
+        )
+    ),
+    *(
+        (criterion, "other than a merge", path, source)
+        for criterion in ("dco", "osps_le_01_01")
+        for path, source in (
+            (
+                ".github/workflows/lint.yml",
+                'done < <(git rev-list --reverse --no-merges "origin/$BASE_REF..$HEAD_SHA")',
+            ),
+            (
+                "CONTRIBUTING.md",
+                "and reads no merge commit, which only brings the base branch in.",
+            ),
+        )
+    ),
+    (
+        "test_policy_mandated",
+        "changes need tests,",
+        "CONTRIBUTING.md",
+        "- Changes need tests, and the checks of `scripts/check.sh` pass.",
+    ),
     (
         "contribution_requirements",
         "a signature that GitHub verifies",
@@ -11111,6 +11221,10 @@ def test_the_answers_of_openssf_best_practices_say_what_each_kind_does(
         assert "strict mode of mypy" not in answer
         assert "mypy checks in its strict mode" not in answer
         assert "every line and branch" not in answer
+        # The check DCO lets a bot's own commits through without a sign-off, and GitHub
+        # signs off only what a person commits in its web interface (issue 1092).
+        assert "Every commit carries" not in answer
+        assert "commits made on github.com" not in answer
     # The page of the security policy shows what the answer of the store says.
     security = (projects[kind] / "SECURITY.md").read_text(encoding="utf-8")
     assert (
