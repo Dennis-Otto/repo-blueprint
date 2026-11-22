@@ -9,16 +9,10 @@ requests when there is none.
 
 ## [1.25.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.24.0...v1.25.0) (2026-11-22)
 
-
 ### Features
 
-* a repository keeps its own answers of bestpractices.dev in a file of the project ([#1088](https://github.com/Dennis-Otto/repo-blueprint/issues/1088)) ([86d870a](https://github.com/Dennis-Otto/repo-blueprint/commit/86d870aae1106869824fce1d8edfdc872170461c))
-* the answers of bestpractices.dev say what the governance, the contribution rules and the release check make true ([#1089](https://github.com/Dennis-Otto/repo-blueprint/issues/1089)) ([98c36da](https://github.com/Dennis-Otto/repo-blueprint/commit/98c36da758572ce2c8b7b2f0eae69babcfed7c12))
-
-
-### Bug fixes
-
-* **deps:** update the issue assistant to v1.15.2 ([#1082](https://github.com/Dennis-Otto/repo-blueprint/issues/1082)) ([3002463](https://github.com/Dennis-Otto/repo-blueprint/commit/300246332200f3490b70b40aa26030f260d15f8f))
+- **Fuller answers for bestpractices.dev:** the answers of `.bestpractices.json` now say what the files of your repository already make true, so the entry of your repository on OpenSSF Best Practices says what it really does once you save the links of the weekly issue. The governance answers name the final responsibility of the maintainer, the public decisions, the required checks and the bots, the table of roles and access, the private reporting of the code of conduct, the sign-off that the required check *lint* asks for, and with a designated successor what GitHub lets them do with the repository. The contribution requirements add the verified signature, the Conventional Commit title and the entry in the changelog. The Release verification shows in the answers of signed tags and releases, Dependabot alerts in the monitoring of dependencies, zizmor and the rule for exceptions in the enforced coding standards, and the tools of the website in the quick set-up. A Nextcloud app adds the header and the outgoing request of its Psalm taint analysis, the coverage of every line of `lib/` and the version check of its signed package, a Home Assistant integration the version check of its zip for HACS. An answer of your own in `.github/bestpractices.project.toml` still wins; after the update, the weekly issue lists the new answers, whose links you save once.
+- **Answers of your own for bestpractices.dev:** a new file of your project, `.github/bestpractices.project.toml`, holds the answers of OpenSSF Best Practices that only your repository can give, such as its end-to-end tests or its security review, and no update touches it. A justification there replaces the blueprint's for the same criterion, and a criterion that `.bestpractices.json` leaves out gets its status and justification there. The weekly issue *The answers on bestpractices.dev differ from .bestpractices.json* compares the entry with both files, marks your own answers and closes once the entry gives them, so saving its links no longer replaces them with the blueprint's words. The new step *Answers for bestpractices.dev* of `scripts/check.sh` checks the file without the network, and `python3 .github/blueprint.py best-practices --verify --fix` removes what only repeats `.bestpractices.json`. To bring back an answer that the links replaced, copy it from your entry as it was before into a table of the file, named as in `.bestpractices.json`, such as `[test]` with only its `justification`, check every sentence against your repository, run the step, and after the merge save the links of the next weekly issue.
 
 ## [1.24.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.2...v1.24.0) (2026-11-21)
 

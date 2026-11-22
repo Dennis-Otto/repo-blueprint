@@ -200,3 +200,4 @@ Copy [the template](0000-template.md) to a file named after the number of your p
 | [1055](1055-github-starts-the-daily-release-hours-after-its-schedule.md) | GitHub starts the daily release hours after its schedule, and the texts say so | accepted |
 | [1061](1061-downstream-runs-on-main-after-a-push-of-new-answers.md) | Downstream runs on main after a push of new answers | accepted |
 | [1074](1074-a-pull-request-that-changes-what-the-fuzzing-reads-waits-for-it.md) | A pull request that changes what the fuzzing reads waits for it | accepted |
+| [1088](1088-a-repository-keeps-its-own-answers-of-bestpractices-dev-in-a-file-of-the-project.md) | A repository keeps its own answers of bestpractices.dev in a file of the project | accepted, amends [0047](0047-every-repository-proposes-the-best-practices-answers-that-the-blueprint-guarantees.md) and [1046](1046-a-bot-notices-a-stale-entry-on-bestpractices-dev.md) |
