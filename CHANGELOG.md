@@ -7,6 +7,19 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.25.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.24.0...v1.25.0) (2026-11-22)
+
+
+### Features
+
+* a repository keeps its own answers of bestpractices.dev in a file of the project ([#1088](https://github.com/Dennis-Otto/repo-blueprint/issues/1088)) ([86d870a](https://github.com/Dennis-Otto/repo-blueprint/commit/86d870aae1106869824fce1d8edfdc872170461c))
+* the answers of bestpractices.dev say what the governance, the contribution rules and the release check make true ([#1089](https://github.com/Dennis-Otto/repo-blueprint/issues/1089)) ([98c36da](https://github.com/Dennis-Otto/repo-blueprint/commit/98c36da758572ce2c8b7b2f0eae69babcfed7c12))
+
+
+### Bug fixes
+
+* **deps:** update the issue assistant to v1.15.2 ([#1082](https://github.com/Dennis-Otto/repo-blueprint/issues/1082)) ([3002463](https://github.com/Dennis-Otto/repo-blueprint/commit/300246332200f3490b70b40aa26030f260d15f8f))
+
 ## [1.24.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.23.2...v1.24.0) (2026-11-21)
 
 ### Features
