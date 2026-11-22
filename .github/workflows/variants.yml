@@ -143,6 +143,7 @@ jobs:
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
+          [[ -f "$script" ]] || { echo "No blueprint.py: the checkout failed, so the PR coach has nothing to explain."; exit 0; }
           python3 "$script" coach explain "$CHECK"
 
   variant:
@@ -680,6 +681,7 @@ jobs:
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
+          [[ -f "$script" ]] || { echo "No blueprint.py: the checkout failed, so the PR coach has nothing to explain."; exit 0; }
           python3 "$script" coach explain "$CHECK"
 
   # The screenshot bot of a new repository, which runs its starter
@@ -806,6 +808,7 @@ jobs:
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
+          [[ -f "$script" ]] || { echo "No blueprint.py: the checkout failed, so the PR coach has nothing to explain."; exit 0; }
           python3 "$script" coach explain "$CHECK"
 
   # The rules of main require this one check, not each variant: a matrix that its
@@ -853,4 +856,5 @@ jobs:
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
+          [[ -f "$script" ]] || { echo "No blueprint.py: the checkout failed, so the PR coach has nothing to explain."; exit 0; }
           python3 "$script" coach explain "$CHECK"
