@@ -10971,6 +10971,9 @@ WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
     # The commits that the check DCO lets through without one (issue 1092).
     ("dco", "a bot's own commits", set(KINDS)),
     ("osps_le_01_01", "a bot's own commits", set(KINDS)),
+    # The merge commits, which it doesn't read, such as those of the branch bot.
+    ("dco", "other than a merge", set(KINDS)),
+    ("osps_le_01_01", "other than a merge", set(KINDS)),
     ("contribution_requirements", "a signature that GitHub verifies", set(KINDS)),
     ("contribution_requirements", "a line under Unreleased", set(KINDS)),
     ("contribution_requirements", "for new functionality", set(KINDS) - {"generic"}),
@@ -11032,7 +11035,22 @@ SOURCES_OF_THE_ANSWERS: list[tuple[str, str, str, str]] = [
                 "CONTRIBUTING.md",
                 "A bot's own commits in its own pull request, such as an update of a"
                 " dependency, of the blueprint or a release, need none, since a bot"
-                " can't sign the certificate; the check *DCO* lets only those through.",
+                " can't sign the certificate; the check *DCO* lets only those through,"
+                " and reads no merge commit, which only brings the base branch in.",
+            ),
+        )
+    ),
+    *(
+        (criterion, "other than a merge", path, source)
+        for criterion in ("dco", "osps_le_01_01")
+        for path, source in (
+            (
+                ".github/workflows/lint.yml",
+                'done < <(git rev-list --reverse --no-merges "origin/$BASE_REF..$HEAD_SHA")',
+            ),
+            (
+                "CONTRIBUTING.md",
+                "and reads no merge commit, which only brings the base branch in.",
             ),
         )
     ),
