@@ -29367,13 +29367,16 @@ def test_the_uv_of_the_workflows_follows_the_blueprint(
     assert enabled is (kind == "blueprint")
 
 
-# Each job ends after a few times its longest run, and each step that installs, builds
-# or downloads after five minutes: a build of the website that hung on 2026-10-12 held
-# a pull request for half an hour, until the Variants ran out of time.
+# Each job ends after a limit measured against its slowest runs, and each step that
+# installs, builds or downloads after five minutes: a build of the website that hung on
+# 2026-10-12 held a pull request for half an hour, until the Variants ran out of time.
+# check (python) against the worst of the last 30 runs on main, 485 seconds on
+# 2026-11-23, and check (github-action) against the slowest attempts of
+# Dennis-Otto/issue-assistant, 481 to 485 seconds on 2026-11-22 and 23 (decision 1132).
 JOB_LIMITS = {
     ("variants.yml", "variant"): 10,
     ("ci-python.yml", "check"): 12,
-    ("ci-github-action.yml", "check"): 8,
+    ("ci-github-action.yml", "check"): 15,
     ("ci-home-assistant.yml", "check"): 15,
 }
 WORK = re.compile(
@@ -29411,6 +29414,17 @@ def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
                 assert minutes < limit
             bounded += 1
     assert bounded
+
+
+def test_the_check_of_a_github_action_ends_after_fifteen_minutes(
+    projects: Mapping[str, Path],
+) -> None:
+    # A slow runner needed 481 to 485 seconds for every step of the check of
+    # Dennis-Otto/issue-assistant, and its limit of 8 minutes cancelled a check that
+    # had passed (decision 1132). A repository's ci.yml is the blueprint's, rendered.
+    jobs = parse(workflows(projects["github-action"])["ci.yml"])["jobs"]
+    assert jobs["check"]["name"] == "check (github-action)"
+    assert jobs["check"]["timeout-minutes"] == 15
 
 
 @pytest.mark.parametrize(
