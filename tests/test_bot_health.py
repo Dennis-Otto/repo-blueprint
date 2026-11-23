@@ -20,7 +20,7 @@ from hypothesis import strategies as st
 from shared import BY_HAND, in_a_repository
 
 import blueprint.github
-from blueprint import branches, cli
+from blueprint import bot_health, branches, cli
 from blueprint.bot_health import (
     BLUEPRINT_BOT,
     EVENT_BOTS,
@@ -31,10 +31,12 @@ from blueprint.bot_health import (
     LABEL_DESCRIPTION,
     LAST_JOB,
     LATE,
+    LOOK_BACK_TIME,
     LOOKS,
     MARKER,
     MONTHS,
     MOST_JOBS,
+    MOST_PAGES,
     MOST_PROBLEMS,
     MOST_STARTS,
     ONE_TRY,
@@ -274,6 +276,12 @@ class FakeGitHub:
                 self.failed_runs_of_every_branch,
             ),
             (
+                r"/actions/workflows/(\d+)/runs\?branch=main"
+                r"&created=%3E%3D([\dT:-]+Z)&exclude_pull_requests=true&per_page=100"
+                r"&page=(\d+)",
+                self.page_of_runs,
+            ),
+            (
                 r"/actions/workflows/(\d+)/runs\?event=release"
                 r"&exclude_pull_requests=true&per_page=1",
                 self.runs_of_releases,
@@ -450,6 +458,20 @@ class FakeGitHub:
                 and datetime.fromisoformat(run["created_at"]) >= start
             ][:100]
         }
+
+    def page_of_runs(
+        self, method: str, body: Any, number: str, since: str, page: str
+    ) -> tuple[int, Any]:
+        # A page of the runs of every attempt since the time that the request names,
+        # the newest first, as the look back at the earlier time-outs reads them.
+        start = datetime.fromisoformat(since)
+        runs = [
+            run
+            for run in self.workflow_runs.get(int(number), [])
+            if datetime.fromisoformat(run["created_at"]) >= start
+        ]
+        first = (int(page) - 1) * 100
+        return 200, {"workflow_runs": runs[first : first + 100]}
 
     def runs_of_releases(self, method: str, body: Any, number: str) -> tuple[int, Any]:
         # The latest run that a published release started, of whatever tag.
@@ -1044,25 +1066,28 @@ def test_a_job_that_runs_out_of_time_twice_is_reported(github: FakeGitHub) -> No
     assert OUT_OF_TIME in github.issues[1]["body"]
 
 
+@pytest.mark.parametrize("name", ["Release", "Findings"])
 @pytest.mark.parametrize(
     ("job", "annotations"),
     [
-        # A person or a newer run cancelled it, or a job that didn't run out of time.
+        # A person or a newer run cancelled it, or a job that didn't run out of time;
+        # in Findings also the newer run whose waiting job a second try replaced in
+        # the group findings.
         ("cancelled", [failure("failure", "The operation was canceled.")]),
         ("cancelled", []),
         ("success", [failure("failure", OUT_OF_TIME)]),
     ],
 )
 def test_a_run_that_only_something_else_cancelled_is_no_failure(
-    github: FakeGitHub, job: str, annotations: list[dict[str, str]]
+    github: FakeGitHub, job: str, annotations: list[dict[str, str]], name: str
 ) -> None:
-    github.runs[1] = run_of(1, conclusion="cancelled")
+    github.runs[1] = run_of(1, name=name, conclusion="cancelled")
     github.jobs[(1, 1)] = [job_of_a_run(11, "release", job)]
     github.annotations[11] = annotations
 
     result = watch_run(api_of(github), REPO, 1, NOW)
 
-    assert result == "Release: ended as cancelled: no failure."
+    assert result == f"{name}: ended as cancelled: no failure."
     assert writes(github) == []
 
 
@@ -1156,10 +1181,17 @@ def test_a_workflow_of_one_try_with_another_failure_gets_no_second_try(
 def test_a_workflow_of_one_try_whose_job_ran_out_of_time_gets_no_second_try(
     github: FakeGitHub, conclusion: str, annotations: list[dict[str, str]]
 ) -> None:
-    # A part of the mutants that hit its time limit would run for hours again.
+    # A part of the mutants that hit its time limit in its step would run for hours
+    # again, also beside a job that Harden-Runner stopped; so would one that GitHub
+    # calls timed out without saying where.
     github.runs[1] = run_of(1, name="Mutation", path=FINDINGS)
     github.jobs[(1, 1)] = [
-        job_of_a_run(11, "mutation (1/4)", conclusion),
+        job_of_a_run(
+            11,
+            "mutation (1/4)",
+            conclusion,
+            [("Set up job", "success"), ("Run the mutants", "cancelled")],
+        ),
         job_of_a_run(12, "mutation report", "success"),
         stopped_job(13, "mutation issue"),
     ]
@@ -1188,6 +1220,433 @@ def test_a_workflow_of_one_try_with_a_leg_that_its_matrix_cancelled_gets_its_sec
 
     assert result == "Mutation: failed: runs the failed jobs once more."
     assert github.reruns == [1]
+
+
+# The jobs of Findings that GitHub cancelled at their limit of 5 minutes outside their
+# steps, as the jobs API lists their steps. #1116, run 45111195875: Set up job passed
+# after 299 seconds, then every step of the job's own was skipped.
+READ_THE_RECORD = "Findings / Read the record of the reported alerts"
+SET_UP_LATE = [
+    ("Set up job", "success"),
+    ("Pre Block every host but GitHub's results service", "success"),
+    ("Block every host but GitHub's results service", "skipped"),
+    ("Make sure that Harden-Runner blocks", "skipped"),
+    ("Wait until Harden-Runner lets the hosts through", "skipped"),
+    ("Restore the record of the reported alerts", "skipped"),
+    ("Check the record of the reported alerts", "skipped"),
+    ("Wait until Harden-Runner has removed Docker", "success"),
+    ("Post Block every host but GitHub's results service", "success"),
+    ("Complete job", "success"),
+]
+# #969, run 43861587625: the limit came in Set up job.
+ACCEPT = "Findings / Accept or report findings"
+SET_UP_CANCELLED = [("Set up job", "cancelled")]
+# #1098, run 45039209006: every step passed, and the limit came after the last one.
+AFTER_THE_LAST_STEP = [
+    ("Set up job", "success"),
+    ("Pre Block every host but GitHub's", "success"),
+    ("Block every host but GitHub's", "success"),
+    ("Make sure that Harden-Runner blocks", "success"),
+    ("Wait until Harden-Runner lets the hosts through", "success"),
+    ("Make sure that GitHub names the commit of this workflow", "success"),
+    ("Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "success"),
+    ("Check out the issue assistant of this workflow", "success"),
+    ("Look up the newest record of the reported alerts", "success"),
+    ("Put the record of the reported alerts in place", "success"),
+    ("Dismiss accepted findings and report the others", "success"),
+    ("Keep the record of the reported alerts", "skipped"),
+    ("Wait until Harden-Runner has removed Docker", "success"),
+    ("Post Check out the issue assistant of this workflow", "success"),
+    ("Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "success"),
+    ("Post Block every host but GitHub's", "success"),
+    ("Complete job", "success"),
+]
+# The hang of 1 and 2 November, run 41356208504: GitHub lists no step of the job any
+# more, but the job carries the annotation, so it started.
+DOWNLOAD = (
+    "Failed to download action 'https://api.github.com/repos/step-security/"
+    "harden-runner/tarball/9c5af2b'. Error: The request was canceled due to the "
+    "configured HttpClient.Timeout of 100 seconds elapsing."
+)
+SET_UP_TIME = "in the set-up of the job"
+AFTER_TIME = "in the runner after the last step of the job"
+OUTSIDE = [
+    pytest.param(READ_THE_RECORD, SET_UP_LATE, SET_UP_TIME, id="1116"),
+    pytest.param(ACCEPT, SET_UP_CANCELLED, SET_UP_TIME, id="969"),
+    pytest.param(ACCEPT, AFTER_THE_LAST_STEP, AFTER_TIME, id="1098"),
+    pytest.param(ACCEPT, [], AFTER_TIME, id="without-steps"),
+]
+
+
+def timed_out_run(
+    github: FakeGitHub,
+    number: int,
+    job: str,
+    steps: list[tuple[str, str]],
+    *,
+    name: str = "Findings",
+    attempt: int = 1,
+    created: datetime = NOW - timedelta(hours=3),
+) -> None:
+    """A run of a workflow of one try whose job GitHub cancelled at its time limit, in
+    its first attempt, beside a job that passed."""
+    github.runs[number] = run_of(
+        number,
+        name=name,
+        path=FINDINGS,
+        event="workflow_run",
+        conclusion="cancelled",
+        attempt=attempt,
+        created=created,
+    )
+    github.jobs[(number, 1)] = [
+        job_of_a_run(number * 10, job, "cancelled", steps),
+        job_of_a_run(number * 10 + 1, "Findings / the other job", "success"),
+    ]
+    github.annotations[number * 10] = [
+        failure("failure", f"{OUT_OF_TIME}."),
+        failure("warning", DOWNLOAD),
+    ]
+
+
+@pytest.mark.parametrize(("job", "steps", "place"), OUTSIDE)
+def test_a_job_of_findings_that_ran_out_of_time_outside_its_steps_runs_once_more(
+    github: FakeGitHub, job: str, steps: list[tuple[str, str]], place: str
+) -> None:
+    timed_out_run(github, 1, job, steps)
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    own = job.removeprefix("Findings / ")
+    assert result == (
+        f"Findings: the job {own} ran out of its time {place}, outside the code: "
+        "runs the failed jobs once more."
+    )
+    assert github.reruns == [1]
+    assert github.issues == {}
+
+
+@pytest.mark.parametrize("name", sorted(ONE_TRY - {"Findings"}))
+@pytest.mark.parametrize(("job", "steps", "place"), OUTSIDE)
+def test_a_workflow_that_searches_runs_again_only_after_a_time_out_in_its_set_up(
+    github: FakeGitHub, job: str, steps: list[tuple[str, str]], place: str, name: str
+) -> None:
+    # A job that hung after its last step would run again from its start: a part of
+    # Mutation for up to 350 minutes, and the property tests and the fuzzing would
+    # search again.
+    timed_out_run(github, 1, job, steps, name=name)
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    if place == SET_UP_TIME:
+        assert result.endswith(", outside the code: runs the failed jobs once more.")
+        assert github.reruns == [1]
+    else:
+        assert result == f"{name}: fails: opened #1."
+        assert github.reruns == []
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_a_job_that_harden_runner_stopped_beside_a_time_out_in_the_set_up_runs_again(
+    github: FakeGitHub, conclusion: str
+) -> None:
+    timed_out_run(github, 1, READ_THE_RECORD, SET_UP_LATE)
+    github.runs[1]["conclusion"] = conclusion
+    github.jobs[(1, 1)].append(stopped_job(12, ACCEPT))
+    github.annotations[12] = [STOPPED_JOB]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == (
+        "Findings: the job Read the record of the reported alerts ran out of its time "
+        "in the set-up of the job, outside the code: runs the failed jobs once more."
+    )
+    assert github.reruns == [1]
+
+
+@pytest.mark.parametrize(
+    ("steps", "again"),
+    [
+        # The time ran out in a step of the job's own, or the runner was lost in one.
+        (
+            [("Set up job", "success"), ("Dismiss accepted findings", "cancelled")],
+            False,
+        ),
+        ([("Set up job", "success"), ("Dismiss accepted findings", None)], False),
+        ([("Set up job", "success"), ("Dismiss accepted findings", "failure")], False),
+        # A pre step is of an action of another repository, as is its download.
+        (
+            [
+                ("Set up job", "success"),
+                ("Pre Block every host", "cancelled"),
+                ("Block every host", "skipped"),
+                ("Complete job", "success"),
+            ],
+            True,
+        ),
+        # A job with no step of its own, which ran out of its time after its set-up.
+        ([("Set up job", "success"), ("Complete job", "success")], True),
+    ],
+)
+def test_a_job_that_ran_out_of_time_in_its_own_step_is_reported_at_once(
+    github: FakeGitHub, steps: list[tuple[str, str | None]], again: bool
+) -> None:
+    timed_out_run(github, 1, ACCEPT, steps)  # type: ignore[arg-type]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert github.reruns == ([1] if again else [])
+    assert (result == "Findings: fails: opened #1.") is not again
+
+
+def test_a_job_of_findings_that_github_calls_timed_out_is_reported_at_once(
+    github: FakeGitHub,
+) -> None:
+    # Without the annotation, nothing says where its time ran out.
+    timed_out_run(github, 1, ACCEPT, AFTER_THE_LAST_STEP)
+    github.runs[1]["conclusion"] = "failure"
+    github.jobs[(1, 1)][0]["conclusion"] = "timed_out"
+    github.annotations[10] = []
+
+    assert watch_run(api_of(github), REPO, 1, NOW) == "Findings: fails: opened #1."
+    assert github.reruns == []
+
+
+def test_a_job_of_findings_that_runs_out_of_time_again_is_reported(
+    github: FakeGitHub,
+) -> None:
+    timed_out_run(github, 1, ACCEPT, SET_UP_CANCELLED, attempt=2)
+    github.jobs[(1, 2)] = github.jobs.pop((1, 1))
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Findings: fails: opened #1."
+    assert github.reruns == []
+    assert OUT_OF_TIME in github.issues[1]["body"]
+
+
+def test_a_second_try_that_passes_says_which_attempt_it_healed(
+    github: FakeGitHub,
+) -> None:
+    github.runs[1] = run_of(1, name="Findings", conclusion="success", attempt=2)
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == (
+        "Findings: passes at attempt 2, which healed the failure of attempt 1."
+    )
+    assert writes(github) == []
+
+
+def earlier_time_out(
+    github: FakeGitHub, number: int, job: str, days: float, *, attempt: int = 2
+) -> None:
+    """An earlier run of Findings whose job ran out of its time outside its steps at
+    its first attempt, and which ran again."""
+    created = NOW - timedelta(hours=3, days=days)
+    timed_out_run(github, number, job, SET_UP_CANCELLED, created=created)
+    github.workflow_runs.setdefault(1, []).append(
+        run_of(
+            number,
+            name="Findings",
+            path=FINDINGS,
+            event="workflow_run",
+            conclusion="success",
+            attempt=attempt,
+            created=created,
+        )
+    )
+    del github.runs[number]
+
+
+def test_a_time_out_outside_the_code_reaches_the_issue_from_its_third_time(
+    github: FakeGitHub,
+) -> None:
+    earlier_time_out(github, 2, f"{ACCEPT} (1/2)", 2)
+    earlier_time_out(github, 3, ACCEPT, 5)
+    timed_out_run(github, 4, ACCEPT, AFTER_THE_LAST_STEP)
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result == (
+        "Findings: the job Accept or report findings ran out of its time in the runner "
+        "after the last step of the job, outside the code: runs the failed jobs once "
+        "more, and fails: opened #1."
+    )
+    assert github.reruns == [4]
+    body = github.issues[1]["body"]
+    first = body.split("-->\n", 1)[1]
+    assert first.startswith(
+        "The job `Accept or report findings` ran out of its time outside the code for "
+        "the third time in 7 days: in [the run of 2026-10-13 09:00 UTC]("
+        f"https://github.com/{REPO}/actions/runs/4) in the runner after the last step "
+        "of the job, in [the run of 2026-10-11 09:00 UTC]("
+        f"https://github.com/{REPO}/actions/runs/2) in the set-up of the job and in "
+        "[the run of 2026-10-08 09:00 UTC]"
+    )
+    assert "The code of the workflow failed in none of them" in first
+    assert github.state_of(1)["third"] is True
+
+    # Its second try passes, and the closing says again that it was the third time.
+    github.runs[4] = run_of(4, name="Findings", path=FINDINGS, conclusion="success")
+    github.runs[4]["run_attempt"] = 2
+    github.jobs[(4, 2)] = [job_of_a_run(40, ACCEPT, "success")]
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result == "Findings: passes again: closed #1."
+    assert "It was the third time in 7 days" in github.comments[1][-1]
+
+
+def test_a_fourth_time_says_how_often(github: FakeGitHub) -> None:
+    for number, days in ((2, 1), (3, 2), (5, 3)):
+        earlier_time_out(github, number, ACCEPT, days)
+    timed_out_run(github, 6, ACCEPT, SET_UP_CANCELLED)
+
+    watch_run(api_of(github), REPO, 6, NOW)
+
+    assert "outside the code 4 times in 7 days" in github.issues[1]["body"]
+
+
+def test_a_third_time_updates_the_open_issue(github: FakeGitHub) -> None:
+    number = github.add_issue(FINDINGS, run=1, attempt=1, failed=1, where="x")
+    earlier_time_out(github, 2, ACCEPT, 1)
+    earlier_time_out(github, 3, ACCEPT, 2)
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result.endswith(
+        "runs the failed jobs once more, and fails in another "
+        f"place: updated #{number}."
+    )
+    assert github.state_of(number)["third"] is True
+
+    # A failure of the code that follows is no third time any more.
+    github.runs[5] = run_of(5, name="Findings", path=FINDINGS, attempt=2)
+    watch_run(api_of(github), REPO, 5, NOW)
+
+    assert "third" not in github.state_of(number)
+    assert "third time" not in github.issues[number]["body"]
+
+
+@pytest.mark.parametrize(
+    ("job", "days", "attempt", "step", "conclusion"),
+    [
+        # Another job, one from 8 days before, and one that never ran again.
+        (READ_THE_RECORD, 2, 2, None, "cancelled"),
+        (ACCEPT, 8, 2, None, "cancelled"),
+        (ACCEPT, 2, 1, None, "cancelled"),
+        # One whose time ran out in its own step, and one that passed.
+        (ACCEPT, 2, 2, "cancelled", "cancelled"),
+        (ACCEPT, 2, 2, None, "success"),
+    ],
+)
+def test_other_time_outs_do_not_count(
+    github: FakeGitHub,
+    job: str,
+    days: int,
+    attempt: int,
+    step: str | None,
+    conclusion: str,
+) -> None:
+    earlier_time_out(github, 2, ACCEPT, 5)
+    earlier_time_out(github, 3, job, days, attempt=attempt)
+    other = github.jobs[(3, 1)][0]
+    other["conclusion"] = conclusion
+    if step:
+        other["steps"].append({"name": "Dismiss accepted findings", "conclusion": step})
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result.endswith(": runs the failed jobs once more.")
+    assert github.issues == {}
+
+
+def test_the_look_back_stops_after_a_call_that_github_kept_failing(
+    github: FakeGitHub,
+) -> None:
+    earlier_time_out(github, 2, ACCEPT, 1)
+    earlier_time_out(github, 3, ACCEPT, 2)
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+    github.fail[
+        ("GET", f"repos/{REPO}/actions/runs/3/attempts/1/jobs?per_page=100")
+    ] = 502
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result.endswith(
+        ": runs the failed jobs once more; the runs before reached back only to "
+        "2026-10-12 09:00 UTC, as GitHub kept failing."
+    )
+    assert github.reruns == [4]
+    assert github.issues == {}
+
+
+def test_the_look_back_stops_when_github_fails_its_list_of_runs(
+    github: FakeGitHub,
+) -> None:
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+    since = stamp(NOW - timedelta(days=7, hours=3))
+    github.fail[
+        (
+            "GET",
+            f"repos/{REPO}/actions/workflows/1/runs?branch=main&created=%3E%3D{since}"
+            "&exclude_pull_requests=true&per_page=100&page=1",
+        )
+    ] = 502
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result.endswith(
+        "; the runs before reached back only to 2026-10-13 09:00 UTC, as GitHub kept "
+        "failing."
+    )
+    assert github.reruns == [4]
+
+
+def test_the_look_back_stops_when_its_time_is_up(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    earlier_time_out(github, 2, ACCEPT, 1)
+    earlier_time_out(github, 3, ACCEPT, 2)
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+    clock = iter([0.0, 1.0, float(LOOK_BACK_TIME)])
+    monkeypatch.setattr(bot_health, "seconds", lambda: next(clock))
+
+    result = watch_run(api_of(github), REPO, 4, NOW)
+
+    assert result.endswith(
+        ": runs the failed jobs once more; the runs before reached back only to "
+        f"2026-10-12 09:00 UTC, as its time of {LOOK_BACK_TIME} seconds was up."
+    )
+    assert github.issues == {}
+
+
+def test_the_look_back_reads_a_limited_number_of_pages(github: FakeGitHub) -> None:
+    # Runs at their first attempt, which say nothing, every minute.
+    github.workflow_runs[1] = [
+        run_of(
+            1000 + number,
+            name="Findings",
+            path=FINDINGS,
+            conclusion="success",
+            created=NOW - timedelta(hours=3, minutes=number + 1),
+        )
+        for number in range(MOST_PAGES * 100 + 1)
+    ]
+    earlier_time_out(github, 2, ACCEPT, 1)
+    timed_out_run(github, 3000, ACCEPT, SET_UP_CANCELLED)
+
+    result = watch_run(api_of(github), REPO, 3000, NOW)
+
+    last = NOW - timedelta(hours=3, minutes=MOST_PAGES * 100)
+    assert result.endswith(
+        "; the runs before reached back only to "
+        f"{last:%Y-%m-%d %H:%M} UTC, as it reads 1,000 runs at most."
+    )
+    assert sum("&page=" in path for _, path in github.calls) == MOST_PAGES
 
 
 @pytest.mark.parametrize("name", sorted(EVENT_BOTS | OWN_ISSUE))
@@ -1785,11 +2244,15 @@ def test_the_daily_look_runs_a_run_of_bot_health_again_that_harden_runner_stoppe
         stopped_own_run(github, 35),
         # A run that ran again is left to that attempt, ...
         stopped_own_run(github, 34, attempt=2),
+        # ... one whose other job ran out of its time failed in that one too, ...
+        stopped_own_run(github, 33),
         # ... one that failed for another reason stays failed, ...
         own_run(31),
         # ... and one before the days that the look goes back is no longer looked at.
         stopped_own_run(github, 30, created=NOW - STOPPED_SINCE - timedelta(hours=1)),
     ]
+    github.jobs[(33, 1)].append(job_of_a_run(331, "look", "cancelled"))
+    github.annotations[331] = [failure("failure", OUT_OF_TIME)]
 
     summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
 

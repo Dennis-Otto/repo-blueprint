@@ -6,7 +6,14 @@ name: Bot health
 # run of a bot or a scheduled workflow ends on the default branch, or the verification
 # of a release that someone published by hand or with a token, this bot runs its
 # failed jobs once more if a second try can pass, as it does with a job that GitHub
-# cancelled at its time limit; a failure that stays keeps one
+# cancelled at its time limit. Findings, Mutation, the property tests and the fuzzing
+# would only hide or repeat their failure, so they get it only when every job that
+# failed failed outside the code: Harden-Runner stopped it, or GitHub cancelled it at
+# its time limit in the set-up of the job, before a step of its own ran, and in
+# Findings, whose jobs take under a minute, also in the runner after its last step.
+# Such a time-out that comes back is reported from its third time in 7 days, by the
+# name of its job, while its jobs still run once more (decision 1118). A failure that
+# stays keeps one
 # issue per workflow open, with the label bot-failure, the failed jobs, their steps
 # and their first errors, and the next run that passes closes it once every job that
 # failed ran again in it, in every leg of its matrix, and passed: a run that skipped
