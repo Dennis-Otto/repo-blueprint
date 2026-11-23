@@ -1,6 +1,6 @@
 # The action and the image of markdownlint-cli2 move together
 
-- Status: accepted
+- Status: superseded by [1111](1111-the-check-lint-runs-the-image-of-markdownlint-cli2.md), with which the check *lint* runs the image itself and the action leaves
 - Date: 2026-11-15
 
 ## Context

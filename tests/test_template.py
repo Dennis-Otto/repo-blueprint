@@ -13170,63 +13170,52 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
-def test_renovate_moves_the_markdownlint_of_the_action_and_of_the_image_together(
+def test_renovate_moves_the_image_of_markdownlint_in_one_group_and_names_no_action(
     projects: dict[str, Path], kind: str
 ) -> None:
-    # The check lint runs the markdownlint-cli2 of its action, scripts/markdownlint.sh
-    # that of its image, and Renovate would update each in a pull request of its own,
-    # a new major version of the action apart from the image of its markdownlint-cli2:
-    # one group, also across major versions, after the groups of the actions and of the
-    # images, keeps them in one branch (#932).
+    # The check lint, scripts/markdownlint.sh and the Variants workflow run one image
+    # of markdownlint-cli2, which moves in all of them in one pull request of its own,
+    # after the groups of the actions and of the images; no rule names the action that
+    # the check lint ran before, whose version moved apart from the image (#1111).
     root = ROOT if kind == "blueprint" else projects[kind]
     shared = renovate_rules(
         (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     )
     own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
     rules = [*shared["packageRules"], *own.get("packageRules", [])]
-    (action,) = pins.load_bundles(ROOT)
-    image = pins.load_bundles(ROOT)[action].image
+    image = "davidanson/markdownlint-cli2"
+    assert not [
+        rule
+        for rule in rules
+        if any(
+            "markdownlint-cli2-action" in name for name in rule.get("matchDepNames", [])
+        )
+    ]
     grouped = [
         index
         for index, rule in enumerate(rules)
-        if action in rule.get("matchDepNames", [])
+        if image in rule.get("matchDepNames", [])
     ]
     assert rules[grouped[0]] == {
-        "matchDepNames": [action, image],
+        "matchDepNames": [image],
         "groupName": "markdownlint-cli2",
         "separateMajorMinor": False,
     }
     for group in ("the actions", "the actions to a new major version", "the images"):
         (index,) = [i for i, rule in enumerate(rules) if rule.get("groupName") == group]
         assert index < grouped[0], group
-    # No later rule names another group for either of them.
+    # No later rule names another group for it, nor a task after its update.
     assert not [
         rule
         for rule in rules[grouped[0] + 1 :]
-        if {action, image} & set(rule.get("matchDepNames", []))
-        and ("groupName" in rule or "group" in rule)
+        if image in rule.get("matchDepNames", [])
+        and ({"groupName", "group", "postUpgradeTasks"} & set(rule))
     ]
-    # The names are those of the pins that Renovate finds.
+    # The name is that of the image that the custom manager of the images finds.
     lint = (root / ".github/workflows/lint.yml").read_text(encoding="utf-8")
-    assert f"uses: {action}@" in lint
+    assert f"MARKDOWNLINT: {image}:v" in lint
     script = (root / "scripts/markdownlint.sh").read_text(encoding="utf-8")
     assert f'image="{image}:v' in script
-    tasks = [rule for rule in rules[grouped[0] + 1 :] if "postUpgradeTasks" in rule]
-    if kind != "blueprint":
-        assert not [rule for rule in tasks if action in rule.get("matchDepNames", [])]
-        return
-    # In the blueprint, pins.py reads the version that the action runs at its new
-    # commit, and Renovate commits the record. The rule names the image too: Renovate
-    # takes the tasks of a branch from its first update, whichever of the two it is.
-    (task,) = [rule for rule in tasks if action in rule.get("matchDepNames", [])]
-    assert task == {
-        "matchDepNames": [action, image],
-        "postUpgradeTasks": {
-            "commands": ["python3 pins.py"],
-            "fileFilters": [pins.RECORD],
-            "executionMode": "branch",
-        },
-    }
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -26672,10 +26661,30 @@ def test_every_project_lints_its_markdown_as_the_check_lint(
         < check.index('\nstep "Markdown"\n')
         < check.index('\nstep "Files of the project"\n')
     )
-    # The same files and the same command as the check lint.
-    assert step_named(workflows(project)["lint.yml"], "markdown")["with"] == {
-        "globs": "**/*.md"
-    }
+    # The same files and the same command as the check lint, which runs the image of
+    # the script by its tag and digest, as the user of the runner, for the Markdown
+    # and for its fix, and no action of markdownlint (#1111).
+    lint = parse(workflows(project)["lint.yml"])
+    image = MARKDOWNLINT_IMAGE.search(script)
+    assert image
+    assert lint["jobs"]["lint"]["env"]["MARKDOWNLINT"] == (
+        f"{image[1]}:v{image[2]}@{image[3]}"
+    )
+    run = (
+        'docker run --rm --network none --user "$(id -u):$(id -g)" '
+        '--volume "$PWD:/workdir" "$MARKDOWNLINT"'
+    )
+    for name, arguments in (
+        ("markdown", '"**/*.md" || status=$?'),
+        ("Fix what markdownlint can fix", '--fix "**/*.md"'),
+    ):
+        step = step_named(lint, name)
+        assert "uses" not in step
+        assert f"{run} {arguments}" in " ".join(
+            step["run"].replace("\\\n", " ").split()
+        )
+    for text in workflows(project).values():
+        assert "markdownlint-cli2-action" not in text
     assert script.count('"**/*.md"\n') == 2
     # The step explains itself, and fixes what markdownlint can fix in the Markdown.
     catalog = tomllib.loads(
@@ -26705,17 +26714,155 @@ def test_the_markdown_lints_with_one_version_everywhere() -> None:
     rules = renovate_rules(
         (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     )
-    found = []
-    for manager in rules["customManagers"]:
-        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
-        if not any(name.search("scripts/markdownlint.sh") for name in files):
-            continue
-        for pattern in manager["matchStrings"]:
-            for match in re.finditer(pattern.replace("(?<", "(?P<"), script):
-                found.append(
-                    (match["depName"], match["currentValue"], match["currentDigest"])
-                )
-    assert found == [(name, f"v{version}", digest)]
+    # The custom manager of the images finds the one image in each of the three, so
+    # that Renovate moves it in all of them in one pull request (#1111).
+    places = (
+        "scripts/markdownlint.sh",
+        ".github/workflows/lint.yml",
+        ".github/workflows/variants.yml",
+    )
+    for path in places:
+        text = (ROOT / path).read_text(encoding="utf-8")
+        found = []
+        for manager in rules["customManagers"]:
+            files = [
+                re.compile(name.strip("/")) for name in manager["managerFilePatterns"]
+            ]
+            if not any(pattern.search(path) for pattern in files):
+                continue
+            for pattern in manager["matchStrings"]:
+                for match in re.finditer(pattern.replace("(?<", "(?P<"), text):
+                    found.append(
+                        (
+                            match["depName"],
+                            match["currentValue"],
+                            match["currentDigest"],
+                        )
+                    )
+        assert [image for image in found if image[0] == name] == [
+            (name, f"v{version}", digest)
+        ], path
+
+
+# What markdownlint-cli2 0.24.0, the version of the image, wrote for a document that
+# breaks MD018 and MD009 (the second as a warning by its rules) and for one that breaks
+# MD012, which names no column: the findings on stderr, the rest on stdout.
+MARKDOWNLINT_OUTPUT = """\
+markdownlint-cli2 v0.24.0 (markdownlint v0.42.0)
+Finding: **/*.md
+Linting: 2 files
+Summary: 3 issues in 2 files
+docs/broken.md:3:1 error MD018/no-missing-space-atx No space after hash on atx style heading [Context: "#Broken heading"]
+docs/broken.md:5:20 warning MD009/no-trailing-spaces Trailing spaces [Expected: 0 or 2; Actual: 3]
+nocol.md:3 error MD012/no-multiple-blanks Multiple consecutive blank lines [Expected: 1; Actual: 2]
+"""
+
+
+def test_each_finding_of_markdownlint_shows_at_its_line() -> None:
+    # The problem matcher of the step markdown turns each finding into an annotation
+    # at its line, in the files of the pull request too, as the action did, and only
+    # while the step runs: the fix after it repeats what is left (#1111).
+    step = step_named(
+        (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "markdown"
+    )
+    script = step["run"]
+    written = re.search(r"<<'EOF'\n(.*)\nEOF\n", script, re.S)
+    assert written
+    (matcher,) = json.loads(written[1])["problemMatcher"]
+    assert matcher["owner"] == "markdownlint"
+    (pattern,) = matcher["pattern"]
+    assert {key: pattern[key] for key in pattern if key != "regexp"} == {
+        "file": 1,
+        "line": 2,
+        "column": 3,
+        "severity": 4,
+        "code": 5,
+        "message": 6,
+    }
+    found = [
+        match.groups()
+        for line in MARKDOWNLINT_OUTPUT.splitlines()
+        if (match := re.fullmatch(pattern["regexp"], line))
+    ]
+    assert found == [
+        (
+            "docs/broken.md",
+            "3",
+            "1",
+            "error",
+            "MD018/no-missing-space-atx",
+            'No space after hash on atx style heading [Context: "#Broken heading"]',
+        ),
+        (
+            "docs/broken.md",
+            "5",
+            "20",
+            "warning",
+            "MD009/no-trailing-spaces",
+            "Trailing spaces [Expected: 0 or 2; Actual: 3]",
+        ),
+        (
+            "nocol.md",
+            "3",
+            None,
+            "error",
+            "MD012/no-multiple-blanks",
+            "Multiple consecutive blank lines [Expected: 1; Actual: 2]",
+        ),
+    ]
+    # Added before the lint and removed after it, also when it fails.
+    lines = script.splitlines()
+    assert lines.index('echo "::add-matcher::$RUNNER_TEMP/markdownlint.json"') < next(
+        index for index, line in enumerate(lines) if line.startswith("docker run")
+    )
+    assert lines[-2:] == [
+        'echo "::remove-matcher owner=markdownlint::"',
+        'exit "$status"',
+    ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("status", [0, 1])
+def test_the_step_markdown_fails_with_markdownlint_and_removes_its_matcher(
+    tmp_path: Path, status: int
+) -> None:
+    # The step runs as GitHub runs it, with bash -e, and a stub of docker that writes
+    # what markdownlint-cli2 wrote: it fails as the lint does, after it removed the
+    # matcher, so that no later step's output turns into its annotations.
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    script = step_named(lint, "markdown")["run"]
+    stubs, calls = tmp_path / "stubs", tmp_path / "calls"
+    stubs.mkdir()
+    (tmp_path / "output").write_text(MARKDOWNLINT_OUTPUT, encoding="utf-8")
+    stub(stubs, "docker", calls, f"cat '{(tmp_path / 'output').as_posix()}' >&2")
+    image = parse(lint)["jobs"]["lint"]["env"]["MARKDOWNLINT"]
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    assert BASH
+    result = subprocess.run(
+        [BASH, "--noprofile", "--norc", "-eo", "pipefail", "step.sh"],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "RUNNER_TEMP": tmp_path.as_posix(),
+            "MARKDOWNLINT": image,
+            "STATUS": str(status),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == status
+    assert result.stdout.splitlines() == [
+        f"::add-matcher::{tmp_path.as_posix()}/markdownlint.json",
+        "::remove-matcher owner=markdownlint::",
+    ]
+    assert result.stderr == MARKDOWNLINT_OUTPUT
+    json.loads((tmp_path / "markdownlint.json").read_text(encoding="utf-8"))
+    arguments = calls.read_text(encoding="utf-8").splitlines()
+    assert arguments[:5] == ["docker", "run", "--rm", "--network", "none"]
+    assert arguments[-2:] == [image, "**/*.md"]
 
 
 def markdownlint_in(tmp_path: Path) -> tuple[Path, Path, Path]:
