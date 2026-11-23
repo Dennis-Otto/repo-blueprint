@@ -3209,6 +3209,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/renovate-blueprint.json5",
         ".github/mkdocs-blueprint.yml",
         ".github/mkdocs_blueprint.py",
+        ".github/github_anchors.py",
         ".markdownlint-cli2.jsonc",
         ".markdownlint.jsonc",
         ".devcontainer/devcontainer.json",
@@ -25896,6 +25897,42 @@ def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> 
     run = config["tool"]["coverage"]["run"]
     assert "source" not in run
     assert "blueprint" in run["source_pkgs"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_gives_a_heading_the_anchor_that_github_gives_it(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    # The extension of the anchors is the blueprint's, beside the hooks, and the
+    # settings name it with the tag that puts its folder on the path of Python.
+    name = ".github/github_anchors.py"
+    assert (project / name).read_bytes() == (ROOT / name).read_bytes()
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert name in owned.split("\n")
+    base = (project / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    assert "\n  github_anchors: !!python/object/apply:site.addsitedir [.github]\n" in (
+        base
+    )
+    # From the root of the project, where MkDocs and Zensical run, Python finds it by
+    # the name that markdown_extensions gives it, and a French question loses the
+    # no-break space before its question mark, as on GitHub.
+    script = (
+        "import site, sys, markdown, pymdownx.slugs; site.addsitedir('.github');"
+        " slugify = pymdownx.slugs.slugify(case='lower');"
+        " shown = markdown.markdown(sys.argv[1], extensions=['toc', 'github_anchors'],"
+        " extension_configs={'toc': {'slugify': slugify}});"
+        " print(shown.split('\"')[1])"
+    )
+    heading = "## De quoi ai-je besoin" + chr(0xA0) + "?"
+    found = subprocess.run(
+        [sys.executable, "-c", script, heading],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert found.stdout == "de-quoi-ai-je-besoin\n"
 
 
 @pytest.mark.parametrize("kind", KINDS)

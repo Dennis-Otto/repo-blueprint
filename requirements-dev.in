@@ -3,14 +3,18 @@
 # coverage (pytest-cov) and a time limit for each (pytest-timeout), coverage, type
 # checks and lint, ShellCheck among it, which shellcheck-py brings for Linux, macOS
 # and Windows, Pillow, with which the tests draw the pictures of the screenshot bot,
-# and PyYAML, with which they read the workflows whose steps they run; Copier needs it
-# as well, but the tests ask for it themselves. Renovate keeps this list and the
-# hash-pinned requirements-dev.txt current.
+# PyYAML, with which they read the workflows whose steps they run; Copier needs it
+# as well, but the tests ask for it themselves; and Python-Markdown with
+# pymdown-extensions and the types of Python-Markdown, with which the tests render
+# headings as the website does, for the anchors of .github/github_anchors.py.
+# Renovate keeps this list and the hash-pinned requirements-dev.txt current.
 copier
 coverage
 hypothesis
+markdown
 mypy
 pillow
+pymdown-extensions
 pytest
 pytest-cov
 pytest-timeout
@@ -18,3 +22,4 @@ pytest-xdist
 pyyaml
 ruff
 shellcheck-py
+types-markdown
