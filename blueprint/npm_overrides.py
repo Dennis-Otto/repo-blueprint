@@ -262,8 +262,10 @@ def judge(
 
 def manifests(root: Path) -> list[str]:
     """Every package.json that git keeps, in any folder, that has overrides and a
-    package-lock.json beside it."""
-    listed = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    package-lock.json beside it. An untracked one is another tool's, such as the
+    vendor/ that Renovate's Composer update leaves in its checkout, and stays as it
+    is."""
+    listed = git(root, "ls-files", "-z", "--cached")
     found = []
     for name in sorted(set(filter(None, listed.split("\0")))):
         path = PurePosixPath(name)
