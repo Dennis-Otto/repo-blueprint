@@ -39,3 +39,7 @@ Option 5, since only it keeps the anchors in the place that both generators read
 - A website that builds from another folder than the root of its repository, with `mkdocs build -f`, stops with *Failed to load extension 'github_anchors'*, as its snippets would miss their files.
 - An icon of Material such as `:material-github:` still counts with nothing, as before: its element carries no shortcode, and GitHub keeps such a name as text.
 - The tests render headings with the extensions of `.github/mkdocs-blueprint.yml` and compare them with the anchors that GitHub's renderer gave, so the tools of development have Python-Markdown and pymdown-extensions as well.
+
+## De quoi ai-je besoin ?
+
+This heading is the first question of the French FAQ of homedarts-for-autodarts ("What do I need?"), with the no-break space before its `?`, and the [page of the website](../features/website.md) links to it by the anchor that GitHub gives it, `de-quoi-ai-je-besoin`. Without the extension, the heading has `de-quoi-ai-je-besoin-`: should its ids ever stop reaching the check of the anchors of MkDocs or Zensical, such as when either collects them before priority 6, the strict build of this website fails on that link.

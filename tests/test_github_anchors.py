@@ -315,3 +315,13 @@ def test_python_finds_the_extension_by_its_name_from_the_root() -> None:
         check=True,
     ).stdout
     assert shown == '<h2 id="deux--espaces">Deux  espaces</h2>\n'
+
+
+def test_the_strict_build_of_the_website_links_to_a_no_break_space() -> None:
+    # The real check of MkDocs and Zensical: without the extension, the heading
+    # has de-quoi-ai-je-besoin-, and the strict build fails on these links.
+    record = next((ROOT / "docs/decisions").glob("1117-*.md"))
+    assert f"\n## De quoi ai-je besoin{NBSP}?\n" in record.read_text(encoding="utf-8")
+    link = f"](../decisions/{record.name}#de-quoi-ai-je-besoin)"
+    for page in ("website.md", "website.de.md"):
+        assert link in (ROOT / "docs/features" / page).read_text(encoding="utf-8")
