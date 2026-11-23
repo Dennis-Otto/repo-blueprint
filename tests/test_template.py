@@ -3235,10 +3235,11 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         if name == ".github/renovate-blueprint.json5":
             # The blueprint runs its blueprint.py from its root, where every
             # repository has it as .github/blueprint.py.
-            own = own.replace(
-                "python3 blueprint.py locks --refresh",
-                "python3 .github/blueprint.py locks --refresh",
-            )
+            for command in ("locks --refresh", "npm-overrides --fix"):
+                own = own.replace(
+                    f"python3 blueprint.py {command}",
+                    f"python3 .github/blueprint.py {command}",
+                )
         assert own == (project / name).read_text(encoding="utf-8"), name
 
 
@@ -12592,6 +12593,15 @@ WAITS = {
     "updateNotScheduled": False,
     "additionalBranchPrefix": "review-",
 }
+# The task after every update of npm, which removes an override that the update made
+# needless (decision 1112), without its command, which names where blueprint.py is.
+# Renovate commits only package.json and package-lock.json of it, in any folder, and
+# installs Node with npm, which its image lacks, and Python for blueprint.py.
+NPM_OVERRIDES_TASKS = {
+    "fileFilters": ["**/package.json", "**/package-lock.json"],
+    "executionMode": "branch",
+    "installTools": {"node": {}, "python": {}},
+}
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -12618,6 +12628,9 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     # that what merges is what the checks saw; the branch bot keeps it up to date
     # with main, as Renovate does in its window.
     blueprint = "blueprint.py" if kind == "blueprint" else ".github/blueprint.py"
+    # After the refresh of npm, as after every update of npm, blueprint.py removes an
+    # override that npm no longer needs; Renovate runs each distinct task of the
+    # updates of a branch once, so a branch with both runs both commands.
     for manager in ("npm", "pip-compile"):
         refresh = refresh_of(shared, own, manager)
         tasks = refresh.pop("postUpgradeTasks", None)
@@ -12630,7 +12643,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
                 "installTools": {"python": {}, "uv": {}},
             }
             if manager == "pip-compile"
-            else None
+            else NPM_OVERRIDES_TASKS
+            | {"commands": [f"python3 {blueprint} npm-overrides --fix"]}
         )
     assert shared["rebaseWhen"] == "behind-base-branch"
     assert refresh_of(shared, own, "composer") == COMPOSER
@@ -12643,13 +12657,27 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
         "schedule": ["at any time"],
         "automerge": True,
     }
-    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+    # The command after an update of npm changes no version but what an override
+    # held, and keeps the lock file to the versions that it had, so it is the one
+    # task of every update.
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    overrides = {
+        "matchManagers": ["npm"],
+        "postUpgradeTasks": NPM_OVERRIDES_TASKS
+        | {"commands": [f"python3 {blueprint} npm-overrides --fix"]},
+    }
+    assert rules.count(overrides) == 1
+    for rule in rules:
         if {"postUpgradeTasks", "statusCheckWhen", "additionalBranchPrefix"} & set(
             rule
         ) and "pins.py" not in str(rule):
-            assert rule["matchUpdateTypes"] == ["lockFileMaintenance"], rule
+            assert rule == overrides or rule["matchUpdateTypes"] == [
+                "lockFileMaintenance"
+            ], rule
     # The Renovate of the blueprint, which runs for every repository of its owner,
-    # runs the command of the refresh and no other of blueprint.py.
+    # runs the command of the refresh and the one of the overrides of npm, and no
+    # other of blueprint.py: every command of a task matches exactly one entry of
+    # allowedCommands.
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
@@ -12657,6 +12685,18 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     allowed = [rule for rule in bot["allowedCommands"] if re.search(rule, command)]
     assert allowed == [r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"]
     assert not re.search(allowed[0], f"python3 {blueprint} locks --fix")
+    for rule in rules:
+        for task in rule.get("postUpgradeTasks", {}).get("commands", []):
+            matches = [
+                entry for entry in bot["allowedCommands"] if re.search(entry, task)
+            ]
+            assert len(matches) == 1, task
+    command = f"python3 {blueprint} npm-overrides --fix"
+    assert [entry for entry in bot["allowedCommands"] if re.search(entry, command)] == [
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$"
+    ]
+    for other in ("npm-overrides", "npm-overrides --fix --other", "pins.py"):
+        assert not re.search(bot["allowedCommands"][1], f"python3 {blueprint} {other}")
     # The check dependency-review holds a refresh that merges by itself when a version
     # younger than a week comes anyway, on the branches that Renovate names it, alone
     # or in a group, and names the versions of Composer that nothing dates; one that
@@ -13012,10 +13052,11 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
-    # Besides the command of the weekly refresh of the lock files, which every
-    # repository has.
+    # Besides the command of the weekly refresh of the lock files and the one that
+    # removes a needless override of npm, which every repository has.
     assert bot["allowedCommands"] == [
         r"^python3 (?:\.github/)?blueprint\.py locks --refresh$",
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$",
         r"^python3 pins\.py$",
     ]
     assert [
@@ -15454,14 +15495,16 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         run["env"]
     )
     # The settings of the bot of the blueprint, without the command of its pins.py,
-    # which no repository has; the command of the weekly refresh stays.
+    # which no repository has; the commands of the weekly refresh and of the
+    # overrides of npm stay.
     own = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     start = own.index("    // The blueprint's own pins.py")
     end = own.index("\n", own.index('"^python3 pins')) + 1
     bot = (project / ".github/renovate-global.json5").read_text(encoding="utf-8")
     assert bot == own[:start] + own[end:]
     assert renovate_rules(bot)["allowedCommands"] == [
-        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"
+        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$",
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$",
     ]
     # Renovate updates the Renovate of the workflow on its line "# renovate:" alone,
     # by the same rule as in the blueprint.

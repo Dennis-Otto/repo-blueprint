@@ -20,6 +20,12 @@
   // Renovate itself compiles them in the same checkout (decision 0137).
   allowedCommands: [
     "^python3 (?:\\.github/)?blueprint\\.py locks --refresh$",
+    // blueprint.py of the repository removes an override of npm that an update made
+    // needless. It runs npm only to write package-lock.json, with --package-lock-only
+    // and --ignore-scripts, so that no code of a package runs, writes no file but
+    // package.json and package-lock.json, and puts both back byte for byte whenever
+    // npm still needs the override (decision 1112).
+    "^python3 (?:\\.github/)?blueprint\\.py npm-overrides --fix$",
     // The blueprint's own pins.py writes the sha256 of a tool that Renovate moved to
     // a new release, and runs nothing that it downloads.
     "^python3 pins\\.py$",
