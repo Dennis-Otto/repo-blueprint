@@ -93,6 +93,7 @@ from blueprint.best_practices import (
 )
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
+    AFTER_THE_STEPS,
     COLLISION,
     CRON,
     EVENT_BOTS,
@@ -110,6 +111,7 @@ from blueprint.bot_health import (
     TYPE,
     Cron,
     after_pull_requests,
+    around,
     dispatch_inputs,
     own_issue,
     preview_report,
@@ -18608,6 +18610,32 @@ def test_the_bot_health_bot_watches_every_bot(
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_health_bot_tells_a_step_of_a_job_from_those_around_it(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The bot runs a job of a workflow of one try again when its time ran out outside
+    # its own steps, which it tells by their names: Set up job, Complete job, and the
+    # pre and post steps of an action of another repository. No step of such a
+    # workflow, in the blueprint or in a project made from it, takes such a name, so a
+    # time-out in one of them stays reported (decision 1118); the jobs of Findings come
+    # from the issue assistant's reusable workflow.
+    root = ROOT if project == "blueprint" else projects[project]
+    named = names_of_workflows(root)
+    assert AFTER_THE_STEPS <= ONE_TRY
+    for name in ONE_TRY & named.keys():
+        assert name in watched_by_bot_health(root), name
+        for job in (parse(named[name]).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                assert not around(str(step.get("name") or "")), (name, step)
+    health = (root / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    assert "in the set-up of the job, before a step of its own ran" in health
+    assert "from its third time in 7 days" in health
+    if project != "blueprint":
+        bot = (root / ".github/blueprint/bot_health.py").read_text(encoding="utf-8")
+        assert bot == (ROOT / "blueprint/bot_health.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
 def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     projects: dict[str, Path], project: str
 ) -> None:
@@ -29397,13 +29425,16 @@ def test_the_uv_of_the_workflows_follows_the_blueprint(
     assert enabled is (kind == "blueprint")
 
 
-# Each job ends after a few times its longest run, and each step that installs, builds
-# or downloads after five minutes: a build of the website that hung on 2026-10-12 held
-# a pull request for half an hour, until the Variants ran out of time.
+# Each job ends after a limit measured against its slowest runs, and each step that
+# installs, builds or downloads after five minutes: a build of the website that hung on
+# 2026-10-12 held a pull request for half an hour, until the Variants ran out of time.
+# check (python) against the worst of the last 30 runs on main, 485 seconds on
+# 2026-11-23, and check (github-action) against the slowest attempts of
+# Dennis-Otto/issue-assistant, 481 to 485 seconds on 2026-11-22 and 23 (decision 1132).
 JOB_LIMITS = {
     ("variants.yml", "variant"): 10,
     ("ci-python.yml", "check"): 12,
-    ("ci-github-action.yml", "check"): 8,
+    ("ci-github-action.yml", "check"): 15,
     ("ci-home-assistant.yml", "check"): 15,
 }
 WORK = re.compile(
@@ -29441,6 +29472,17 @@ def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
                 assert minutes < limit
             bounded += 1
     assert bounded
+
+
+def test_the_check_of_a_github_action_ends_after_fifteen_minutes(
+    projects: Mapping[str, Path],
+) -> None:
+    # A slow runner needed 481 to 485 seconds for every step of the check of
+    # Dennis-Otto/issue-assistant, and its limit of 8 minutes cancelled a check that
+    # had passed (decision 1132). A repository's ci.yml is the blueprint's, rendered.
+    jobs = parse(workflows(projects["github-action"])["ci.yml"])["jobs"]
+    assert jobs["check"]["name"] == "check (github-action)"
+    assert jobs["check"]["timeout-minutes"] == 15
 
 
 @pytest.mark.parametrize(

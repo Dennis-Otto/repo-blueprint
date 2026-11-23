@@ -35,8 +35,9 @@ jobs:
   check:
     name: check (python)
     runs-on: ubuntu-24.04
-    # A few times its longest run, so that a run that hangs ends early; a step that
-    # installs, builds or downloads ends after five minutes.
+    # Measured against the worst of the last 30 runs on main of the blueprint, 485
+    # seconds on 2026-11-23 (decision 1132), so that a run that hangs ends early; a
+    # step that installs, builds or downloads ends after five minutes.
     timeout-minutes: 12
     steps:
       - name: Record the network traffic of the job
