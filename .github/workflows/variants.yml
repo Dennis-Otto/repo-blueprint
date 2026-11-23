@@ -646,7 +646,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/blueprint.py settings actions
-      # The markdownlint-cli2 of the action of the Lint workflow, in its image.
+      # The image of markdownlint-cli2 of the check lint, by its tag and digest.
       - name: Lint the Markdown of the project
         timeout-minutes: 5
         run: |

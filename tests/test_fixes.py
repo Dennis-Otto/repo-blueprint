@@ -4399,15 +4399,15 @@ def test_the_markdown_fixes_itself_on_the_head_of_the_pull_request() -> None:
     )
     fix = step_in(lint, "Fix what markdownlint can fix")
     assert fix["continue-on-error"] is True
-    assert fix["with"]["fix"] is True
-    # The same action as the check, so that both have one version.
-    action = [
-        step["uses"]
-        for step in steps
-        if step.get("uses", "").startswith("DavidAnson/markdownlint-cli2-action@")
-    ]
-    assert len(action) == 2
-    assert len(set(action)) == 1
+    # The same image as the check, so that both have one version, as the user of the
+    # runner, whose files the fix keeps.
+    markdown = step_in(lint, "Lint the Markdown of every document")
+    for step in (markdown, fix):
+        assert '"$MARKDOWNLINT"' in step["run"]
+        assert '--user "$(id -u):$(id -g)"' in step["run"]
+    assert '"$MARKDOWNLINT" --fix "**/*.md"' in fix["run"]
+    assert "--fix" not in markdown["run"]
+    assert lint["env"]["MARKDOWNLINT"].startswith("davidanson/markdownlint-cli2:v")
     keep_step = step_in(lint, "Keep the fixes for the fix bot")
     assert keep_step["with"]["name"] == "fixes-lint"
     assert steps.index(head) < steps.index(fix) < steps.index(keep_step)
