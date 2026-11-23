@@ -839,7 +839,6 @@ def earlier_time_outs(
     later: list[Run] = []
     reached = run.created
     why = ""
-    failing = False
     for page in range(1, MOST_PAGES + 1):
         try:
             listed = api.get(
@@ -849,7 +848,8 @@ def earlier_time_outs(
                 f"&exclude_pull_requests=true&per_page={github.PAGE}&page={page}"
             )
         except GitHubError:
-            why, failing = "as GitHub kept failing", True
+            # The runs of the pages before are looked at all the same.
+            why = "as GitHub kept failing"
             break
         items = [Run.of(item) for item in (listed or {}).get("workflow_runs", [])]
         later += [
@@ -860,12 +860,16 @@ def earlier_time_outs(
         if len(items) < github.PAGE:
             break
         reached = items[-1].created
+        if seconds() - start >= LOOK_BACK_TIME:
+            # The list took the time, and the look below stops at its first run.
+            why = f"as its time of {LOOK_BACK_TIME} seconds was up"
+            break
         if page == MOST_PAGES:
             why = f"as it reads {MOST_PAGES * github.PAGE:,} runs at most"
     found: dict[str, list[tuple[Run, str]]] = {}
     last = run.created
     places = places_of(run)
-    for earlier in [] if failing else later:
+    for earlier in later:
         if seconds() - start >= LOOK_BACK_TIME:
             reached, why = last, f"as its time of {LOOK_BACK_TIME} seconds was up"
             break
@@ -1060,8 +1064,11 @@ def look_at(
     can, outside = second_try_can_pass(api, repo, run)
     if can:
         if second_try:
-            # Before it runs a job again that ran out of its time outside its steps,
-            # the bot counts the earlier times: from the third, it reports it as well.
+            # The second try comes first, so that a slow look back can't keep it from
+            # the job of the bot. Then, of a job that ran out of its time outside its
+            # steps, the bot counts the earlier times: from the third, it reports it
+            # as well.
+            tried = run_again(api, repo, run)
             earlier, short = (
                 earlier_time_outs(
                     api, repo, run, {base_name(item.job) for item in outside}
@@ -1072,7 +1079,6 @@ def look_at(
             third = third_time(run, outside, earlier)
             if short:
                 note = f"; {short}"
-            tried = run_again(api, repo, run)
             if tried is not None:
                 what = (
                     "runs the failed jobs once more"

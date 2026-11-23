@@ -1649,6 +1649,82 @@ def test_the_look_back_reads_a_limited_number_of_pages(github: FakeGitHub) -> No
     assert sum("&page=" in path for _, path in github.calls) == MOST_PAGES
 
 
+def fillers(count: int) -> list[dict[str, Any]]:
+    """Runs of Findings at their first attempt, which say nothing, every minute."""
+    return [
+        run_of(
+            1000 + number,
+            name="Findings",
+            path=FINDINGS,
+            conclusion="success",
+            created=NOW - timedelta(hours=3, minutes=number + 1),
+        )
+        for number in range(count)
+    ]
+
+
+def test_the_look_back_counts_the_runs_it_listed_before_github_kept_failing(
+    github: FakeGitHub,
+) -> None:
+    # A full first page that ends with two earlier time-outs, and a second page that
+    # GitHub keeps failing.
+    github.workflow_runs[1] = fillers(98)
+    earlier_time_out(github, 2, ACCEPT, 1)
+    earlier_time_out(github, 3, ACCEPT, 2)
+    timed_out_run(github, 3000, ACCEPT, SET_UP_CANCELLED)
+    since = stamp(NOW - timedelta(days=7, hours=3))
+    github.fail[
+        (
+            "GET",
+            f"repos/{REPO}/actions/workflows/1/runs?branch=main&created=%3E%3D{since}"
+            "&exclude_pull_requests=true&per_page=100&page=2",
+        )
+    ] = 502
+
+    result = watch_run(api_of(github), REPO, 3000, NOW)
+
+    assert result.endswith(
+        ": runs the failed jobs once more, and fails: opened #1; the runs before "
+        "reached back only to 2026-10-11 09:00 UTC, as GitHub kept failing."
+    )
+    assert github.reruns == [3000]
+    assert github.state_of(1)["third"] is True
+
+
+def test_the_look_back_stops_when_its_list_of_runs_took_its_time(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github.workflow_runs[1] = fillers(98)
+    earlier_time_out(github, 2, ACCEPT, 1)
+    earlier_time_out(github, 3, ACCEPT, 2)
+    timed_out_run(github, 3000, ACCEPT, SET_UP_CANCELLED)
+    clock = iter([0.0, float(LOOK_BACK_TIME), float(LOOK_BACK_TIME)])
+    monkeypatch.setattr(bot_health, "seconds", lambda: next(clock))
+
+    result = watch_run(api_of(github), REPO, 3000, NOW)
+
+    assert result.endswith(
+        ": runs the failed jobs once more; the runs before reached back only to "
+        f"2026-10-13 09:00 UTC, as its time of {LOOK_BACK_TIME} seconds was up."
+    )
+    assert sum("&page=" in path for _, path in github.calls) == 1
+    assert github.reruns == [3000]
+    assert github.issues == {}
+
+
+def test_the_second_try_comes_before_the_look_back(github: FakeGitHub) -> None:
+    earlier_time_out(github, 2, ACCEPT, 1)
+    timed_out_run(github, 4, ACCEPT, SET_UP_CANCELLED)
+
+    watch_run(api_of(github), REPO, 4, NOW)
+
+    rerun = github.calls.index(
+        ("POST", f"repos/{REPO}/actions/runs/4/rerun-failed-jobs")
+    )
+    listing = next(i for i, (_, path) in enumerate(github.calls) if "&page=" in path)
+    assert rerun < listing
+
+
 @pytest.mark.parametrize("name", sorted(EVENT_BOTS | OWN_ISSUE))
 @pytest.mark.parametrize(
     ("event", "head"),
