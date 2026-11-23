@@ -25944,6 +25944,17 @@ OLDEST_PHPUNIT = (
 )
 
 
+def phpunit_in(tmp_path: Path, text: str) -> Path:
+    """A workspace whose vendor/bin/phpunit runs text, executable on Linux too, as
+    Composer installs it; returns the workspace."""
+    workspace = tmp_path / "workspace"
+    phpunit = workspace / "vendor/bin/phpunit"
+    phpunit.parent.mkdir(parents=True)
+    phpunit.write_text(text, encoding="utf-8", newline="\n")
+    phpunit.chmod(0o755)
+    return workspace
+
+
 def resolve_for_the_oldest_php(
     tmp_path: Path, updates: str
 ) -> workflow_steps.StepResult:
@@ -25959,7 +25970,8 @@ def resolve_for_the_oldest_php(
             "composer": OLDEST_COMPOSER,
             "sleep": recording("sleep"),
         },
-        files={"composer.json": OLDEST_MANIFEST, "vendor/bin/phpunit": OLDEST_PHPUNIT},
+        files={"composer.json": OLDEST_MANIFEST},
+        workspace=phpunit_in(tmp_path, OLDEST_PHPUNIT),
     )
 
 
@@ -26090,10 +26102,8 @@ def test_a_failed_test_on_another_php_is_an_annotation(
         job_id,
         "Run the tests",
         stubs={"python3": recording("python3")},
-        files={
-            "vendor/bin/phpunit": "#!/usr/bin/env bash\nexit 2\n",
-            ".github/blueprint.py": "",
-        },
+        files={".github/blueprint.py": ""},
+        workspace=phpunit_in(tmp_path, "#!/usr/bin/env bash\nexit 2\n"),
     )
 
     assert done.returncode == 1
