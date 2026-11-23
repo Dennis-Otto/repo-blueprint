@@ -7,6 +7,31 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.25.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.25.0...v1.25.1) (2026-11-23)
+
+
+### Bug fixes
+
+* a failure outside the code opens no issue of flaky tests ([#1096](https://github.com/Dennis-Otto/repo-blueprint/issues/1096)) ([4e81da9](https://github.com/Dennis-Otto/repo-blueprint/commit/4e81da953fccebf40bea0212c2025cd34b028531))
+* a website is published only with its provenance, and a failed publication runs once more ([#1115](https://github.com/Dennis-Otto/repo-blueprint/issues/1115)) ([b588d0a](https://github.com/Dennis-Otto/repo-blueprint/commit/b588d0aed2846d9b99777c80412441dd8b9f1792))
+* an update of Renovate that makes an npm override needless removes it ([#1114](https://github.com/Dennis-Otto/repo-blueprint/issues/1114)) ([3b0edb1](https://github.com/Dennis-Otto/repo-blueprint/commit/3b0edb1cbeaa288d5a1febc02cf9409ae5d93b8a))
+* **deps:** lock file maintenance ([#1123](https://github.com/Dennis-Otto/repo-blueprint/issues/1123)) ([4e7a68d](https://github.com/Dennis-Otto/repo-blueprint/commit/4e7a68d19e3cc2639487248db199ba39b6927c58))
+* **deps:** update dependency @biomejs/biome to v2.6.8 ([#1101](https://github.com/Dennis-Otto/repo-blueprint/issues/1101)) ([39a6501](https://github.com/Dennis-Otto/repo-blueprint/commit/39a6501e31bbf99fb74a0b7c0cf2f20b21b9cab0))
+* **deps:** update dependency cspell to v10.5.1 ([#1108](https://github.com/Dennis-Otto/repo-blueprint/issues/1108)) ([8c2f4d1](https://github.com/Dennis-Otto/repo-blueprint/commit/8c2f4d114d9ba6142a52e390b6230b3116a3bfd6))
+* **deps:** update dependency infection/infection to v0.35.11 ([#1102](https://github.com/Dennis-Otto/repo-blueprint/issues/1102)) ([ddd5c12](https://github.com/Dennis-Otto/repo-blueprint/commit/ddd5c1298d7655ae810c0f90ebb543a1eb5b9f22))
+* **deps:** update dependency nextcloud/server to v35.0.3 ([#1103](https://github.com/Dennis-Otto/repo-blueprint/issues/1103)) ([700f7da](https://github.com/Dennis-Otto/repo-blueprint/commit/700f7dafeca8c8ef5ce5d514dbb081bf06419f11))
+* **deps:** update dependency playwright-core to v1.65.1 ([#1104](https://github.com/Dennis-Otto/repo-blueprint/issues/1104)) ([a1dfb8f](https://github.com/Dennis-Otto/repo-blueprint/commit/a1dfb8f9e3e63376dd546c84d5979da277603dd1))
+* **deps:** update dependency uv to v0.13.8 ([#1105](https://github.com/Dennis-Otto/repo-blueprint/issues/1105)) ([c9165c0](https://github.com/Dennis-Otto/repo-blueprint/commit/c9165c013932b5fff45f4c239de64aec857225c2))
+* **deps:** update ghcr.io/renovatebot/renovate docker tag to v44.257.9 ([#1121](https://github.com/Dennis-Otto/repo-blueprint/issues/1121)) ([6765ea1](https://github.com/Dennis-Otto/repo-blueprint/commit/6765ea1cd9b419e9d42cdb467b822f24e7a8a746))
+* **deps:** update ghcr.io/renovatebot/renovate docker tag to v44.258.0 ([#1131](https://github.com/Dennis-Otto/repo-blueprint/issues/1131)) ([402821b](https://github.com/Dennis-Otto/repo-blueprint/commit/402821bfca93a1cfb40a944ba5ceda14dd041aec))
+* **deps:** update google/osv-scanner-action action to v2.7.1 ([#1106](https://github.com/Dennis-Otto/repo-blueprint/issues/1106)) ([912bd06](https://github.com/Dennis-Otto/repo-blueprint/commit/912bd0623c93d441c796fd0084dfbddbdcc2d92c))
+* **deps:** update renovatebot/github-action action to v46.3.14 ([#1120](https://github.com/Dennis-Otto/repo-blueprint/issues/1120)) ([9aa3cb3](https://github.com/Dennis-Otto/repo-blueprint/commit/9aa3cb365f75a76464203c48ba859454a1a2f810))
+* **deps:** update the digests of the images ([#1099](https://github.com/Dennis-Otto/repo-blueprint/issues/1099)) ([475dc1e](https://github.com/Dennis-Otto/repo-blueprint/commit/475dc1eee0296ee2c0bb4861c732481ff2ee9ad8))
+* **deps:** update the issue assistant to v1.15.3 ([#1097](https://github.com/Dennis-Otto/repo-blueprint/issues/1097)) ([105c8af](https://github.com/Dennis-Otto/repo-blueprint/commit/105c8afacacac5299b3ea0851f97e3bd2d174290))
+* **deps:** update the tools of the cloudflare workers ([#1107](https://github.com/Dennis-Otto/repo-blueprint/issues/1107)) ([c9e1aeb](https://github.com/Dennis-Otto/repo-blueprint/commit/c9e1aeb9473204a3a5f8d6fbc3ab2ae8b79af251))
+* the answer on direct dependencies names the files that list them, and the checks take a Python with its standard library ([#1113](https://github.com/Dennis-Otto/repo-blueprint/issues/1113)) ([8e0f1db](https://github.com/Dennis-Otto/repo-blueprint/commit/8e0f1dbd239f8cc2b5061bbf7b437ebd7d333170))
+* the answers of bestpractices.dev say which commits carry a sign-off and claim no test suite in generic ([#1093](https://github.com/Dennis-Otto/repo-blueprint/issues/1093)) ([0584b50](https://github.com/Dennis-Otto/repo-blueprint/commit/0584b50ea030bafdfbad4bd2cd692a4abfd89aa6))
+
 ## [1.25.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.24.0...v1.25.0) (2026-11-22)
 
 ### Features
