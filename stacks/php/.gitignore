@@ -1,0 +1,5 @@
+# Renovate's update of Composer installs the packages here in its checkout and leaves
+# them for the next branch when it has nothing to commit. A post-upgrade task commits
+# every file that git shows as new and that no .gitignore names (decision 1112), such
+# as the package.json of a package of Composer.
+/vendor/
