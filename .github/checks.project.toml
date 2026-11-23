@@ -27,11 +27,10 @@ canary still answers `sample_code: true`.
 `tests/test_pins.py` fails when a pinned download of the workflows or of
 `.github/sign-tag.sh` has a version or a sha256 other than `.github/pins.toml`, as after
 a version moved by hand, or by Renovate when the download of its post-upgrade task
-failed. It also fails when the Lint workflow pins
-`DavidAnson/markdownlint-cli2-action` at another commit than its bundle in
-`.github/pins.toml`, or when `scripts/markdownlint.sh` or the Variants workflow runs
-the image `davidanson/markdownlint-cli2` at another version than the action runs, so
-that `scripts/check.sh` and the check *lint* would lint the Markdown differently."""
+failed. It also fails when the Lint workflow, `scripts/markdownlint.sh` or the
+Variants workflow runs the image `davidanson/markdownlint-cli2` at another tag or
+digest than the other two, so that `scripts/check.sh` and the check *lint* would lint
+the Markdown differently."""
 why = """Every line and branch under test means that every change of behavior shows in a
 test, so that a bug can't come back unnoticed. The reference pages say what their sources
 say only while they are written anew with each change of them, and a download is safe
@@ -46,12 +45,10 @@ canary, which the fix bot can't, as it adds no such file to a pull request. A ca
 kind changed gets its new kind in the registry and `python3 reference.py`; one that still
 answers `sample_code: true` answers no as `docs/faq.md` describes. `python3
 pins.py` downloads each version that moved and writes its sha256 beside it and into
-`.github/pins.toml`, and reads the version of markdownlint-cli2 that the action runs
-at its new commit; the fix bot runs it too, but commits no change of
-`.github/workflows/`, which a person commits. An image of markdownlint-cli2 at another
-version than the action comes with the action, in the group *markdownlint-cli2* of
-Renovate: wait for it in the same pull request, or give the image the tag and the
-digest of that version. `coverage run -m
+`.github/pins.toml`; the fix bot runs it too, but commits no change of
+`.github/workflows/`, which a person commits. Give the image of markdownlint-cli2 the
+same tag and digest in all three; Renovate moves them together in the pull request of
+its group *markdownlint-cli2*. `coverage run -m
 pytest` runs the tests one after another;
 `python -m pytest -n logical --maxprocesses=8 --cov` runs them in parallel as CI does,
 where pytest-xdist and pytest-cov are installed:"""

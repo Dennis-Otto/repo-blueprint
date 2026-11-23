@@ -125,20 +125,6 @@
       },
     },
     {
-      // The version of markdownlint-cli2 that the action of the check lint runs at
-      // its new commit, which pins.py reads from its package.json into
-      // .github/pins.toml; tests/test_pins.py fails while the image runs another.
-      // It names the image too, as Renovate takes the tasks of the branch of the
-      // group from its first update, whichever of the two that is; when only the
-      // image moved, pins.py writes nothing new.
-      matchDepNames: ["DavidAnson/markdownlint-cli2-action", "davidanson/markdownlint-cli2"],
-      postUpgradeTasks: {
-        commands: ["python3 pins.py"],
-        fileFilters: [".github/pins.toml"],
-        executionMode: "branch",
-      },
-    },
-    {
       matchFileNames: ["requirements-dev.txt"],
       semanticCommitType: "chore",
       groupName: "the tools of the blueprint's tests",

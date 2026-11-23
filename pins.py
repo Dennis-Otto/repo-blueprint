@@ -28,12 +28,6 @@ test of a Nextcloud app reads the one of its CI, takes the name from the pin and
 builds it from the version itself. A new name of a release then is one change of the
 address in the record, and python3 pins.py writes it into every file.
 
-The record also keeps the version of the package of npm that an action runs, such as
-markdownlint-cli2 of DavidAnson/markdownlint-cli2-action, from the package.json of the
-action at the commit that the workflows pin, and the image of that package, which the
-scripts and the workflows run: pins.py reads the version anew once Renovate moved the
-commit, and --check names each image that runs another version than the action, so
-that the check lint and scripts/check.sh can't come to disagree on a rule.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -72,15 +66,6 @@ PIN = re.compile(
     re.MULTILINE,
 )
 SHA256 = re.compile(r"[0-9a-f]{64}")
-COMMIT = re.compile(r"[0-9a-f]{40}")
-# The version of a package that an action runs, exact, as the action bundles it.
-EXACT = re.compile(r"\d+\.\d+\.\d+(?:-[\w.]+)?")
-# An action that a workflow pins to a commit.
-USES = re.compile(r"uses: (?P<dep>[\w.-]+/[\w.-]+)@(?P<commit>[0-9a-f]{40})\b")
-# The files that run an image by tag and digest, as Renovate's custom manager finds it.
-IMAGE_FILES = (".github/*.sh", ".github/workflows/*.yml", "scripts/*.sh")
-# The package.json of an action at a commit, from which pins.py reads its version.
-PACKAGE_JSON = "https://raw.githubusercontent.com/{dep}/{commit}/package.json"
 # The address of an asset of a release on GitHub, and the release of its tag, which
 # lists the names of its assets.
 RELEASE_ASSET = re.compile(
@@ -95,10 +80,6 @@ HEADER = """\
 # that the files pin. Renovate moves a version, and python3 pins.py then writes the
 # sha256 of the new release beside it and here. pins.py keeps this file; add a new
 # download by hand.
-# Each bundle is an action that the workflows pin to a commit and the package of npm
-# that it runs, with the version that its package.json names at that commit, which
-# python3 pins.py reads anew once Renovate moved the commit; the image of the package
-# that the scripts and the workflows run must have the same version.
 # https://github.com/Dennis-Otto/repo-blueprint
 """
 # Each download tries three times, 10 and 20 seconds apart, as the workflows do.
@@ -130,35 +111,6 @@ class Download:
 
 
 @dataclass(frozen=True)
-class Bundle:
-    """An action pinned to a commit, the package of npm that it runs there with its
-    version, and the image of that package, which must run the same version."""
-
-    commit: str
-    package: str
-    version: str
-    image: str
-
-
-@dataclass(frozen=True)
-class Use:
-    """An action that a workflow pins to a commit."""
-
-    path: str
-    dep: str
-    commit: str
-
-
-@dataclass(frozen=True)
-class Image:
-    """An image that a script or a workflow runs, by its tag without a v."""
-
-    path: str
-    name: str
-    version: str
-
-
-@dataclass(frozen=True)
 class Pin:
     """A download that a file pins, where its sha256 is in the file, and the name of
     its file with where that is, when the pin names it."""
@@ -178,15 +130,10 @@ def read_record(root: Path) -> dict[str, Any]:
     data: dict[str, Any] = tomllib.loads((root / RECORD).read_bytes().decode("utf-8"))
     if (
         "download" not in data
-        or set(data) - {"download", "bundle"}
+        or set(data) - {"download"}
         or not all(isinstance(table, dict) for table in data.values())
     ):
-        raise PinError(
-            [
-                f'{RECORD} has only tables [download."OWNER/NAME"] and '
-                '[bundle."OWNER/ACTION"]'
-            ]
-        )
+        raise PinError([f'{RECORD} has only tables [download."OWNER/NAME"]'])
     return data
 
 
@@ -213,33 +160,7 @@ def load_record(root: Path) -> dict[str, Download]:
     return record
 
 
-def load_bundles(root: Path) -> dict[str, Bundle]:
-    """The bundles of .github/pins.toml, by the name of the action."""
-    bundles = {}
-    for dep, entry in read_record(root).get("bundle", {}).items():
-        if not (
-            isinstance(entry, dict)
-            and set(entry) == {"commit", "package", "version", "image"}
-            and all(isinstance(value, str) and value for value in entry.values())
-            and COMMIT.fullmatch(entry["commit"])
-            and EXACT.fullmatch(entry["version"])
-        ):
-            raise PinError(
-                [
-                    f"{RECORD}: {dep} needs a commit of 40 hex digits, the package "
-                    "that it runs, its exact version and the image of that package, "
-                    "and nothing else"
-                ]
-            )
-        bundles[dep] = Bundle(
-            entry["commit"], entry["package"], entry["version"], entry["image"]
-        )
-    return bundles
-
-
-def render_record(
-    record: dict[str, Download], bundles: dict[str, Bundle] | None = None
-) -> str:
+def render_record(record: dict[str, Download]) -> str:
     """The text of .github/pins.toml."""
     tables = [
         f"\n[download.{json.dumps(dep)}]\n"
@@ -247,14 +168,6 @@ def render_record(
         f"version = {json.dumps(download.version)}\n"
         f"sha256 = {json.dumps(download.sha256)}\n"
         for dep, download in record.items()
-    ]
-    tables += [
-        f"\n[bundle.{json.dumps(dep)}]\n"
-        f"commit = {json.dumps(bundle.commit)}\n"
-        f"package = {json.dumps(bundle.package)}\n"
-        f"version = {json.dumps(bundle.version)}\n"
-        f"image = {json.dumps(bundle.image)}\n"
-        for dep, bundle in (bundles or {}).items()
     ]
     return HEADER + "".join(tables)
 
@@ -279,98 +192,6 @@ def find_pins(root: Path) -> list[Pin]:
                     )
                 )
     return pins
-
-
-def find_uses(root: Path, deps: set[str]) -> list[Use]:
-    """Every commit to which the workflows pin one of the actions, file by file."""
-    uses = []
-    for path in sorted(root.glob(".github/workflows/*.yml")):
-        text = path.read_bytes().decode("utf-8")
-        for found in USES.finditer(text):
-            if found["dep"] in deps:
-                uses.append(
-                    Use(
-                        path.relative_to(root).as_posix(), found["dep"], found["commit"]
-                    )
-                )
-    return uses
-
-
-def find_images(root: Path, names: set[str]) -> list[Image]:
-    """Every tag of one of the images that the scripts and the workflows run."""
-    images = []
-    for pattern in IMAGE_FILES:
-        for path in sorted(root.glob(pattern)):
-            text = path.read_bytes().decode("utf-8")
-            for name in sorted(names):
-                tag = re.compile(
-                    rf"(?<![\w./-]){re.escape(name)}:v?(?P<version>[^@\s\"']+)"
-                    r"@sha256:[0-9a-f]{64}"
-                )
-                images += [
-                    Image(path.relative_to(root).as_posix(), name, found["version"])
-                    for found in tag.finditer(text)
-                ]
-    return images
-
-
-def commits(uses: Sequence[Use]) -> dict[str, list[str]]:
-    """The commits to which the workflows pin each action, in the order of the files."""
-    pinned: dict[str, list[str]] = {}
-    for use in uses:
-        if use.commit not in pinned.setdefault(use.dep, []):
-            pinned[use.dep].append(use.commit)
-    return pinned
-
-
-def bundle_mismatches(bundles: dict[str, Bundle], uses: Sequence[Use]) -> list[str]:
-    """What a bundle needs before pins.py can read the version of its package."""
-    pinned = commits(uses)
-    problems = []
-    for dep in bundles:
-        found = pinned.get(dep, [])
-        if not found:
-            problems.append(f"{RECORD}: no workflow pins the action {dep}; remove it")
-        elif len(found) > 1:
-            problems.append(
-                f"The workflows pin {dep} at {' and '.join(found)}: give each the "
-                "same commit"
-            )
-    return problems
-
-
-def bundle_problems(root: Path, bundles: dict[str, Bundle]) -> list[str]:
-    """Each action whose commit moved, and each image that runs another version of
-    its package than the action, without a download."""
-    uses = find_uses(root, set(bundles))
-    problems = bundle_mismatches(bundles, uses)
-    pinned = commits(uses)
-    images = find_images(root, {bundle.image for bundle in bundles.values()})
-    for dep, bundle in bundles.items():
-        if len(pinned.get(dep, [])) != 1:
-            continue
-        if pinned[dep][0] != bundle.commit:
-            problems.append(
-                f"{RECORD}: the workflows pin {dep} at {pinned[dep][0]}, the record "
-                f"at {bundle.commit}; python3 pins.py reads the version of "
-                f"{bundle.package} that it runs"
-            )
-            continue
-        runs = [image for image in images if image.name == bundle.image]
-        if not runs:
-            problems.append(
-                f"{RECORD}: no script or workflow runs the image {bundle.image} of "
-                f"{dep}; remove it"
-            )
-        problems += [
-            f"{image.path}: the image {bundle.image} runs {bundle.package} "
-            f"{image.version}, the action {dep} {bundle.version}: give the image the "
-            f"tag of {bundle.version} and its digest, which Renovate brings in the "
-            "pull request that moves the action"
-            for image in runs
-            if image.version != bundle.version
-        ]
-    return problems
 
 
 def versions(pins: Sequence[Pin]) -> dict[str, list[str]]:
@@ -428,7 +249,7 @@ def check(root: Path) -> list[str]:
                 f"{download.asset(pin.version)} by its address in {RECORD}, not "
                 f"{pin.asset}; python3 pins.py writes the right one"
             )
-    return problems + bundle_problems(root, load_bundles(root))
+    return problems
 
 
 def get[T](
@@ -480,17 +301,6 @@ def read(
     return data.decode("utf-8", errors="replace")
 
 
-def bundled(url: str, package: str, read: Fetch) -> str:
-    """The exact version of package among the dependencies of the package.json at url."""
-    try:
-        version = json.loads(read(url))["dependencies"][package]
-    except (ValueError, KeyError, TypeError):
-        version = None
-    if not (isinstance(version, str) and EXACT.fullmatch(version)):
-        raise PinError([f"{url} names no exact version of {package} that it runs"])
-    return version
-
-
 def renamed(dep: str, url: str, read: Fetch) -> list[str]:
     """For an asset of a release on GitHub that could not be downloaded, the names of
     the assets that the release has, when its own is not among them: a release may
@@ -516,13 +326,10 @@ def renamed(dep: str, url: str, read: Fetch) -> list[str]:
 
 
 def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]:
-    """Write the sha256 of each version that moved, and the version of the package of
-    each action whose commit moved; what it wrote, a line each."""
+    """Write the sha256 of each version that moved; what it wrote, a line each."""
     record = load_record(root)
-    bundles = load_bundles(root)
     pins = find_pins(root)
-    uses = find_uses(root, set(bundles))
-    problems = mismatches(record, pins) + bundle_mismatches(bundles, uses)
+    problems = mismatches(record, pins)
     if problems:
         raise PinError(problems)
     done = []
@@ -558,21 +365,12 @@ def update(root: Path, fetch: Fetch = download, read: Fetch = read) -> list[str]
         for start, end, new in sorted(changes, reverse=True):
             text = text[:start] + new + text[end:]
         texts[path] = text
-    pinned = commits(uses)
-    for dep, bundle in bundles.items():
-        commit = pinned[dep][0]
-        if commit != bundle.commit:
-            url = PACKAGE_JSON.format(dep=dep, commit=commit)
-            version = bundled(url, bundle.package, read)
-            bundles[dep] = replace(bundle, commit=commit, version=version)
-            done.append(f"{dep} {commit}: {bundle.package} {version}")
     for path, text in texts.items():
         (root / path).write_bytes(text.encode("utf-8"))
-    text = render_record(record, bundles)
+    text = render_record(record)
     if (root / RECORD).read_bytes().decode("utf-8") != text:
         (root / RECORD).write_bytes(text.encode("utf-8"))
-        actions = f" and {len(bundles)} actions" if bundles else ""
-        done.append(f"{RECORD}: {len(record)} downloads{actions}")
+        done.append(f"{RECORD}: {len(record)} downloads")
     return done
 
 
