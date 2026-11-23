@@ -20,10 +20,15 @@ name: After the checks
 # ran out of time after each of its steps had passed, whose runner never reported that
 # the job ended, a check that GitHub kept failing, which says so, and a job that only
 # sums up the jobs that it needs, as variants does: the one that failed has its own
-# row. The PR coach's explanation of a check is no error of the job's own. A failure
-# outside the code that comes back for the third time in 7 days, in a job of the same
-# name and the same steps, gets its row after all, as a cause that stays is a person's
-# to fix; and an issue of an older bot that holds only such failures closes. A job that
+# row. Such a job says so, or its definition in the file of the workflow at the commit
+# of the run shows it, with needs, an if with always() or !cancelled(), and a job that
+# it needs that failed or was cancelled (decision 1110). The PR coach's explanation of
+# a check is no error of the job's own. A failure outside the code that comes back for
+# the third time in 7 days, in a job of the same name and the same steps, gets its row
+# after all, as a cause that stays is a person's to fix; and an issue of an older bot
+# that holds only such failures closes. The look back over those 7 days stops, with a
+# warning, once GitHub keeps failing, and after two minutes, and counts as far as it
+# got, so that the report ends in its time. A job that
 # fails again is a real failure and stays red, and so does one that failed the same
 # way for the commit before, and one that failed in a step of scripts/check.sh that
 # can't pass without a change, such as Psalm or Files of the project, which the PR coach
@@ -45,6 +50,15 @@ name: After the checks
 # mail again, and a bot that GitHub keeps failing ends with a notice as well (decision
 # 0136). A pull request names its jobs and steps and writes its logs, so the issue
 # shows them only as code, and the branch of a fork not at all.
+#
+# The bot for stopped checks runs the failed jobs of a check once more that failed
+# outside the code in two ways: Harden-Runner couldn't block, mostly in an outage of
+# GitHub (decision 0134), or GitHub Pages or Sigstore kept Docs from publishing the
+# website of a push to the default branch, when only the jobs that publish it and ask
+# for it failed, or the job docs failed only to hand it to GitHub Pages, twice
+# (decision 1110). The website is signed before it is published, so a failure of
+# Sigstore publishes nothing; the bot-health bot starts Docs once more the next day
+# when that try failed as well.
 #
 # The start of the branch bot: a required check of a pull request that failed for good,
 # also of one from a fork, moves the line of the branch bot in update-branches.yml on to
@@ -626,6 +640,7 @@ jobs:
     permissions:
       actions: read
       checks: read
+      contents: read # the file of the workflow, which names the jobs that each job needs
       issues: write
     steps:
       - name: Block every host that the job doesn't need
@@ -733,6 +748,14 @@ jobs:
           # The workflow of the run, whose runs of the 7 days before tell a failure
           # outside the code that keeps coming back.
           WORKFLOW: ${{ github.event.workflow_run.workflow_id }}
+          # The seconds for which the look back asks about the runs of a later attempt:
+          # about 2.4 seconds for each while GitHub answers, so some 50 runs, as many
+          # as the busiest workflow of the fleet had in 7 days, within the 5 minutes
+          # of the job.
+          LOOK_BACK_TIME: "120"
+          # The file of the workflow at the commit of the run, which names the jobs
+          # that each job needs.
+          WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
           # The text before the name of each test or step in a log that pytest didn't
           # write, such as "Browser step:"; the answer test_marker of the blueprint sets it.
           MARKER: ""
@@ -813,6 +836,45 @@ jobs:
           # broke and without a log broke in its runner: a runner that is alive cancels
           # a step that hangs and uploads its log.
           #
+          # A job sums up the jobs that it needs, as variants or the gate of end-to-end
+          # tests does, when its definition in the file of the workflow at the commit
+          # of the run, found by its name, or by its key where it has none, has needs
+          # and an if with always() or !cancelled(), and a job that it needs failed or
+          # was cancelled in the same attempt: that one has its own row, or failed in
+          # no test. A name with an expression, as a matrix has, is no such name. The
+          # file is read once, with the yq and the jq of the runner, and without it
+          # the bot goes by the words of SUMS_UP alone, with a notice.
+          defined=""
+          read_definitions=""
+          definitions() {
+            local file="$RUNNER_TEMP/workflow.yml"
+            [[ -z "$read_definitions" ]] || return 0
+            read_definitions=true
+            if ! tried gh api --header "$API_VERSION_HEADER" --header "Accept: application/vnd.github.raw+json" \
+              "repos/$GH_REPO/contents/${WORKFLOW_PATH%%@*}?ref=$SHA" >"$file" ||
+              ! defined="$(yq -o=json '.jobs // {}' "$file" | jq -r '. as $jobs | to_entries[] | select(.value | type == "object" and has("needs"))
+                | .key as $key | .value as $job | ($job.needs | if type == "array" then .[] else . end | tostring) as $need
+                | [($job.name // $key | tostring), ($job.if // "" | tostring | gsub("\\s+"; " ")), ($jobs[$need].name // $need | tostring)] | @tsv')"; then
+              echo "::notice::The file of the workflow, $(plain "$WORKFLOW_PATH") at ${SHA:0:7}, couldn't be read, so a job that only sums up the jobs that it needs counts unless it says so."
+              defined=""
+            fi
+          }
+          sums_up() {
+            local job="$1" own condition need other prefix opening='$''{{' pattern='always\(\)|![[:space:]]*cancelled\(\)'
+            definitions
+            while IFS=$'\t' read -r own condition need; do
+              [[ -n "$own" && "$own" == "$job" && "$own" != *"$opening"* && "$condition" =~ $pattern ]] || continue
+              prefix="${need%%"$opening"*}"
+              while IFS= read -r other; do
+                [[ -n "$other" && "$other" != "$job" ]] || continue
+                if [[ "$other" == "$need" || "$other" == "$need ("* ]] ||
+                  [[ "$prefix" != "$need" && -n "$prefix" && "$other" == "$prefix"* ]]; then
+                  return 0
+                fi
+              done <<<"$broken"
+            done <<<"$defined"
+            return 1
+          }
           # judge sets verdict to skip, clear, stuck, outside or code, and the tests,
           # the error and where the job broke.
           judge() {
@@ -860,6 +922,9 @@ jobs:
               if ((others == 0 && exits <= said)); then
                 return 0
               fi
+            fi
+            if sums_up "$name"; then
+              return 0
             fi
             # A log that GitHub doesn't give, such as that of a job that never started,
             # leaves the row without its tests, and a warning of the run says why; so
@@ -1038,13 +1103,23 @@ jobs:
           # The jobs of the first attempts of the runs of the same workflow in the 7
           # days before the run that passed at a later attempt, once for the run: their
           # run, id, conclusion, name without the values of its matrix, and the steps
-          # that broke. 10 pages of 100 runs at most, so that the report ends in its
-          # time; back says how far they reached then.
+          # that broke. 10 pages of 100 runs at most, and the runs of a later attempt
+          # among them for LOOK_BACK_TIME seconds at most, so that the report ends in
+          # its time; it stops at once, with a warning, when GitHub keeps failing, as
+          # each call of a run would wait 70 seconds for it. back says how far they
+          # reached then, and why.
           looked=""
           earlier=""
           back=""
+          short=""
+          failing=""
+          # The warning of a look-back that GitHub kept failing, which then counts only
+          # as far as it got.
+          cut_short() {
+            echo "::warning::The runs of the 7 days before couldn't be read, so a failure outside the code counts only as far as they were: $(plain "$(head -n 1 "$RUNNER_TEMP/gh-errors")")"
+          }
           look_back() {
-            local since page found count run first
+            local since page found count run created first start=$SECONDS last="$WHEN"
             [[ -z "$looked" ]] || return 0
             looked=true
             since="$(date -u -d "@$(($(date -u -d "$WHEN" +%s) - 7 * 86400))" +%Y-%m-%dT%H:%M:%SZ)"
@@ -1053,8 +1128,9 @@ jobs:
               if ! found="$(tried gh api --header "$API_VERSION_HEADER" --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
                 -f created=">=$since" -f status=success -f per_page=100 -f page="$page" \
                 --jq "(.workflow_runs | length | tostring) + \"\t\" + (.workflow_runs[-1].created_at // \"\"),
-                  (.workflow_runs[] | select(.run_attempt > 1 and .id != $RUN and .created_at >= \"$since\") | .id | tostring)")"; then
-                echo "::warning::The runs of the 7 days before couldn't be read, so a failure outside the code counts only as far as they were: $(plain "$(head -n 1 "$RUNNER_TEMP/gh-errors")")"
+                  (.workflow_runs[] | select(.run_attempt > 1 and .id != $RUN and .created_at >= \"$since\") | (.id | tostring) + \"\t\" + .created_at)")"; then
+                cut_short
+                ! given_up || failing=true
                 break
               fi
               runs+="$(tail -n +2 <<<"$found")"$'\n'
@@ -1064,17 +1140,47 @@ jobs:
               fi
               if ((page == 10)); then
                 back="${count#*$'\t'}"
+                short="1,000 runs"
               fi
             done
-            while IFS= read -r run; do
-              [[ -n "$run" ]] || continue
-              first="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$run/attempts/1" --jq .conclusion)" || continue
+            # The runs come the newest first, so the last one read is as far back as
+            # the look reached.
+            while IFS=$'\t' read -r run created; do
+              [[ -n "$run" && -z "$failing" ]] || continue
+              if ((SECONDS - start >= LOOK_BACK_TIME)); then
+                back="$last"
+                short="as its time of $LOOK_BACK_TIME seconds was up"
+                break
+              fi
+              if ! first="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$run/attempts/1" --jq .conclusion)"; then
+                if given_up; then
+                  cut_short
+                  failing=true
+                  back="$last"
+                  short="as GitHub kept failing"
+                  break
+                fi
+                continue
+              fi
               # Today's exception: a first attempt that a newer run cancelled failed
               # in no test.
-              [[ "$first" != cancelled ]] || continue
-              found="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$run/attempts/1/jobs" --paginate \
+              if [[ "$first" == cancelled ]]; then
+                last="$created"
+                continue
+              fi
+              if ! found="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$run/attempts/1/jobs" --paginate \
                 --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled")
-                  | [.id, .conclusion, (.name | split(" (")[0]), ([.steps[]? | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | sort | join(", "))] | @tsv')" || continue
+                  | [.id, .conclusion, (.name | split(" (")[0]), ([.steps[]? | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | sort | join(", "))] | @tsv')"; then
+                if given_up; then
+                  cut_short
+                  failing=true
+                  back="$last"
+                  short="as GitHub kept failing"
+                  break
+                fi
+                continue
+              fi
+              last="$created"
               while IFS= read -r job; do
                 [[ -z "$job" ]] || earlier+="$run"$'\t'"$job"$'\n'
               done <<<"$found"
@@ -1091,8 +1197,17 @@ jobs:
             while IFS=$'\t' read -r run job end name steps; do
               [[ -n "$run" && "$name" == "$key" && "$steps" == "$broke" && "$seen" != *" $run "* ]] || continue
               if [[ "$end" == cancelled ]]; then
-                texts="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$job/annotations" --paginate \
-                  --jq '.[] | select(.annotation_level == "failure") | .message')" || continue
+                # After GitHub kept failing, the bot asks about no more runs.
+                [[ -z "$failing" ]] || break
+                if ! texts="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$job/annotations" --paginate \
+                  --jq '.[] | select(.annotation_level == "failure") | .message')"; then
+                  if given_up; then
+                    cut_short
+                    failing=true
+                    break
+                  fi
+                  continue
+                fi
                 grep -qF "$TIMED" <<<"$texts" || continue
                 ! grep -q "higher priority waiting request" <<<"$texts" || continue
               fi
@@ -1108,6 +1223,9 @@ jobs:
             ([.steps[]? | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | sort | join(", "))] | @tsv'
           jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
             --jq ".jobs[] | select(.conclusion == \"failure\" or .conclusion == \"cancelled\") | $fields")"
+          # The names of the jobs that failed or were cancelled in the attempt, for a
+          # job that only sums them up.
+          broken="$(awk -F '\t' '{ print $5 }' <<<"$jobs")"
           rows=""
           # Each job with each of its tests, one to a line, for the count in the issue.
           counted=""
@@ -1168,7 +1286,7 @@ jobs:
               echo "These jobs failed at first outside the code, in an action of another repository, a post step, the set-up of the job or the runner, and passed when they ran again. No test failed, and the issue of flaky tests leaves them out until such a failure comes back for the third time in 7 days."
               if [[ -n "$back" ]]; then
                 echo
-                echo "The runs before reached back only to $back, 1,000 runs."
+                echo "The runs before reached back only to $back, $short."
               fi
               echo
               echo "| Job | Step | Where it broke | Error |"
@@ -1912,10 +2030,14 @@ jobs:
           echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   stopped:
-    name: run the checks again that Harden-Runner stopped
-    # A job that blocks stops when Harden-Runner can't block, mostly in an outage of
-    # GitHub, and the failed jobs of its run get one more try (decision 0134). The job
-    # rerun does so for the tests, and the release has a bot of its own.
+    name: run the checks again that failed outside the code
+    # Two kinds of failure outside the code get one more try of the failed jobs of
+    # their run. A job that blocks stops when Harden-Runner can't block, mostly in an
+    # outage of GitHub (decision 0134). And the website of a push to the default
+    # branch wasn't published, as GitHub Pages or Sigstore failed, when only the jobs
+    # that publish it and ask for it failed, or the job docs failed only to hand it
+    # to GitHub Pages, twice (decision 1110). The job rerun does so for the tests, and
+    # the release has a bot of its own.
     if: >-
       !github.event.repository.fork &&
       contains(fromJSON('["CodeQL", "Docs", "Lint", "Pull request title", "Quick checks", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
@@ -2027,7 +2149,7 @@ jobs:
               sleep 3
             done
           done
-      - name: Run the jobs again that Harden-Runner stopped
+      - name: Run the jobs again that failed outside the code
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -2036,22 +2158,47 @@ jobs:
           EVENT: ${{ github.event.workflow_run.event }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           eval "$OUTAGE"
+          rule=""
+          # The website of a push to the default branch that GitHub Pages or Sigstore
+          # kept from being published: each job that failed publishes it or asks for
+          # it, or is docs, whose only steps that failed handed the website to GitHub
+          # Pages, the second time too. Any other failure of Docs, such as a broken
+          # link, is one of the change, and a run of a pull request publishes nothing.
+          if [[ "$NAME" == Docs && "$EVENT" == push && "$BRANCH" == "$DEFAULT_BRANCH" ]]; then
+            failed="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "failure") | [.name, ([.steps[]? | select(.conclusion == "failure") | .name] | join("|"))] | @tsv')"
+            [[ -z "$failed" ]] || rule=published
+            while IFS=$'\t' read -r job steps; do
+              case "$job" in
+                "publish the website" | "ask the published website") ;;
+                docs)
+                  case "$steps" in
+                    "Hand the website to GitHub Pages once more" | "Hand the website to GitHub Pages|Hand the website to GitHub Pages once more") ;;
+                    *) rule="" ;;
+                  esac
+                  ;;
+                *) rule="" ;;
+              esac
+            done <<<"$failed"
+          fi
           # A job that the step "Make sure that Harden-Runner blocks" stopped says so in
           # an annotation; any other failure is one of the change.
-          jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
-            --jq '.jobs[] | select(.conclusion == "failure") | .id')"
-          stopped=false
-          for job in $jobs; do
-            messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$job/annotations" --paginate --jq '.[].message')"
-            if grep -qF "would reach every host, and it stops here instead" <<<"$messages"; then
-              stopped=true
-              break
-            fi
-          done
-          if [[ "$stopped" != true ]]; then
-            echo "No job of $NAME stopped because Harden-Runner didn't block; it stays failed." >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$rule" ]]; then
+            jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "failure") | .id')"
+            for job in $jobs; do
+              messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$job/annotations" --paginate --jq '.[].message')"
+              if grep -qF "would reach every host, and it stops here instead" <<<"$messages"; then
+                rule=stopped
+                break
+              fi
+            done
+          fi
+          if [[ -z "$rule" ]]; then
+            echo "No job of $NAME stopped because Harden-Runner didn't block, nor failed only to publish the website; it stays failed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           # The bot-health bot watches some of these workflows too and may have run it
@@ -2100,7 +2247,11 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$output"
-          echo "Harden-Runner didn't block in a job of $NAME, which stopped; the failed jobs run once more." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$rule" == published ]]; then
+            echo "GitHub Pages or Sigstore kept $NAME from publishing the website of ${SHA:0:7}, the head of $BRANCH; the failed jobs run once more." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Harden-Runner didn't block in a job of $NAME, which stopped; the failed jobs run once more." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
