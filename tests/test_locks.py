@@ -1239,13 +1239,16 @@ def long_ago(name: str, version: str) -> datetime | None:
 
 
 @pytest.fixture
-def on_pypi(monkeypatch: pytest.MonkeyPatch) -> dict[str, datetime | None]:
+def on_pypi(monkeypatch: pytest.MonkeyPatch) -> dict[str, datetime | Exception | None]:
     """PyPI for the command, without the network: the answers that the test puts in by
-    package, long ago for the rest."""
-    answers: dict[str, datetime | None] = {}
+    package, long ago for the rest; an error is raised."""
+    answers: dict[str, datetime | Exception | None] = {}
 
     def uploaded(name: str, version: str, opener: object = None) -> datetime | None:
-        return answers[name] if name in answers else long_ago(name, version)
+        answer = answers[name] if name in answers else long_ago(name, version)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
     monkeypatch.setattr(lock_age, "pypi_uploaded", uploaded)
     return answers
@@ -1713,7 +1716,7 @@ def test_a_refresh_keeps_a_young_version_of_main_and_passes(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     fake_uv: FakeUv,
-    on_pypi: dict[str, datetime | None],
+    on_pypi: dict[str, datetime | Exception | None],
 ) -> None:
     root = committed(
         repository(
@@ -1743,6 +1746,96 @@ def test_a_refresh_keeps_a_young_version_of_main_and_passes(
         REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.1"
     )
     assert fake_uv.constraints == ["alpha==1.0\nbeta>=2.0\n"]
+
+
+def outage(name: str) -> lock_age.Unanswered:
+    """What the command learns of PyPI about a version of a package in an outage."""
+    return lock_age.Unanswered(f"https://pypi.org/pypi/{name}/1.0/json: timed out")
+
+
+@needs_git
+def test_a_refresh_that_pypi_didnt_answer_about_fails_instead_of_an_empty_commit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fake_uv: FakeUv,
+    on_pypi: dict[str, datetime | Exception | None],
+) -> None:
+    # PyPI didn't answer about main's alpha 1.0, so the refresh keeps it, and the
+    # lock file comes out as main has it: Renovate's commit would be empty, and the
+    # refresh of that Monday would be missed without a word (#1130).
+    root = moved_by_the_refresh(tmp_path)
+    on_pypi["alpha"] = outage("alpha")
+    fake_uv.answers(lock("", "alpha==1.0"))
+
+    assert main(["locks", "--refresh"], root=root) == 1
+
+    out = capsys.readouterr().out
+    assert out == (
+        "requirements.txt: compiled again from versions at least a week old, "
+        "without alpha==1.5.\n"
+        "PyPI gave no answer about alpha==1.0, so the refresh kept it as HEAD has it, "
+        "and no lock file differs from HEAD any more. The refresh fails, so that "
+        "Renovate reports it instead of an empty commit, and its next run tries "
+        "again.\n"
+    )
+    assert fake_uv.constraints == ["alpha==1.0\n"]
+
+
+@needs_git
+def test_a_refresh_that_still_brings_a_version_passes_without_an_answer_of_pypi(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fake_uv: FakeUv,
+    on_pypi: dict[str, datetime | Exception | None],
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\nbeta\n",
+                "requirements.txt": lock(
+                    REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.0"
+                ),
+            },
+        )
+    )
+    refreshed(
+        root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.2", "beta==2.5")
+    )
+    # PyPI didn't answer about alpha, while beta 2.1 is a week old.
+    on_pypi["alpha"] = outage("alpha")
+    fake_uv.answers(lock("", "alpha==1.0", "beta==2.1"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert capsys.readouterr().out == (
+        "requirements.txt: compiled again from versions at least a week old, "
+        "without alpha==1.2, beta==2.5.\n"
+        "PyPI gave no answer about alpha==1.0, which stays as HEAD has it.\n"
+    )
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.1"
+    )
+    assert fake_uv.constraints == ["alpha==1.0\nbeta>=2.0\n"]
+
+
+@needs_git
+def test_a_refresh_with_a_version_that_pypi_cant_date_passes_as_before(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fake_uv: FakeUv,
+    on_pypi: dict[str, datetime | Exception | None],
+) -> None:
+    # PyPI answered, but names no file of main's alpha 1.0: the next run learns no
+    # more, so the empty commit stays what it was.
+    root = moved_by_the_refresh(tmp_path)
+    on_pypi["alpha"] = None
+    fake_uv.answers(lock("", "alpha==1.0"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert "PyPI" not in capsys.readouterr().out
+    assert fake_uv.constraints == ["alpha==1.0\n"]
 
 
 @needs_git

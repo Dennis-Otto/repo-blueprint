@@ -1,0 +1,4 @@
+### Bug fixes
+
+- **The issue *Renovate logs problems* no longer opens for a weekly refresh that has nothing left to bring:** after the refresh of the lock files of pip-compile merged, Renovate builds it again in every run of that day and warns of an empty commit when no version is both newer and a week old. The bot-health bot leaves that warning out, and the summary of its job says so, as long as no other line of the repository names that branch and no pull request of the branch is open. The same warning on any other branch, such as that of a security update, is reported as before.
+- **A refresh that PyPI didn't answer about no longer disappears without a word:** when PyPI gives no answer about a version of the refresh, also at its last attempt, and the refresh would bring nothing, `locks --refresh` fails and names the versions, so that Renovate reports the failure and tries again in its next run.

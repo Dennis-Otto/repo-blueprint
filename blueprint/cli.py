@@ -1574,8 +1574,10 @@ def locks_refresh_command(root: Path) -> int:
         return 1
     now = datetime.now(UTC)
     failed = False
+    unanswered: list[str] = []
     for name in names:
         found = locks.refresh(root, name, uv, now, lock_age.pypi_uploaded)
+        unanswered += found.unanswered
         if found.note:
             print(f"{name}: left as Renovate refreshed it, for {found.note}.")
         elif found.failure:
@@ -1597,7 +1599,21 @@ def locks_refresh_command(root: Path) -> int:
             "them is younger than a week."
         )
         return 1
-    return 0
+    if not unanswered:
+        return 0
+    versions = ", ".join(sorted(set(unanswered)))
+    if locks.refreshed(root):
+        print(f"PyPI gave no answer about {versions}, which stays as HEAD has it.")
+        return 0
+    # The commit of the refresh would be empty, of which Renovate only warns. A failure
+    # is an artifact error of a branch that it doesn't create, which the bot-health bot
+    # reports, and Renovate's next run of the day tries again (decision 1130).
+    print(
+        f"PyPI gave no answer about {versions}, so the refresh kept it as HEAD has it, "
+        "and no lock file differs from HEAD any more. The refresh fails, so that "
+        "Renovate reports it instead of an empty commit, and its next run tries again."
+    )
+    return 1
 
 
 def locks_age_command(base: str, root: Path) -> int:
