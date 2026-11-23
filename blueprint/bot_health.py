@@ -15,8 +15,9 @@ of the job, and in Findings also in the runner after its last step. Such a time-
 that comes back is reported as well from its third time in seven days, by the name of
 its job (decision 1118). A bot of events, such as Welcome, also
 for a pull request, and a workflow that keeps an issue of its own get neither a second
-try nor an issue, unless Harden-Runner stopped a job of their first attempt: then
-their failed jobs run once more (decision 0141). Their last job starts this bot with
+try nor an issue, unless Harden-Runner stopped a job of their first attempt, or a job
+of Newest PHP broke before its tests ran: then their failed jobs run once more
+(decisions 0141 and 1119). Their last job starts this bot with
 the run when a job of theirs failed at the first attempt, and the other watched
 workflows start it for their runs of main and of the tags of releases alone, so that
 no run of a pull request starts it (decision 0176).
@@ -109,6 +110,12 @@ OUT_OF_TIME = "The job has exceeded the maximum execution time"
 # The annotation with which the step "Make sure that Harden-Runner blocks" stops a job
 # whose Harden-Runner doesn't block, mostly in an outage of GitHub (decision 0134).
 STOPPED = "would reach every host, and it stops here instead"
+# The annotation with which a job of the workflows of BEFORE_THE_TESTS says that it
+# failed before its tests ran, as when setup-php or Composer failed at both of its
+# tries: like a job that Harden-Runner stopped, its run gets its second try and no issue
+# (decision 1119).
+BROKE_BEFORE = "failed before its tests ran, so nothing in the code is wrong"
+BEFORE_THE_TESTS = frozenset({"Newest PHP"})
 PASSED = "success"
 # A second try only hides or repeats their failure: Findings fails while an alert is
 # open, Mutation takes hours to measure the same again, and the property tests and the
@@ -146,7 +153,9 @@ LOOK_BACK_TIME = 120
 # Workflows that keep an issue of their own about their failures; a workflow of the
 # project says so in a comment line of its own, `# bot-health: own-issue`. The daily
 # look still starts one whose schedule GitHub missed or switched off.
-OWN_ISSUE = frozenset({"Diagrams", "Newest Node", "Newest Python", "Next runner"})
+OWN_ISSUE = frozenset(
+    {"Diagrams", "Newest Node", "Newest PHP", "Newest Python", "Next runner"}
+)
 # The bots of events: a pull request or a comment on one starts them, also one of a
 # fork, and a failure shows on that pull request. Like the workflows that keep an issue
 # of their own, they get no issue of the bot, and they run again only when
@@ -687,7 +696,9 @@ def stopped_by_harden_runner(
 ) -> bool:
     """Whether the step that makes sure that Harden-Runner blocks stopped a job of the
     run that failed, as its annotation says, or with every, each job that failed, of
-    which a job that ran out of its time is one that Harden-Runner didn't stop."""
+    which a job that ran out of its time is one that Harden-Runner didn't stop. In a
+    workflow of BEFORE_THE_TESTS, a job that says that it broke before its tests ran
+    counts as stopped too."""
     stopped = []
     for job in jobs_of(api, repo, run.id, run.attempt):
         conclusion = job.get("conclusion")
@@ -704,9 +715,25 @@ def stopped_by_harden_runner(
                 stopped.append(False)
             continue
         stopped.append(
-            conclusion == "failure" and any(STOPPED in message for message in messages)
+            conclusion == "failure" and any(stops(run, message) for message in messages)
         )
     return any(stopped) and (all(stopped) or not every)
+
+
+def stops(run: Run, message: str) -> bool:
+    """Whether the annotation of a failed job of the run says that it stopped outside
+    the code: that Harden-Runner didn't block, or in a workflow of BEFORE_THE_TESTS,
+    that the job broke before its tests ran."""
+    return STOPPED in message or (
+        run.name in BEFORE_THE_TESTS and BROKE_BEFORE in message
+    )
+
+
+def stopper(run: Run) -> str:
+    """What stops a job of the run outside the code, for the lines of this bot."""
+    if run.name in BEFORE_THE_TESTS:
+        return "Harden-Runner or a set-up that failed before the tests"
+    return "Harden-Runner"
 
 
 @dataclass(frozen=True)
@@ -1209,8 +1236,8 @@ def watch_stop(api: Api, repo: str, run_id: int) -> tuple[str, bool]:
         return f"{run.name}: ended as {run.conclusion}, nothing to do.", True
     if not stopped_by_harden_runner(api, repo, run):
         return (
-            f"{run.name}: Harden-Runner stopped no job of {run.link()}, which stays "
-            "failed.",
+            f"{run.name}: {stopper(run)} stopped no job of {run.link()}, which "
+            "stays failed.",
             True,
         )
     text, done = again_after_a_stop(api, repo, run)
@@ -1223,12 +1250,12 @@ def again_after_a_stop(api: Api, repo: str, run: Run) -> tuple[str, bool]:
     tried = run_again(api, repo, run)
     if tried is None:
         return (
-            f"Harden-Runner stopped a job of {run.link()}, and GitHub refused to run "
-            "it again",
+            f"{stopper(run)} stopped a job of {run.link()}, and GitHub refused to "
+            "run it again",
             False,
         )
     again = "its failed jobs run once more" if tried else "another bot runs it again"
-    return f"Harden-Runner stopped a job of {run.link()}, so {again}", True
+    return f"{stopper(run)} stopped a job of {run.link()}, so {again}", True
 
 
 # ---------------------------------------------------------------- the daily look

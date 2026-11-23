@@ -452,6 +452,57 @@ docs = "https://docs.github.com/en/code-security/code-scanning/integrating-with-
 autofix = """An upload that fails needs a look at its log; the change rarely causes
 it."""
 
+[check."tests (newest PHP)"]
+title = "The tests on the newest PHP"
+problem = """PHPUnit failed on the newest PHP that the pinned setup-php sets up as a
+final release, with the tools of `composer.lock`; the annotations name each test that
+failed, and the summary names the PHP. Mostly the new PHP changed a behavior that the
+code or a test relies on, as its UPGRADING notes list. When the job failed before its
+tests ran, setup-php or Composer couldn't download, mostly in an outage: nothing in the
+code is wrong, the bot-health bot runs the job once more, and no issue opens."""
+why = """The users of the app get that PHP with a later version of Nextcloud, while the
+CI runs the tests on the PHP of the tools only. The workflow *Newest PHP* tells it on
+`main` and every week, months before a version of Nextcloud accepts that PHP, and keeps
+the issue *The tests fail with the newest or the oldest PHP* open until it passes."""
+fix = """Set up the PHP that the summary names, such as with its official image
+`php:<version>-cli`, run the tests with the locked tools, fix the code or the test, and
+push to `main`; the weekly run closes the issue then:"""
+commands = [
+  "composer install",
+  "vendor/bin/phpunit --no-coverage",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/1119-the-tests-of-a-nextcloud-app-run-on-the-newest-and-the-oldest-php.md"
+autofix = """A new PHP changes what the code does, and whether the code or the test
+follows it is a choice for a person who knows the app."""
+
+[check."tests (oldest PHP)"]
+title = "The tests on the oldest PHP"
+problem = """PHPUnit failed on the oldest PHP of `appinfo/info.xml`, or Composer found
+no release of a package of `require-dev` for it, which the annotation names. The job
+resolves the newest PHPUnit that runs on that PHP in place of the one of
+`composer.lock`, as the summary names it, so a test that needs an API of a newer
+PHPUnit fails for that reason. When the job failed before it resolved, setup-php or
+Composer couldn't download, mostly in an outage: nothing in the code is wrong, the
+bot-health bot runs the job once more, and no issue opens."""
+why = """The app's users may still run that PHP, while the CI only parses the code
+with it: a behavior that differs between that PHP and the PHP of the tools passes every
+other check."""
+fix = """Set up the PHP that the summary names, here 8.2, and in a copy of the
+checkout resolve PHPUnit for it as the job does, run the tests, fix the code or the
+test, and push to `main`. When no release of a package runs on that PHP, test it
+another way, or raise `min-version` of Nextcloud in `appinfo/info.xml` to a version
+that needs a newer PHP:"""
+commands = [
+  "composer remove --dev --no-update vimeo/psalm nextcloud/coding-standard",
+  'composer config platform.php "$(php -r "echo PHP_VERSION;")"',
+  "composer require --dev --no-update 'phpunit/phpunit:^10.5 || ^11.5 || ^12.0'",
+  "composer update",
+  "vendor/bin/phpunit --no-coverage",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/1119-the-tests-of-a-nextcloud-app-run-on-the-newest-and-the-oldest-php.md"
+autofix = """Whether the code keeps the oldest PHP or `min-version` rises is a choice for
+a person, who knows the app's users."""
+
 [check.Psalm]
 title = "Security alerts of Psalm"
 problem = """The taint analysis of Psalm found untrusted input that reaches a sink in

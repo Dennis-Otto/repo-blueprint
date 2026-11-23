@@ -1,0 +1,39 @@
+# The tests of a Nextcloud app run on the newest and the oldest PHP
+
+- Status: accepted, amends [0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) and [0141](0141-the-bot-health-bot-runs-every-bot-again-that-harden-runner-stopped.md)
+- Date: 2026-11-23
+
+## Context
+
+[0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) runs the tools of a Nextcloud app, PHPUnit among them, on the PHP of `config.platform.php` of `composer.json`, 8.3 for a new app, and checks the oldest PHP of `appinfo/info.xml`, 8.2, only with the step *Oldest PHP*: `php8.2 --syntax-check` of what the app ships and `composer check-platform-reqs`. Psalm checks the code for PHP 8.2 as well. Nothing runs the code on 8.2, and no job runs a PHP newer than the tools, while *Newest Python* and *Newest Node* do that for the other kinds.
+
+That let two real differences through. At their `main` of 2026-11-23, paperless-sync fails 10 tests of `NextcloudStorageServiceTest` on PHP 8.6.0, as `fclose()` now returns `false` when a flush fails, and paperless-unified-search 5, as the message of `JsonException` now ends with `near location 1:1`; both pass on 8.3 and 8.5. Nextcloud 33 to 35 still refuse PHP 8.6, so no user is affected yet, but its master accepts it.
+
+On another PHP, the lock of an app installs on 8.2 to 8.6, as `config.platform.php` makes Composer resolve for the PHP of the tools and its check of the platform only asks for a PHP at least that old. PHPUnit 12 of the lock refuses 8.2, and php-cs-fixer refuses 8.6. PHPUnit 11.5, resolved for 8.2 in a copy, runs the tests of both apps, as `phpunit.xml` is written for PHPUnit 10.5 to 13.
+
+## Options
+
+1. **A job on the newest PHP and one on the oldest in every pull request,** as the step *Oldest PHP* runs: on the day a new PHP comes out, every open pull request turns red for a change that none of them made, and the resolve for the oldest PHP depends on Packagist on the day and takes up to two minutes.
+2. **`scripts/check.sh` on the newest PHP:** php-cs-fixer refuses a PHP newer than the syntax that it knows, so the job would fail for the tool, not for the app.
+3. **A workflow of its own on `main` and every week, with PHPUnit alone,** like *Newest Node*: the newest PHP with the tools of the lock, the oldest with the newest PHPUnit that runs there, and one issue while the tests fail.
+
+## Decision
+
+Option 3: the workflow *Newest PHP*, `newest-php.yml`, of the kind `nextcloud-app` only, after every push to `main`, every week in the slot of the repository and by hand; a newer push cancels the run before it. It is no required check, and the blueprint's own copy starts only by hand, as its jobs don't run there ([0179](0179-a-workflow-that-only-the-repositories-run-starts-here-only-by-hand.md)).
+
+- **`tests (newest PHP)`** runs `vendor/bin/phpunit --no-coverage` with the tools of `composer.lock` on the newest PHP that the pinned setup-php sets up as a final release, and the summary names it. Not `php-version: latest`: setup-php looks that up at the time of the run in the list of versions on its default branch, which named 8.6 from 2026-11-20 on, while the pinned 2.40.0 still sets up 8.6 as a development build of its branch. The job reads `latest` from the list of the pinned release, which GitHub downloads with the action, so the newest PHP moves with the pin that Renovate brings, about a week after setup-php released it. No nightly, master or release candidate: a development build fails for reasons of PHP itself.
+- **`tests (oldest PHP)`** reads both PHPs as the CI does. When they are equal, its steps skip and its summary says why; composer.json belongs to the project, so every app has the job. Otherwise it sets up the oldest PHP and, in its own checkout, which nothing commits, removes the tools that the tests don't run (Psalm, php-cs-fixer, the coding standard, Infection), sets `config.platform.php` to that PHP and lets PHPUnit be `^10.5 || ^11.5` beside the app's own constraint, of which Composer picks the newest that runs. A test that needs an API of a newer PHPUnit can fail for that reason, and the summary and the issue say so. When Composer finds no release for that PHP, it exits with 2, and the job names the package: then a person tests the oldest PHP another way or raises `min-version`. The job is needed only while the oldest Nextcloud of an app accepts a PHP older than its tools: Nextcloud 35 needs 8.3.
+- **One issue,** *The tests fail with the newest or the oldest PHP*, with the label `maintenance`, as the other workflows of the newest versions keep: a failed PHPUnit, or a resolve that found nothing, opens it or brings it up to date with each PHP that failed, and the weekly run closes it once the newest passes and the oldest passes or has nothing to do. The job of the report blocks every host but `api.github.com`.
+- **A failure before the tests is none of the app's.** setup-php and `composer install` get a second try after 30 seconds, as the uploads got with [1096](1096-the-flaky-test-bot-reports-only-a-failure-of-the-code.md), and so does the resolve when Composer fails with another code than 2. When a step before the tests still fails, the job says in an error that nothing in the code is wrong, and the report changes nothing. Extending [0141](0141-the-bot-health-bot-runs-every-bot-again-that-harden-runner-stopped.md), the bot-health bot treats that error in a run of *Newest PHP*, `BEFORE_THE_TESTS`, as it treats a job that Harden-Runner stopped: it runs the failed jobs once more and opens no issue, after the last job of the run starts it, and in its daily look when that start failed.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-php-checks-a-nextcloud-app.dark.svg">
+  <img src="../images/diagrams/which-php-checks-a-nextcloud-app.svg" alt="Which PHP checks a Nextcloud app: Renovate keeps the tools of composer.json current, with only the releases that run on the PHP of the tools, each major version on its own and PHPUnit below 13. The CI reads two versions of PHP from the files of the app: config.platform.php of composer.json, for which Composer locks the tools, and the min-version of the PHP in appinfo/info.xml, the oldest PHP that the app runs on. It sets up the oldest PHP first and the PHP of the tools last, so that php runs the tools. php-cs-fixer, Psalm for PHP 8.2 and PHPUnit in a new random order run on the PHP of the tools; then the step Oldest PHP parses the code that the app ships with php8.2 and checks that its packages install there. After every change of main and every week, the workflow Newest PHP runs PHPUnit with the locked tools on the newest PHP that the pinned setup-php sets up as a final release, and on PHP 8.2 with PHPUnit 11.5, which Composer resolves for it; while the tests fail, one issue stays open.">
+</picture>
+
+## Consequences
+
+- The tests of paperless-sync at `32ff957`, in Docker with the steps of the job, fail with the 10 errors of `NextcloudStorageServiceTest` on PHP 8.6.0 and pass on 8.5.13; the job on a runner reaches 8.6 only with the release of setup-php after its commit `2001cd3` and Renovate's update of the pin.
+- A pull request costs no extra minute: both jobs run on `main` and every week only. While the issue is open, every push to `main` makes another red run with the same failure, as with Newest Python and Newest Node; something is left to do.
+- The resolve for the oldest PHP is neither locked nor reproducible, so a new release of a dev package can fail it between two weeks without a change of the app; the error names the package.
+- The job reads the list of setup-php from where the runner keeps the actions of a job, `_actions` beside the workspace. A runner that keeps them elsewhere fails the job before its tests, which says so and opens no issue.

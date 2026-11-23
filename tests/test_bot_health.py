@@ -22,7 +22,9 @@ from shared import BY_HAND, in_a_repository
 import blueprint.github
 from blueprint import bot_health, branches, cli
 from blueprint.bot_health import (
+    BEFORE_THE_TESTS,
     BLUEPRINT_BOT,
+    BROKE_BEFORE,
     EVENT_BOTS,
     ISSUE_BOTS,
     ISSUE_EVENTS,
@@ -1748,8 +1750,11 @@ def test_a_bot_that_harden_runner_stopped_runs_again(
 
     result, done = watch_stop(api_of(github), REPO, 1)
 
+    stopper = "Harden-Runner"
+    if name in BEFORE_THE_TESTS:
+        stopper += " or a set-up that failed before the tests"
     assert result == (
-        f"{name}: Harden-Runner stopped a job of [the run of 2026-10-13 09:00 UTC]"
+        f"{name}: {stopper} stopped a job of [the run of 2026-10-13 09:00 UTC]"
         f"(https://github.com/{REPO}/actions/runs/1), so its failed jobs run once more."
     )
     assert done
@@ -1778,6 +1783,110 @@ def test_a_bot_that_failed_for_another_reason_stays_failed(github: FakeGitHub) -
     )
     assert done
     assert writes(github) == []
+
+
+# The error of a job of Newest PHP whose set-up failed at both tries (decision 1119).
+BROKE = failure(
+    "failure",
+    "The job failed before its tests ran, so nothing in the code is wrong; setup-php "
+    "or Composer failed at both tries, mostly in an outage. The bot-health bot runs "
+    "the job once more, and no issue opens.",
+    "Nothing in the code is wrong",
+)
+
+
+def broken_before_the_tests(number: int, name: str) -> dict[str, Any]:
+    return job_of_a_run(
+        number,
+        name,
+        "failure",
+        [
+            ("Set up job", "success"),
+            ("Set up the newest PHP", "failure"),
+            ("Set up the newest PHP once more", "failure"),
+            ("Run the tests", "skipped"),
+            ("Say that nothing in the code is wrong", "success"),
+        ],
+    )
+
+
+def test_newest_php_runs_again_when_a_job_broke_before_its_tests(
+    github: FakeGitHub,
+) -> None:
+    # setup-php failed at both tries in one job, while the other job's tests passed.
+    github.runs[1] = run_of(1, name="Newest PHP", event="push")
+    github.jobs[(1, 1)] = [
+        broken_before_the_tests(11, "tests (newest PHP)"),
+        job_of_a_run(12, "tests (oldest PHP)", "success"),
+        job_of_a_run(13, "start the bot-health bot after a failure", "success"),
+    ]
+    github.annotations[11] = [BROKE]
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert BROKE_BEFORE in BROKE["message"]
+    assert result == (
+        "Newest PHP: Harden-Runner or a set-up that failed before the tests stopped a "
+        "job of [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/1), so its failed jobs run once more."
+    )
+    assert done
+    # No issue: the failure is none of the app's.
+    assert writes(github) == [
+        ("POST", f"repos/{REPO}/actions/runs/1/rerun-failed-jobs")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "steps", "annotations"),
+    [
+        # The tests of the app failed: the workflow's own issue says so.
+        (
+            "Newest PHP",
+            [("Set up job", "success"), ("Run the tests", "failure")],
+            [failure("failure", "Failed asserting that false is true.")],
+        ),
+        # Another workflow can't claim the rule by its words.
+        ("Newest Node", [("Run the checks", "failure")], [BROKE]),
+    ],
+)
+def test_a_failure_of_the_tests_or_of_another_workflow_stays_failed(
+    github: FakeGitHub,
+    name: str,
+    steps: list[tuple[str, str]],
+    annotations: list[dict[str, str]],
+) -> None:
+    github.runs[1] = run_of(1, name=name, event="push")
+    github.jobs[(1, 1)] = [job_of_a_run(11, "tests", "failure", steps)]
+    github.annotations[11] = annotations
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result.endswith(", which stays failed."), result
+    assert done
+    assert writes(github) == []
+
+
+def test_the_daily_look_runs_newest_php_again_when_a_job_broke_before_its_tests(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Bot health didn't follow the run, as GitHub refused to start it.
+    github.workflows = [workflow(5, "Newest PHP")]
+    github.jobs[(50, 1)] = [broken_before_the_tests(500, "tests (oldest PHP)")]
+    github.annotations[500] = [BROKE]
+    github.workflow_runs[5] = [bot_run(50, "Newest PHP", event="push", workflow=5)]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == [50]
+    assert github.issues == {}
+    assert summary.splitlines()[-1] == (
+        "- `Newest PHP`: Harden-Runner or a set-up that failed before the tests "
+        "stopped a job of [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/50), so its failed jobs run once "
+        "more."
+    )
 
 
 @pytest.mark.parametrize(
@@ -2887,7 +2996,16 @@ def test_the_names_of_the_workflows_exist() -> None:
     }
     assert names >= ONE_TRY | OWN_ISSUE | EVENT_BOTS | ISSUE_BOTS
     # Each keeps an issue of its own, and a second one would repeat it.
-    assert {"Diagrams", "Newest Node", "Newest Python", "Next runner"} <= OWN_ISSUE
+    assert {
+        "Diagrams",
+        "Newest Node",
+        "Newest PHP",
+        "Newest Python",
+        "Next runner",
+    } <= OWN_ISSUE
+    # A workflow whose jobs say that they broke before their tests keeps an issue of
+    # its own about the tests, and its last job starts this bot.
+    assert BEFORE_THE_TESTS <= OWN_ISSUE
     # A workflow is one or the other, and the bot gives a second try to either only
     # when Harden-Runner stopped it.
     assert not OWN_ISSUE & EVENT_BOTS

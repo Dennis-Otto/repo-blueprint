@@ -68,6 +68,7 @@ from workflow_steps import (
     exact,
     job_in,
     parse,
+    recording,
     step_in,
 )
 
@@ -94,6 +95,7 @@ from blueprint.best_practices import (
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     AFTER_THE_STEPS,
+    BROKE_BEFORE,
     COLLISION,
     CRON,
     EVENT_BOTS,
@@ -767,6 +769,10 @@ TRIGGERS: dict[str, dict[str, Any]] = {
     "newest-node.yml": {
         "push": {"branches": ["main"]},
         "schedule": [{"cron": "40 3 * * 2"}],
+    },
+    "newest-php.yml": {
+        "push": {"branches": ["main"]},
+        "schedule": [{"cron": "55 3 * * 2"}],
     },
     "properties.yml": {"schedule": [{"cron": "41 2 * * *"}]},
     "upstream.yml": {"schedule": [{"cron": "50 4 * * 3"}]},
@@ -24768,6 +24774,7 @@ ON_PUSH_TO_MAIN = {
     "replaces": {
         "dashboard.yml",
         "newest-node.yml",
+        "newest-php.yml",
         "newest-python.yml",
         "settings.yml",
     },
@@ -25159,13 +25166,14 @@ def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
         assert "schedule" in triggers(flows[name]), name
     # Every release carries an SBOM of its own; the weekly one is the repository's.
     assert set(triggers(flows["sbom.yml"])) == {"schedule", "workflow_dispatch"}
-    # After every merge: the coverage of main, the newest Python and Node, the analyses
-    # that code scanning compares pull requests with, the website, the release and the
-    # branch bot.
+    # After every merge: the coverage of main, the newest Python, Node and PHP, the
+    # analyses that code scanning compares pull requests with, the website, the release
+    # and the branch bot.
     for name in (
         "ci-python.yml",
         "newest-python.yml",
         "newest-node.yml",
+        "newest-php.yml",
         "codeql.yml",
         "zizmor.yml",
         "osv-scanner.yml",
@@ -25717,6 +25725,446 @@ def test_a_failure_with_the_newest_node_keeps_an_issue_open(
     node = f"Node {version}, the newest release" if version else "the newest Node"
     assert f"fail with {node}, which the users" in calls, calls
     assert "engines.node in package.json" in calls
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_newest_and_the_oldest_php_test_main_and_every_week(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    # Only a Nextcloud app runs on PHP; the blueprint keeps the source of the workflow,
+    # whose jobs it skips, as it skips the CI of PHP.
+    php = project in ("blueprint", "nextcloud-app")
+    assert ("newest-php.yml" in flows) == php
+    for name, text in flows.items():
+        if name != "newest-php.yml":
+            assert "tests (newest PHP)" not in text, name
+            assert "tests (oldest PHP)" not in text, name
+    if not php:
+        return
+    newest = flows["newest-php.yml"]
+    # Not in pull requests, as the newest Python and Node: a new PHP breaks them all
+    # alike. The blueprint starts it only by hand (decision 0179).
+    events = {"workflow_dispatch"} if project == "blueprint" else {"push", "schedule"}
+    assert set(triggers(newest)) == {"workflow_dispatch", *events}
+    names = [job["name"] for job in parse(newest)["jobs"].values()]
+    assert names == [
+        "tests (newest PHP)",
+        "tests (oldest PHP)",
+        "report",
+        "start the bot-health bot after a failure",
+    ]
+    # Only PHPUnit, without coverage: no php-cs-fixer, Psalm, mutants or package, and
+    # no development build of PHP.
+    assert "scripts/check.sh" not in newest
+    for job_id in ("newest", "oldest"):
+        job = job_in(newest, job_id)
+        tests = step_in(job, "Run the tests")
+        assert (
+            "vendor/bin/phpunit --no-coverage --log-junit build/phpunit.xml"
+            in (tests["run"])
+        )
+        assert "annotate phpunit build/phpunit.xml" in tests["run"]
+        assert "continue-on-error" not in tests
+        # The same extensions as the CI, and no coverage. A PHP that the job found,
+        # never nightly, master or setup-php's latest of the day.
+        for each in steps_using(job, "shivammathur/setup-php"):
+            version = each["with"]["php-version"]
+            assert re.fullmatch(r"\$\{\{ steps\.\w+\.outputs\.\w+ \}\}", version)
+            assert each["with"]["extensions"] == "dom, libxml, mbstring, xml"
+            assert each["with"]["coverage"] == "none"
+            assert each["with"]["tools"] == "composer:v2"
+        assert step_in(job, "Explain the failure")["env"] == {"CHECK": job["name"]}
+    # A new repository runs the jobs, which the blueprint itself skips.
+    assert (GUARD in newest) == (project == "blueprint")
+    jobs = workflow_steps.workflow("newest-php.yml")["jobs"]
+    # The PHP of the run and how its tests ended, for the issue.
+    assert jobs["newest"]["outputs"] == {
+        "version": "${{ steps.version.outputs.php }}",
+        "tests": "${{ steps.phpunit.outcome }}",
+    }
+    setup = step_in(jobs["newest"], "Set up the newest PHP")
+    assert setup["with"]["php-version"] == "${{ steps.newest.outputs.php }}"
+    outputs = {
+        key: " ".join(value.split()) for key, value in jobs["oldest"]["outputs"].items()
+    }
+    assert outputs == {
+        "version": "${{ steps.php.outputs.oldest }}",
+        "phpunit": "${{ steps.resolve.outputs.phpunit }}",
+        "tests": "${{ steps.php.outcome == 'success' && steps.php.outputs.oldest =="
+        " steps.php.outputs.tools && 'same' || steps.resolve.outputs.found =="
+        " 'none' && 'nothing' || steps.phpunit.outcome }}",
+    }
+    # The leg reads the PHPs as the CI does.
+    ci = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    reading = "Find the PHP of the tools and the oldest PHP of the app"
+    assert step_in(jobs["oldest"], reading)["run"] == script_of(ci, reading)
+    run = script_of(newest, "Name the PHP of the run")
+    assert "PHP_VERSION" in run
+    assert '>> "$GITHUB_STEP_SUMMARY"' in run
+
+
+@pytest.mark.parametrize("job_id", ["newest", "oldest"])
+def test_a_set_up_of_the_php_tests_tries_twice(job_id: str) -> None:
+    # setup-php and Composer download from GitHub and Packagist: a second try half a
+    # minute later, as for the uploads (decision 1096), and an error that tells a
+    # failure before the tests from one of them, for the bot-health bot (1119).
+    job = workflow_steps.job("newest-php.yml", job_id)
+    names = [str(each.get("name")) for each in job["steps"]]
+    php = "newest PHP" if job_id == "newest" else "oldest PHP of the app"
+    pairs = [(f"Set up the {php}", "setup", "Give setup-php half a minute")]
+    if job_id == "newest":
+        pairs.append(
+            ("Install the locked tools", "install", "Give Composer half a minute")
+        )
+    for name, step_id, pause in pairs:
+        first = step_in(job, name)
+        again = step_in(job, f"{name} once more")
+        assert first["id"] == step_id
+        assert first["continue-on-error"] is True
+        condition = f"steps.{step_id}.outcome == 'failure'"
+        assert step_in(job, pause) == {
+            "name": pause,
+            "if": condition,
+            "run": "sleep 30",
+        }
+        assert again["if"] == condition
+        assert "continue-on-error" not in again
+        keys = ("uses", "with", "run")
+        assert {key: first[key] for key in keys if key in first} == {
+            key: again[key] for key in keys if key in again
+        }
+        assert names.index(name) < names.index(pause) < names.index(f"{name} once more")
+    said = step_in(job, "Say that nothing in the code is wrong")
+    assert said["if"].startswith("failure() && steps.phpunit.outcome != 'failure'")
+    assert BROKE_BEFORE in said["run"]
+    assert names.index("Run the tests") < names.index(said["name"])
+
+
+def setup_php_lists(tmp_path: Path, *latest: str) -> Path:
+    """The workspace of a runner whose folder of actions holds setup-php with a list of
+    versions for each latest; returns RUNNER_WORKSPACE."""
+    for number, version in enumerate(latest):
+        folder = (
+            tmp_path / f"work/_actions/shivammathur/setup-php/{number}a/src/configs"
+        )
+        folder.mkdir(parents=True)
+        listed = {"highest": version, "latest": version, "nightly": "8.6"}
+        (folder / "php-versions.json").write_text(json.dumps(listed), encoding="utf-8")
+    return tmp_path / "work/demo"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("latest", "php", "error"),
+    [
+        # The list of the pinned release, not that of setup-php's default branch.
+        (("8.5",), "8.5", ""),
+        ((), "", "found 0 lists of the versions of PHP of setup-php"),
+        (("8.5", "8.6"), "", "found 2 lists of the versions of PHP of setup-php"),
+        (("8.x",), "", 'names no PHP as latest: "8.x"'),
+    ],
+)
+def test_the_newest_php_is_the_latest_of_the_pinned_setup_php(
+    tmp_path: Path, latest: tuple[str, ...], php: str, error: str
+) -> None:
+    job = workflow_steps.job("newest-php.yml", "newest")
+    # The list is that of the action that the job sets up PHP with.
+    action = step_in(job, "Set up the newest PHP")["uses"].split("@")[0]
+    script = step_in(job, "Find the newest PHP that the pinned setup-php knows")["run"]
+    assert f"/_actions/{action}/*/src/configs/php-versions.json" in script
+    workspace = setup_php_lists(tmp_path, *latest)
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "newest-php.yml",
+        "newest",
+        "Find the newest PHP that the pinned setup-php knows",
+        env={"RUNNER_WORKSPACE": workspace.as_posix()},
+        stubs={"python3": PYTHON3},
+    )
+
+    if php:
+        assert done.returncode == 0, done.stderr
+        assert done.outputs == {"php": php}
+    else:
+        assert done.returncode == 1
+        assert error in done.stdout
+        assert done.outputs == {}
+
+
+# A stand-in of Composer that answers each update with the next code of UPDATES, and
+# with the words of its solver for 2.
+OLDEST_COMPOSER = recording(
+    "composer",
+    """if [[ "$1" == update ]]; then
+  count=$(($(cat "$RUNNER_TEMP/updates" 2>/dev/null || echo 0) + 1))
+  echo "$count" > "$RUNNER_TEMP/updates"
+  read -ra codes <<< "$UPDATES"
+  code="${codes[count - 1]:-0}"
+  if ((code == 2)); then
+    echo "Your requirements could not be resolved to an installable set of packages."
+    echo "  Problem 1"
+    echo "    - Root composer.json requires phpunit/phpunit ^10.5 || ^11.5 -> found."
+    echo "    - phpunit/phpunit 13.0.0 requires php >=8.4 -> your php version (8.2.29)."
+    echo "  Problem 2"
+    echo "    - Root composer.json requires nextcloud/ocp ^35.0 -> found."
+  fi
+  exit "$code"
+fi""",
+)
+OLDEST_MANIFEST = json.dumps(
+    {
+        "require": {"php": "^8.2"},
+        "require-dev": {
+            "nextcloud/coding-standard": "^1.2",
+            "nextcloud/ocp": "^33.0",
+            "phpunit/phpunit": "^12.0",
+            "psalm/plugin-phpunit": "^0.19",
+            "symfony/console": "^7.4",
+            "vimeo/psalm": "^7.0",
+        },
+    }
+)
+OLDEST_PHPUNIT = (
+    "#!/usr/bin/env bash\n"
+    'echo "PHPUnit 11.5.58 by Sebastian Bergmann and contributors."\n'
+)
+
+
+def resolve_for_the_oldest_php(
+    tmp_path: Path, updates: str
+) -> workflow_steps.StepResult:
+    return workflow_steps.run_step(
+        tmp_path,
+        "newest-php.yml",
+        "oldest",
+        "Resolve the newest PHPUnit for the oldest PHP",
+        env={"UPDATES": updates},
+        stubs={
+            "python3": PYTHON3,
+            "php": 'echo -n "8.2.29"\n',
+            "composer": OLDEST_COMPOSER,
+            "sleep": recording("sleep"),
+        },
+        files={"composer.json": OLDEST_MANIFEST, "vendor/bin/phpunit": OLDEST_PHPUNIT},
+    )
+
+
+OLDEST_RESOLVE = [
+    "composer remove --dev --no-update --no-interaction nextcloud/coding-standard"
+    " psalm/plugin-phpunit vimeo/psalm",
+    "composer config platform.php 8.2.29",
+    "composer require --dev --no-update --no-interaction"
+    " phpunit/phpunit:^10.5 || ^11.5 || ^12.0",
+]
+OLDEST_UPDATE = "composer update --no-interaction --prefer-dist --no-progress"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("updates", ["0", "1 0"])
+def test_the_oldest_php_gets_the_newest_phpunit_that_runs_there(
+    tmp_path: Path, updates: str
+) -> None:
+    done = resolve_for_the_oldest_php(tmp_path, updates)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    # Only in the checkout: the tools that the tests don't run go, and PHPUnit may be
+    # a release for the oldest PHP, beside the app's own constraint for a newer one.
+    expected = [*OLDEST_RESOLVE, OLDEST_UPDATE]
+    if updates == "1 0":
+        # A failed download gets a second try after half a minute.
+        expected += ["sleep 30", OLDEST_UPDATE]
+    assert done.stubbed == expected
+    assert done.outputs == {"phpunit": "11.5.58"}
+    # The summary names the PHP and the PHPUnit, and why a test may fail for it.
+    assert done.summary == (
+        "The tests run with PHP 8.2.29, the oldest PHP of appinfo/info.xml, and PHPUnit"
+        " 11.5.58, which Composer resolved for it in place of the PHPUnit of"
+        " composer.lock: a test that needs an API of a newer PHPUnit fails for that"
+        " reason.\n"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_oldest_php_without_a_release_names_the_package(tmp_path: Path) -> None:
+    done = resolve_for_the_oldest_php(tmp_path, "2")
+
+    # No second try: Composer found no release, which another try wouldn't change.
+    assert done.returncode == 1
+    assert done.stubbed == [*OLDEST_RESOLVE, OLDEST_UPDATE]
+    assert done.outputs == {"found": "none"}
+    assert (
+        "::error title=No release for PHP 8.2.29::Composer found no release of"
+        " nextcloud/ocp phpunit/phpunit that runs on PHP 8.2.29, the oldest PHP of"
+        " appinfo/info.xml." in done.stdout
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_oldest_php_fails_after_two_failed_downloads(tmp_path: Path) -> None:
+    done = resolve_for_the_oldest_php(tmp_path, "1 1")
+
+    # A failure before the tests: the step that follows says that nothing in the code
+    # is wrong, and the issue stays as it is.
+    assert done.returncode == 1
+    assert done.stubbed == [*OLDEST_RESOLVE, OLDEST_UPDATE, "sleep 30", OLDEST_UPDATE]
+    assert done.outputs == {}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("platform", "runs"),
+    [
+        # A new app: its tools on PHP 8.3, its code from 8.2 on, which the leg tests.
+        ("8.3.16", True),
+        # An app whose tools still run on its oldest PHP, which the CI tests.
+        ("8.2.27", False),
+    ],
+)
+def test_the_oldest_leg_runs_only_when_the_oldest_php_is_older_than_the_tools(
+    tmp_path: Path, platform: str, runs: bool
+) -> None:
+    files = {
+        "composer.json": json.dumps({"config": {"platform": {"php": platform}}}),
+        "appinfo/info.xml": '<info><dependencies><php min-version="8.2"/>'
+        '<nextcloud min-version="33" max-version="35"/></dependencies></info>\n',
+    }
+    done = workflow_steps.run_step(
+        tmp_path / "read",
+        "newest-php.yml",
+        "oldest",
+        "Find the PHP of the tools and the oldest PHP of the app",
+        stubs={"python3": PYTHON3},
+        files=files,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert (done.outputs["oldest"] != done.outputs["tools"]) == runs
+    # Every step of the leg skips for equal PHPs; the second tries follow the first.
+    job = workflow_steps.job("newest-php.yml", "oldest")
+    skipping = "steps.php.outputs.oldest != steps.php.outputs.tools"
+    for name in (
+        "Set up the oldest PHP of the app",
+        "Find the cache of Composer",
+        "Restore the packages of Composer from the cache",
+        "Resolve the newest PHPUnit for the oldest PHP",
+        "Run the tests",
+    ):
+        assert step_in(job, name)["if"] == skipping, name
+    said = step_in(job, "Say that the CI tests the oldest PHP")
+    assert said["if"] == "steps.php.outputs.oldest == steps.php.outputs.tools"
+    summary = workflow_steps.run_step(
+        tmp_path / "say",
+        "newest-php.yml",
+        "oldest",
+        "Say that the CI tests the oldest PHP",
+        env={"OLDEST": "8.2"},
+    ).summary
+    assert summary == (
+        "The oldest PHP of the app, PHP 8.2, is the PHP of its tools, with which the CI"
+        " runs the tests, so this job has nothing to do.\n"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("job_id", ["newest", "oldest"])
+def test_a_failed_test_on_another_php_is_an_annotation(
+    tmp_path: Path, job_id: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "newest-php.yml",
+        job_id,
+        "Run the tests",
+        stubs={"python3": recording("python3")},
+        files={
+            "vendor/bin/phpunit": "#!/usr/bin/env bash\nexit 2\n",
+            ".github/blueprint.py": "",
+        },
+    )
+
+    assert done.returncode == 1
+    assert done.stubbed == [
+        "python3 .github/blueprint.py annotate phpunit build/phpunit.xml"
+    ]
+
+
+NEWEST_PHP_ISSUE = (
+    "issue create --title The tests fail with the newest or the oldest PHP"
+)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("newest", "oldest", "open_issue", "call", "said"),
+    [
+        # A failure of the tests opens the issue, or brings the open one up to date,
+        # with each PHP that failed.
+        ("failure", "success", "", NEWEST_PHP_ISSUE, ["PHP 8.6.0, the newest"]),
+        ("success", "failure", "7", "issue edit 7 --body", ["PHP 8.2, the oldest"]),
+        (
+            "failure",
+            "nothing",
+            "",
+            NEWEST_PHP_ISSUE,
+            ["PHP 8.6.0, the newest", "no release of a package of require-dev"],
+        ),
+        # The weekly run closes it once both pass, or the oldest has nothing to do.
+        ("success", "success", "7", "issue close 7", []),
+        ("success", "same", "7", "issue close 7", []),
+        ("success", "same", "", "", []),
+    ],
+)
+def test_a_failure_with_the_newest_or_the_oldest_php_keeps_an_issue_open(
+    tmp_path: Path,
+    newest: str,
+    oldest: str,
+    open_issue: str,
+    call: str,
+    said: list[str],
+) -> None:
+    report = workflow_steps.job("newest-php.yml", "report")
+    # Only tests that ran change the issue: a job that broke before its tests, or a
+    # run of the blueprint, which skips them, neither opens nor closes it.
+    assert report["needs"] == ["newest", "oldest"]
+    assert report["if"] == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        "(needs.newest.outputs.tests == 'failure' || "
+        'contains(fromJSON(\'["failure", "nothing"]\'), needs.oldest.outputs.tests)'
+        " || (github.event_name == 'schedule' && needs.newest.outputs.tests =="
+        " 'success' && "
+        'contains(fromJSON(\'["success", "same"]\'), needs.oldest.outputs.tests)))'
+    )
+    only_the_report_writes_issues("newest-php.yml")
+    calls = keep_the_issue_of_a_bot(
+        tmp_path,
+        "newest-php.yml",
+        "Keep the issue of the newest and the oldest PHP current",
+        open_issue,
+        NEWEST=newest,
+        NEWEST_PHP="8.6.0",
+        OLDEST=oldest,
+        OLDEST_PHP="8.2",
+        PHPUNIT="11.5.58",
+    )
+
+    if not call:
+        assert calls == ""
+        return
+    assert calls.startswith(call), calls
+    if not said:
+        assert calls.endswith(
+            "The tests pass with the newest and the oldest PHP again."
+        )
+        return
+    assert f"The latest failure: {RUN_URL}" in calls
+    for text in said:
+        assert text in calls, calls
+    # Nextcloud may not accept the newest PHP yet; the oldest ran with another PHPUnit.
+    assert ("may not accept PHP 8.6.0 yet" in calls) == (newest == "failure")
+    assert ("They ran with PHPUnit 11.5.58" in calls) == (oldest == "failure")
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
@@ -29177,7 +29625,7 @@ def test_the_pr_coach_passes_without_blueprint_py(tmp_path: Path) -> None:
                     if 'coach explain "' in line
                 ), f"{path.name}: {job_id}"
                 explained.append(path.name)
-    assert len(explained) == 31
+    assert len(explained) == 33
     done = workflow_steps.run_step(
         tmp_path,
         "ci-python.yml",

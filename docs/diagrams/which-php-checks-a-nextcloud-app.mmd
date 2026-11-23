@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: Which PHP checks a Nextcloud app
-    accDescr: Renovate keeps the tools of composer.json current, with only the releases that run on the PHP of the tools, each major version on its own and PHPUnit below 13. The CI reads two versions of PHP from the files of the app: config.platform.php of composer.json, for which Composer locks the tools, and the min-version of the PHP in appinfo/info.xml, the oldest PHP that the app runs on. It sets up the oldest PHP first and the PHP of the tools last, so that php runs the tools. php-cs-fixer, Psalm for PHP 8.2 and PHPUnit in a new random order run on the PHP of the tools; then the step Oldest PHP parses the code that the app ships with php8.2 and checks that its packages install there.
+    accDescr: Renovate keeps the tools of composer.json current, with only the releases that run on the PHP of the tools, each major version on its own and PHPUnit below 13. The CI reads two versions of PHP from the files of the app: config.platform.php of composer.json, for which Composer locks the tools, and the min-version of the PHP in appinfo/info.xml, the oldest PHP that the app runs on. It sets up the oldest PHP first and the PHP of the tools last, so that php runs the tools. php-cs-fixer, Psalm for PHP 8.2 and PHPUnit in a new random order run on the PHP of the tools; then the step Oldest PHP parses the code that the app ships with php8.2 and checks that its packages install there. After every change of main and every week, the workflow Newest PHP runs PHPUnit with the locked tools on the newest PHP that the pinned setup-php sets up as a final release, and on PHP 8.2 with PHPUnit 11.5, which Composer resolves for it; while the tests fail, one issue stays open.
 
     renovate["Renovate: tools for PHP 8.3, each major<br>version on its own, PHPUnit below 13"]
     composer(["composer.json<br>config.platform.php 8.3.16"])
@@ -13,16 +13,19 @@ flowchart TB
     setup["The CI sets up PHP 8.2,<br>then PHP 8.3 for php"]
     tools["PHP 8.3: php-cs-fixer, Psalm for PHP 8.2,<br>PHPUnit 12 in random order"]
     oldest["php8.2: the syntax of what the app ships,<br>composer check-platform-reqs --no-dev"]
+    weekly["On main and every week, Newest PHP:<br>PHPUnit on the newest PHP with the locked tools,<br>and on PHP 8.2 with PHPUnit 11.5"]
+    issue(["One issue while the tests fail"])
     app["An app that runs on PHP 8.2 and newer"]
 
     renovate --> composer
     composer --> setup
     info --> setup
-    setup --> tools --> oldest --> app
+    setup --> tools --> oldest --> weekly --> app
+    weekly -. "a test fails" .-> issue
 
     classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class composer,info you
-    class renovate,setup,tools,oldest bot
+    class composer,info,issue you
+    class renovate,setup,tools,oldest,weekly bot
     class app done

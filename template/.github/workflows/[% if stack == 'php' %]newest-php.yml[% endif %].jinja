@@ -1,0 +1,11 @@
+[%- from "includes/replace.jinja" import by_hand, replaced with context -%]
+[%- set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" -%]
+[#- The triggers of a repository; the blueprint starts the workflow only by hand. -#]
+[%- set triggers -%]
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "55 3 * * 2"
+[% endset -%]
+{= replaced(".github/workflows/newest-php.yml", [[by_hand, triggers], [guard, ""]]) -=}
