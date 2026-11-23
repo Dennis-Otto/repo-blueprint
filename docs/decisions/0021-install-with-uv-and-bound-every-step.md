@@ -1,6 +1,6 @@
 # Install the tools with uv, start mypy from its cache, and bound every step that installs, builds or downloads
 
-- Status: accepted
+- Status: accepted, amended by [1132](1132-each-check-ends-after-a-limit-measured-against-its-slowest-runs.md), with which `check (python)` ends after 12 minutes and `check (github-action)` after 15, each measured against its slowest runs
 - Date: 2026-10-13
 
 ## Context

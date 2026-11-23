@@ -506,6 +506,34 @@ def test_the_command_finds_each_package_json_with_overrides_and_a_lock_file(
 
 
 @needs_git
+def test_an_untracked_package_json_of_another_tool_is_left_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Renovate's Composer update installs into stacks/php/vendor/, and its checkout
+    # keeps that folder for the next branch; no .gitignore names it here.
+    old = lock(eslint="10.15.0", minimatch="11.0.8")
+    root = project(
+        tmp_path, {"package.json": HOMEDARTS, "package-lock.json": dumped(old)}
+    )
+    vendored = {
+        "stacks/php/vendor/acme/tool/package.json": HOMEDARTS,
+        "stacks/php/vendor/acme/tool/package-lock.json": dumped(old),
+    }
+    for name, text in vendored.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(text.encode("utf-8"))
+    npm = FakeNpm(old, old)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(npm_overrides, "npm_in", lambda path: npm)
+
+    assert main(["npm-overrides", "--fix"], root=root) == 0
+
+    assert npm.folders == [root]
+    assert contents(root, "package.json") == [WITHOUT_THE_OVERRIDE.encode()]
+    assert contents(root, *vendored) == [text.encode() for text in vendored.values()]
+
+
+@needs_git
 def test_the_command_removes_an_override_in_a_folder_and_names_its_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

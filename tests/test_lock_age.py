@@ -20,6 +20,7 @@ import pytest
 from blueprint import github, lock_age
 from blueprint.cli import main
 from blueprint.lock_age import Added, Undated
+from blueprint.locks import NoAnswer
 
 GIT = shutil.which("git")
 pytestmark = pytest.mark.skipif(
@@ -336,6 +337,38 @@ def test_a_registry_that_doesnt_answer_leaves_the_version_undated(
     assert len(answers.asked) == attempts
 
 
+@pytest.mark.parametrize(
+    ("errors", "unanswered"),
+    [
+        ([refused(404)], False),
+        ([refused(403)], False),
+        ([refused(503)] * lock_age.ATTEMPTS, True),
+        ([refused(429)] * lock_age.ATTEMPTS, True),
+        ([refused(408)] * lock_age.ATTEMPTS, True),
+        ([urllib.error.URLError("timed out")] * lock_age.ATTEMPTS, True),
+    ],
+    ids=[
+        "not found",
+        "forbidden",
+        "an error of the registry",
+        "a limit of the rate",
+        "a timeout of the registry",
+        "an outage",
+    ],
+)
+def test_the_registry_tells_a_version_it_didnt_answer_about_from_one_it_refused(
+    errors: list[OSError], unanswered: bool
+) -> None:
+    # A later run may get the answer of an outage, never that of a refusal.
+    url = "https://pypi.org/pypi/alpha/1.5/json"
+
+    with pytest.raises(Undated) as raised:
+        lock_age.ask(url, Registries({url: list(errors)}))
+
+    assert isinstance(raised.value, lock_age.Unanswered) is unanswered
+    assert isinstance(raised.value, NoAnswer) is unanswered
+
+
 def opened_by_urllib(
     monkeypatch: pytest.MonkeyPatch, answers: Callable[[str, float], io.BytesIO]
 ) -> None:
@@ -548,6 +581,16 @@ def test_the_refresh_of_pip_compile_asks_pypi_when_a_version_of_main_came_out() 
     assert lock_age.pypi_uploaded("beta", "2.0", answers) is None
     # A version that has no file.
     assert lock_age.pypi_uploaded("gamma", "3.0", answers) is None
+
+
+def test_the_refresh_learns_when_pypi_didnt_answer() -> None:
+    url = "https://pypi.org/pypi/alpha/1.0/json"
+    answers = Registries(
+        {url: [urllib.error.URLError("timed out")] * lock_age.ATTEMPTS}
+    )
+
+    with pytest.raises(lock_age.Unanswered, match=f"^{url}: "):
+        lock_age.pypi_uploaded("alpha", "1.0", answers)
 
 
 def test_the_check_passes_a_refresh_of_versions_a_week_old(

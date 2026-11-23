@@ -40,7 +40,10 @@ newer release than the repository and the pull request of the blueprint bot does
 bring it yet, the look starts the blueprint bot, so that a repository that the Rollout
 doesn't start, such as one of another owner, gets it within a day (decision 0052). In
 the blueprint, it also keeps one issue with the warnings and errors in the log of
-Renovate.
+Renovate. Only the warnings of NEEDLESS stay out of it, which the summary names
+instead: the empty commit of a weekly refresh of pip-compile that has no version a
+week old left to bring, while no other line of the repository has its branch and no
+pull request of the branch is open (decision 1130).
 """
 
 from __future__ import annotations
@@ -238,6 +241,9 @@ MOST_PROBLEMS = 50
 # Renovate's line for two updates of one dependency in one branch, of which it drops
 # one; the rules of the blueprint raise it from info to a warning.
 COLLISION = "Ignoring upgrade collision"
+# Renovate's warning for a commit of its branch without a change, after which it pushes
+# nothing (commitFiles of lib/util/git/index.ts).
+EMPTY_COMMIT = "Detected empty commit - aborting git push"
 # The issue that lists the pull requests of Renovate that Renovate leaves alone and
 # that the daily look can't bring back by itself (decision 0144).
 PARKED = "renovate-parked"
@@ -2224,9 +2230,9 @@ def problem_of(entry: Mapping[str, Any]) -> Problem:
     )
 
 
-def renovate_problems(lines: Iterable[str]) -> dict[Problem, int]:
-    """The warnings and errors of Renovate's log in JSON, each with how often it came."""
-    problems: dict[Problem, int] = {}
+def renovate_entries(lines: Iterable[str]) -> list[dict[str, Any]]:
+    """The lines of Renovate's log in JSON that are warnings or errors."""
+    entries = []
     for line in lines:
         try:
             entry = json.loads(line)
@@ -2235,11 +2241,152 @@ def renovate_problems(lines: Iterable[str]) -> dict[Problem, int]:
         if not isinstance(entry, dict):
             continue
         level = entry.get("level")
-        if not isinstance(level, int) or level < 40:
-            continue
+        if isinstance(level, int) and level >= 40:
+            entries.append(entry)
+    return entries
+
+
+def counted(entries: Iterable[Mapping[str, Any]]) -> dict[Problem, int]:
+    """The problems of the lines of a log, each with how often it came."""
+    problems: dict[Problem, int] = {}
+    for entry in entries:
         problem = problem_of(entry)
         problems[problem] = problems.get(problem, 0) + 1
     return problems
+
+
+def renovate_problems(lines: Iterable[str]) -> dict[Problem, int]:
+    """The warnings and errors of Renovate's log in JSON, each with how often it came."""
+    return counted(renovate_entries(lines))
+
+
+@dataclass(frozen=True)
+class Needless:
+    """A warning of Renovate that needs nothing on one branch, in one repository or,
+    without one, in any, with what it is and why it needs nothing."""
+
+    message: str
+    branch: str
+    repository: str
+    what: str
+    why: str
+
+
+# The warnings that need nothing, when no other warning or error of the repository has
+# the same branch and GitHub answers that no pull request of the branch is open
+# (decision 1130). Each is the empty commit of a weekly refresh after which
+# `locks --refresh` took every version back to that of main: no version is both newer
+# and a week old. Never by the message alone, as logLevelRemap would: on the branch of
+# a security update, the empty commit is a fix that can't land, and on a refresh while
+# its pull request is open, a commit that Renovate couldn't make.
+NEEDLESS = (
+    # Renovate's branch of the refresh of pip-compile, its branchTopic
+    # pip-compile-refresh (lib/modules/manager/pip-compile/index.ts), on which
+    # `locks --refresh` runs in every repository.
+    Needless(
+        EMPTY_COMMIT,
+        "renovate/pip-compile-refresh",
+        "",
+        "an empty commit",
+        "the weekly refresh has no version a week old to bring",
+    ),
+    # The group of the blueprint's own .github/renovate.json5 that refreshes
+    # requirements-dev.txt, a lock file of pip-compile, alone. Not every branch of a
+    # group: one of npm, such as that of .github/a11y, runs no `locks --refresh`.
+    Needless(
+        EMPTY_COMMIT,
+        "renovate/lock-file-maintenance-the-tools-of-the-blueprint's-tests",
+        "Dennis-Otto/repo-blueprint",
+        "an empty commit",
+        "the weekly refresh has no version a week old to bring",
+    ),
+)
+
+
+def needless_of(entry: Mapping[str, Any]) -> Needless | None:
+    """The warning that needs nothing that a line of the log is, if any."""
+    repository = str(entry.get("repository") or "")
+    return next(
+        (
+            needless
+            for needless in NEEDLESS
+            if entry.get("msg") == needless.message
+            and entry.get("branch") == needless.branch
+            and needless.repository in ("", repository)
+        ),
+        None,
+    )
+
+
+def no_pull_request(
+    api: Api, repository: str, branch: str, asked: dict[tuple[str, str], bool]
+) -> bool:
+    """Whether GitHub answers that no pull request of the branch of a repository is
+    open; not when it doesn't answer, or answers 404, as for a private repository that
+    the token of the job can't read."""
+    if (repository, branch) not in asked:
+        owner = repository.partition("/")[0]
+        try:
+            pulls = api.get(
+                f"repos/{repository}/pulls?state=open"
+                f"&head={owner}:{urllib.parse.quote(branch)}"
+            )
+        except GitHubError:
+            pulls = None
+        asked[repository, branch] = pulls == []
+    return asked[repository, branch]
+
+
+def left_out(
+    api: Api, entries: Sequence[Mapping[str, Any]], known: dict[str, bool]
+) -> tuple[list[Mapping[str, Any]], dict[tuple[Needless, str], int]]:
+    """The lines of the log that are problems, and those that need nothing, by what
+    they are and their repository, with how often each came. Such a line needs nothing
+    only in a public repository, when no other warning or error of the repository has
+    its branch, and GitHub answers that no pull request of its branch is open."""
+    messages: dict[tuple[str, str], set[str]] = {}
+    for entry in entries:
+        key = (str(entry.get("repository") or ""), str(entry.get("branch") or ""))
+        messages.setdefault(key, set()).add(str(entry.get("msg") or ""))
+    asked: dict[tuple[str, str], bool] = {}
+    problems: list[Mapping[str, Any]] = []
+    left: dict[tuple[Needless, str], int] = {}
+    for entry in entries:
+        needless = needless_of(entry)
+        repository = str(entry.get("repository") or "")
+        if (
+            needless
+            and messages[repository, needless.branch] == {needless.message}
+            and is_public(api, repository, known)
+            and no_pull_request(api, repository, needless.branch, asked)
+        ):
+            left[needless, repository] = left.get((needless, repository), 0) + 1
+        else:
+            problems.append(entry)
+    return problems, left
+
+
+def joined(names: Sequence[str]) -> str:
+    """Names in a sentence: a, b and c."""
+    return " and ".join(filter(None, (", ".join(names[:-1]), names[-1])))
+
+
+def left_out_text(left: Mapping[tuple[Needless, str], int]) -> str:
+    """What the bot left out of the problems, and why."""
+    if not left:
+        return ""
+    repositories: dict[Needless, list[str]] = {}
+    for needless, repository in sorted(left, key=lambda key: key[1]):
+        repositories.setdefault(needless, []).append(repository)
+    parts = [
+        f"{needless.what} of {needless.branch} in {joined(repositories[needless])}: "
+        f"{needless.why}, and no pull request of the branch is open"
+        for needless in NEEDLESS
+        if needless in repositories
+    ]
+    count = sum(left.values())
+    warnings = "1 warning that needs" if count == 1 else f"{count} warnings that need"
+    return f"Renovate logged {warnings} nothing: {'; '.join(parts)}.\n\n"
 
 
 def is_public(api: Api, name: str, known: dict[str, bool]) -> bool:
@@ -2306,14 +2453,33 @@ def renovate_report(
     """Keeps the one issue with Renovate's problems current from the logs of a run, one
     for each repository where the blueprint runs Renovate for several. A run that isn't
     complete missed a repository, which may be the one with the problems, so it doesn't
-    count towards closing the issue."""
+    count towards closing the issue. A warning that needs nothing, of NEEDLESS, is no
+    problem: the summary names it instead (decision 1130)."""
     written = [log for log in logs if log.is_file()]
     if not written:
         return "Renovate wrote no log of problems; the issue stays as it is.\n"
-    problems = renovate_problems(
+    entries = renovate_entries(
         line for log in written for line in log.read_text("utf-8").splitlines()
     )
     known: dict[str, bool] = {}
+    kept, left = left_out(api, entries, known)
+    return left_out_text(left) + issue_of_problems(
+        api, repo, counted(kept), known, run, complete=complete, others=bool(left)
+    )
+
+
+def issue_of_problems(
+    api: Api,
+    repo: str,
+    problems: Mapping[Problem, int],
+    known: dict[str, bool],
+    run: str,
+    *,
+    complete: bool,
+    others: bool,
+) -> str:
+    """Opens, updates or closes the issue of Renovate's problems, and says what it did;
+    others says that the bot left warnings out that need nothing."""
     shown = {
         problem: count
         for problem, count in problems.items()
@@ -2323,6 +2489,8 @@ def renovate_report(
     issue = open_issues(api, repo).get(RENOVATE)
     if not problems:
         if issue is None:
+            if others:
+                return "Renovate logged no other warning and no error.\n"
             return "Renovate logged no warning and no error.\n"
         if not complete:
             return (

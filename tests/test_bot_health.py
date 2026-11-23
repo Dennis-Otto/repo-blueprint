@@ -8,6 +8,7 @@ import io
 import json
 import re
 import subprocess
+import urllib.parse
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -177,7 +178,7 @@ class FakeGitHub:
         self.reran: list[int] = []
         self.enabled: list[int] = []
         self.dispatched: list[tuple[int, Any]] = []
-        self.others: dict[str, dict[str, Any] | int] = {}
+        self.others: dict[str, dict[str, Any] | list[Any] | int] = {}
         # A status that answers a request instead of the simulation.
         self.fail: dict[tuple[str, str], int] = {}
         # What a refused second try finds: the run as another bot left it.
@@ -4716,6 +4717,205 @@ def test_the_issue_of_renovate_counts_the_updates_that_collided(
         "waits, as for its release age. A rule that gives one of them a branch of its "
         "own keeps them apart, as the blueprint does with the digests of the images.\n"
     ) in summary
+
+
+EMPTY_COMMIT = "Detected empty commit - aborting git push"
+REFRESH = "renovate/pip-compile-refresh"
+# The group of the blueprint's own refresh of requirements-dev.txt.
+GROUPED = "renovate/lock-file-maintenance-the-tools-of-the-blueprint's-tests"
+BLUEPRINT = "Dennis-Otto/repo-blueprint"
+APP = "Dennis-Otto/issue-assistant"
+SITE = "Dennis-Otto/dennis-otto.github.io"
+
+
+def empty_commit(repository: str, branch: str) -> str:
+    """Renovate's warning for an empty commit, with the fields that it carries."""
+    return log_line(
+        40,
+        EMPTY_COMMIT,
+        repository=repository,
+        branch=branch,
+        commitRes={"changes": 0, "insertions": 0, "deletions": 0},
+    )
+
+
+def open_pulls_of(repository: str, branch: str) -> str:
+    """The request for the open pull requests of a branch, as GitHub's other paths."""
+    owner = repository.split("/")[0]
+    return f"{repository}/pulls?state=open&head={owner}:{urllib.parse.quote(branch)}"
+
+
+def public(github: FakeGitHub, *repositories: str) -> None:
+    """Public repositories without an open pull request of the branches of the test."""
+    for repository in repositories:
+        github.others[repository] = {"private": False}
+        for branch in (REFRESH, GROUPED, "renovate/lock-file-maintenance-other"):
+            github.others[open_pulls_of(repository, branch)] = []
+
+
+def test_renovate_leaves_out_the_empty_commit_of_a_refresh_with_nothing_to_bring(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # After the weekly refresh merged, Renovate builds it again in every run of that
+    # Monday, and locks --refresh takes every version back to main's (#1127).
+    public(github, APP, SITE, BLUEPRINT)
+    log = tmp_path / "problems.json"
+    lines = [
+        empty_commit(APP, REFRESH),
+        empty_commit(SITE, REFRESH),
+        empty_commit(BLUEPRINT, GROUPED),
+        empty_commit(BLUEPRINT, GROUPED),
+    ]
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert summary == (
+        "Renovate logged 4 warnings that need nothing: an empty commit of "
+        f"{REFRESH} in {SITE} and {APP}: the weekly refresh has no version a week old "
+        "to bring, and no pull request of the branch is open; an empty commit of "
+        f"{GROUPED} in {BLUEPRINT}: the weekly refresh has no version a week old to "
+        "bring, and no pull request of the branch is open.\n\n"
+        "Renovate logged no other warning and no error.\n"
+    )
+    assert writes(github) == []
+    # One question for each branch of each repository.
+    asked = [path for _, path in github.calls if "/pulls?" in path]
+    assert len(asked) == len(set(asked)) == 3
+
+    # With an open issue, the run counts as quiet.
+    log.write_text(empty_commit(APP, REFRESH) + "\n", encoding="utf-8")
+    number = github.add_issue(RENOVATE, quiet=1)
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert summary == (
+        "Renovate logged 1 warning that needs nothing: an empty commit of "
+        f"{REFRESH} in {APP}: the weekly refresh has no version a week old to bring, "
+        "and no pull request of the branch is open.\n\n"
+        f"Renovate logged no problem; #{number} closes after "
+        f"{QUIET_RUNS - 2} more runs like this.\n"
+    )
+    assert github.state_of(number)["quiet"] == 2
+
+
+@pytest.mark.parametrize(
+    ("repository", "branch"),
+    [
+        # A security update that can't land, as in #212 and #384.
+        (APP, "renovate/pypi-pillow-vulnerability"),
+        # A group of another refresh, as that of npm, where no locks --refresh runs.
+        (BLUEPRINT, "renovate/lock-file-maintenance-other"),
+        # The group of the blueprint's own refresh, in another repository.
+        (APP, GROUPED),
+        # Renovate itself, which names no repository.
+        ("", REFRESH),
+    ],
+    ids=["security update", "other group", "group elsewhere", "no repository"],
+)
+def test_renovate_lists_the_empty_commit_of_any_other_branch(
+    github: FakeGitHub, tmp_path: Path, repository: str, branch: str
+) -> None:
+    public(github, APP, BLUEPRINT)
+    github.others[open_pulls_of(APP, branch)] = []
+    log = tmp_path / "problems.json"
+    log.write_text(empty_commit(repository, branch) + "\n", encoding="utf-8")
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert f"| WARN | `{EMPTY_COMMIT}` | `{branch}` |  | 1 |" in summary
+    assert "need nothing" not in summary
+    assert summary.endswith("\nOpened #1.\n")
+
+
+def test_renovate_lists_the_empty_commit_of_a_refresh_whose_pull_request_is_open(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Renovate couldn't commit to the branch of an open pull request.
+    public(github, APP)
+    github.others[open_pulls_of(APP, REFRESH)] = [{"number": 445}]
+    log = tmp_path / "problems.json"
+    log.write_text(empty_commit(APP, REFRESH) + "\n", encoding="utf-8")
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert f"| WARN | `{EMPTY_COMMIT}` | `{REFRESH}` |  | 1 |" in summary
+    assert "need nothing" not in summary
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        log_line(
+            40,
+            "artifactErrors",
+            repository=APP,
+            branch=REFRESH,
+            packageFile="requirements-dev.in",
+        ),
+        log_line(
+            40,
+            "Branch not created because artifact update failed",
+            repository=APP,
+            branch=REFRESH,
+        ),
+    ],
+    ids=["artifact errors", "branch not created"],
+)
+def test_renovate_lists_the_empty_commit_beside_another_problem_of_its_branch(
+    github: FakeGitHub, tmp_path: Path, other: str
+) -> None:
+    # The other line names the lock file as its place, and still counts by its branch;
+    # the other branch of the repository needs nothing.
+    public(github, APP)
+    log = tmp_path / "problems.json"
+    log.write_text(
+        f"{empty_commit(APP, REFRESH)}\n{other}\n{empty_commit(SITE, REFRESH)}\n",
+        encoding="utf-8",
+    )
+    public(github, SITE)
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert f"| WARN | `{EMPTY_COMMIT}` | `{REFRESH}` |  | 1 |" in summary
+    assert f"`{json.loads(other)['msg']}`" in summary
+    assert summary.startswith(
+        f"Renovate logged 1 warning that needs nothing: an empty commit of {REFRESH} "
+        f"in {SITE}: "
+    )
+    assert f"in {APP}" not in summary.split("\n", 1)[0]
+
+
+@pytest.mark.parametrize("answer", [502, 404], ids=["error", "not found"])
+def test_renovate_lists_the_empty_commit_when_github_doesnt_answer_about_its_pull(
+    github: FakeGitHub, tmp_path: Path, answer: int
+) -> None:
+    public(github, APP)
+    github.others[open_pulls_of(APP, REFRESH)] = answer
+    log = tmp_path / "problems.json"
+    log.write_text(empty_commit(APP, REFRESH) + "\n", encoding="utf-8")
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert f"| WARN | `{EMPTY_COMMIT}` | `{REFRESH}` |  | 1 |" in summary
+    assert "need nothing" not in summary
+
+
+def test_renovate_counts_the_empty_commit_of_a_private_repository(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The token of the job can't read the pull requests of a private repository of
+    # another owner, nor the repository: its warning stays a problem, unnamed.
+    log = tmp_path / "problems.json"
+    log.write_text(empty_commit("someone/private", REFRESH) + "\n", encoding="utf-8")
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert summary.endswith(
+        "\n1 more in private repositories, which a public issue doesn't name.\n"
+        "\nOpened #1.\n"
+    )
+    assert not [path for _, path in github.calls if "/pulls?" in path]
 
 
 # ---------------------------------------------------------------- the command line
