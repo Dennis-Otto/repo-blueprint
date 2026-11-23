@@ -3,11 +3,13 @@ with saved copies of real entries (decision 1046)."""
 
 from __future__ import annotations
 
+import ast
 import http.client
 import io
 import json
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -797,10 +799,13 @@ def test_the_answers_are_the_file_and_the_project_file() -> None:
     given, own = best_practices.answers(root)
     template = json.loads((ROOT / ".bestpractices.json").read_text(encoding="utf-8"))
 
-    # The blueprint answers four criteria as only it can (decision 1088): it keeps the
+    # The blueprint answers six criteria as only it can (decision 1088): it keeps the
     # tools of its website in stacks/docs/, from where every repository gets them as
-    # .github/docs-requirements.txt (issue 1087).
+    # .github/docs-requirements.txt (issue 1087), and its pyproject.toml lists no
+    # dependencies, which its blueprint/ takes besides the standard library (issue 1109).
     assert own == {
+        "external_dependencies_justification",
+        "osps_qa_02_01_justification",
         "installation_development_quick_justification",
         "test_justification",
         "test_continuous_integration_justification",
@@ -816,7 +821,52 @@ def test_the_answers_are_the_file_and_the_project_file() -> None:
     )
     assert (ROOT / "stacks/docs/requirements-docs.txt").is_file()
     assert not (ROOT / ".github/docs-requirements.txt").exists()
-    assert best_practices.verify(ROOT) == best_practices.Verification([], [], 4)
+    assert best_practices.verify(ROOT) == best_practices.Verification([], [], 6)
+
+
+# It reads the blueprint's own files, which the copy of the mutation tests lacks.
+@pytest.mark.mutation_unsafe
+def test_the_blueprint_names_what_its_code_takes_besides_the_standard_library() -> None:
+    given, _ = best_practices.answers(ROOT)
+    taken: dict[str, set[str]] = {}
+    for path in [ROOT / "blueprint.py", *sorted((ROOT / "blueprint").rglob("*.py"))]:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                top = name.partition(".")[0]
+                if top not in sys.stdlib_module_names and top != "blueprint":
+                    taken.setdefault(top, set()).add(path.relative_to(ROOT).as_posix())
+
+    # Each package that the code imports besides the standard library is one that the
+    # answers name, in the file that takes it, and nothing else (issue 1109).
+    assert taken == {
+        "PIL": {"blueprint/screenshots.py"},
+        "yaml": {"blueprint/website.py"},
+    }
+    for criterion in ("external_dependencies", "osps_qa_02_01"):
+        words, _, link = str(given[f"{criterion}_justification"]).rpartition(": ")
+        assert "pyproject.toml" not in words
+        assert "the screenshot bot, which takes Pillow from" in words
+        assert "one step of the website, which takes PyYAML" in words
+        named = re.findall(r"[\w/.-]+\.(?:in|txt)\b", words)
+        assert named == [
+            "stacks/screenshots/requirements.in",
+            "requirements-dev.in",
+            "requirements-dev.txt",
+        ]
+        for name in named:
+            assert (ROOT / name).is_file(), name
+        assert link == (
+            "https://github.com/Dennis-Otto/repo-blueprint/blob/main/requirements-dev.in"
+        )
+    assert "pillow==" in (ROOT / "stacks/screenshots/requirements.in").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_what_is_no_answer_of_the_project_file_stays_out(tmp_path: Path) -> None:

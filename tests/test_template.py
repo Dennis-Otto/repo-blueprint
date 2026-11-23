@@ -3235,10 +3235,11 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         if name == ".github/renovate-blueprint.json5":
             # The blueprint runs its blueprint.py from its root, where every
             # repository has it as .github/blueprint.py.
-            own = own.replace(
-                "python3 blueprint.py locks --refresh",
-                "python3 .github/blueprint.py locks --refresh",
-            )
+            for command in ("locks --refresh", "npm-overrides --fix"):
+                own = own.replace(
+                    f"python3 blueprint.py {command}",
+                    f"python3 .github/blueprint.py {command}",
+                )
         assert own == (project / name).read_text(encoding="utf-8"), name
 
 
@@ -5386,6 +5387,64 @@ def test_the_checks_fail_on_a_page_with_columns_side_by_side(
         '\nThe card\n\n<img src="docs/images/card.png" alt="The card">\n'
     )
     assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_take_no_python_without_its_standard_library(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The dev container of a Nextcloud app has only python3-minimal of Debian until its
+    # setup.sh has run: a Python 3.13 that passes the version, but without shutil and
+    # tomllib, on which blueprint.py fails (issue 1109). A shutil.py that fails as the
+    # missing module does stands in for it, in front of the standard library of every
+    # Python of the PATH.
+    project = shutil.copytree(projects["nextcloud-app"], tmp_path / "repository")
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Pages in one column"')
+    script = (
+        check[: check.index('step "Text files"')]
+        + check[start : check.index('step "Markdown"', start)]
+    )
+    minimal = tmp_path / "minimal"
+    minimal.mkdir()
+    (minimal / "shutil.py").write_text(
+        "raise ModuleNotFoundError(\"No module named 'shutil'\", name='shutil')\n",
+        encoding="utf-8",
+    )
+    variables = {"PYTHONPATH": minimal.as_posix()}
+    path = os.pathsep.join(
+        [str(Path(sys.executable).parent), os.environ.get("PATH", "")]
+    )
+
+    complete = run_the_steps(project, script, path=path)
+    skipped = run_the_steps(project, script, path=path, variables=variables)
+    failed = run_the_steps(project, script, path=path, ci=True, variables=variables)
+
+    assert complete.returncode == 0, complete.stdout + complete.stderr
+    assert "page(s) that GitHub shows have one column." in complete.stdout
+    # Outside the CI the step skips, as it does where no Python is installed, and the
+    # later steps that take its Python skip with it.
+    assert skipped.returncode == 0, skipped.stdout + skipped.stderr
+    assert (
+        "Python 3.12 or newer with its standard library is not installed here; the CI"
+        " checks the pages.\n"
+    ) in skipped.stdout
+    assert "ModuleNotFoundError" not in skipped.stdout + skipped.stderr
+    # In the CI it fails, since there every Python has its standard library.
+    assert failed.returncode == 1
+    assert (
+        "Checking the pages needs Python 3.12 or newer with its standard library, which"
+        " this runner lacks.\n"
+    ) in failed.stdout
+    assert "ModuleNotFoundError" not in failed.stdout + failed.stderr
+    # Each step that takes the Python of this one says the same when it skips.
+    for name in (project / "scripts/check.sh", ROOT / "scripts/check.sh"):
+        text = name.read_text(encoding="utf-8")
+        assert "Python 3.12 or newer is not installed" not in text
+        assert "needs Python 3.12 or newer, which" not in text
+        assert text.count("-c 'import shutil, sys, tomllib; sys.exit(") == 1
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10866,6 +10925,13 @@ def proposed_criteria(project: Path, repository: str) -> set[str]:
             if not link.startswith(files):
                 continue
             path, _, anchor = link.removeprefix(files).partition("#")
+            if not (project / path).is_file() and not anchor:
+                # The manifest of an integration, which a rendering without sample
+                # code leaves to the project's own code: the step Version of its
+                # scripts/check.sh fails without it (issue 1109).
+                check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+                assert f"\nversion_in {path} '" in check, (criterion, path)
+                continue
             assert (project / path).is_file(), (criterion, path)
             if anchor:
                 markdown = (project / path).read_text(encoding="utf-8")
@@ -10929,6 +10995,17 @@ WORDS_OF_A_KIND: list[tuple[str, str, set[str]]] = [
     ("delivery_mitm", "HACS", {"home-assistant"}),
     ("sites_password_security", "HACS", {"home-assistant"}),
     ("installation_development_quick", "requirements-test.txt", {"home-assistant"}),
+    # The manifest of the integration, whose packages Home Assistant installs, and the
+    # fuzzing of a Python package and an action, beside the tests and checks (issue
+    # 1109).
+    *(
+        (criterion, words, kinds)
+        for criterion in ("external_dependencies", "osps_qa_02_01")
+        for words, kinds in (
+            ("manifest.json lists in requirements", {"home-assistant"}),
+            ("requirements-fuzz.in", {"python-package", "github-action"}),
+        )
+    ),
     # A GitHub Action: the required check that runs it, and the pinned commit.
     ("automated_integration_testing", "action-test.yml", {"github-action"}),
     ("delivery_mitm", "commit hash", {"github-action"}),
@@ -11173,6 +11250,15 @@ SOURCES_OF_THE_ANSWERS: list[tuple[str, str, str, str]] = [
         ".github/workflows/build-release.yml",
         "The zip for HACS has no manifest.json of $domain $VERSION at its root.",
     ),
+    *(
+        (
+            criterion,
+            "manifest.json lists in requirements",
+            "custom_components/demo_project/manifest.json",
+            '"requirements":',
+        )
+        for criterion in ("external_dependencies", "osps_qa_02_01")
+    ),
 ]
 
 
@@ -11194,6 +11280,18 @@ def test_the_answers_of_openssf_best_practices_say_what_their_files_say(
     # The file of the website's tools that the quick set-up names is there.
     if ".venv-docs" in answers["installation_development_quick_justification"]:
         assert (project / ".github/docs-requirements.txt").is_file()
+    # The direct dependencies are where the answers say: pyproject.toml lists some only
+    # with a table [project], and each file of requirements that they name is there
+    # (issue 1109).
+    for criterion in ("external_dependencies", "osps_qa_02_01"):
+        words = answers.get(f"{criterion}_justification", "").rpartition(": ")[0]
+        if "pyproject.toml" in words:
+            pyproject = tomllib.loads(
+                (project / "pyproject.toml").read_text(encoding="utf-8")
+            )
+            assert "dependencies" in pyproject.get("project", {}), (criterion, kind)
+        for name in re.findall(r"requirements-[\w-]+\.(?:in|txt)\b", words):
+            assert (project / name).is_file(), (criterion, name)
     # Each answer, with its status, fits into one link of the bot's issue, also where
     # the entry has an answer that the link has to replace.
     for name, justification in answers.items():
@@ -12592,6 +12690,15 @@ WAITS = {
     "updateNotScheduled": False,
     "additionalBranchPrefix": "review-",
 }
+# The task after every update of npm, which removes an override that the update made
+# needless (decision 1112), without its command, which names where blueprint.py is.
+# Renovate commits only package.json and package-lock.json of it, in any folder, and
+# installs Node with npm, which its image lacks, and Python for blueprint.py.
+NPM_OVERRIDES_TASKS = {
+    "fileFilters": ["**/package.json", "**/package-lock.json"],
+    "executionMode": "branch",
+    "installTools": {"node": {}, "python": {}},
+}
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -12618,6 +12725,9 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     # that what merges is what the checks saw; the branch bot keeps it up to date
     # with main, as Renovate does in its window.
     blueprint = "blueprint.py" if kind == "blueprint" else ".github/blueprint.py"
+    # After the refresh of npm, as after every update of npm, blueprint.py removes an
+    # override that npm no longer needs; Renovate runs each distinct task of the
+    # updates of a branch once, so a branch with both runs both commands.
     for manager in ("npm", "pip-compile"):
         refresh = refresh_of(shared, own, manager)
         tasks = refresh.pop("postUpgradeTasks", None)
@@ -12630,7 +12740,8 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
                 "installTools": {"python": {}, "uv": {}},
             }
             if manager == "pip-compile"
-            else None
+            else NPM_OVERRIDES_TASKS
+            | {"commands": [f"python3 {blueprint} npm-overrides --fix"]}
         )
     assert shared["rebaseWhen"] == "behind-base-branch"
     assert refresh_of(shared, own, "composer") == COMPOSER
@@ -12643,13 +12754,27 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
         "schedule": ["at any time"],
         "automerge": True,
     }
-    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+    # The command after an update of npm changes no version but what an override
+    # held, and keeps the lock file to the versions that it had, so it is the one
+    # task of every update.
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    overrides = {
+        "matchManagers": ["npm"],
+        "postUpgradeTasks": NPM_OVERRIDES_TASKS
+        | {"commands": [f"python3 {blueprint} npm-overrides --fix"]},
+    }
+    assert rules.count(overrides) == 1
+    for rule in rules:
         if {"postUpgradeTasks", "statusCheckWhen", "additionalBranchPrefix"} & set(
             rule
         ) and "pins.py" not in str(rule):
-            assert rule["matchUpdateTypes"] == ["lockFileMaintenance"], rule
+            assert rule == overrides or rule["matchUpdateTypes"] == [
+                "lockFileMaintenance"
+            ], rule
     # The Renovate of the blueprint, which runs for every repository of its owner,
-    # runs the command of the refresh and no other of blueprint.py.
+    # runs the command of the refresh and the one of the overrides of npm, and no
+    # other of blueprint.py: every command of a task matches exactly one entry of
+    # allowedCommands.
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
@@ -12657,6 +12782,18 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     allowed = [rule for rule in bot["allowedCommands"] if re.search(rule, command)]
     assert allowed == [r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"]
     assert not re.search(allowed[0], f"python3 {blueprint} locks --fix")
+    for rule in rules:
+        for task in rule.get("postUpgradeTasks", {}).get("commands", []):
+            matches = [
+                entry for entry in bot["allowedCommands"] if re.search(entry, task)
+            ]
+            assert len(matches) == 1, task
+    command = f"python3 {blueprint} npm-overrides --fix"
+    assert [entry for entry in bot["allowedCommands"] if re.search(entry, command)] == [
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$"
+    ]
+    for other in ("npm-overrides", "npm-overrides --fix --other", "pins.py"):
+        assert not re.search(bot["allowedCommands"][1], f"python3 {blueprint} {other}")
     # The check dependency-review holds a refresh that merges by itself when a version
     # younger than a week comes anyway, on the branches that Renovate names it, alone
     # or in a group, and names the versions of Composer that nothing dates; one that
@@ -13012,10 +13149,11 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
-    # Besides the command of the weekly refresh of the lock files, which every
-    # repository has.
+    # Besides the command of the weekly refresh of the lock files and the one that
+    # removes a needless override of npm, which every repository has.
     assert bot["allowedCommands"] == [
         r"^python3 (?:\.github/)?blueprint\.py locks --refresh$",
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$",
         r"^python3 pins\.py$",
     ]
     assert [
@@ -15454,14 +15592,16 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         run["env"]
     )
     # The settings of the bot of the blueprint, without the command of its pins.py,
-    # which no repository has; the command of the weekly refresh stays.
+    # which no repository has; the commands of the weekly refresh and of the
+    # overrides of npm stay.
     own = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     start = own.index("    // The blueprint's own pins.py")
     end = own.index("\n", own.index('"^python3 pins')) + 1
     bot = (project / ".github/renovate-global.json5").read_text(encoding="utf-8")
     assert bot == own[:start] + own[end:]
     assert renovate_rules(bot)["allowedCommands"] == [
-        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"
+        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$",
+        r"^python3 (?:\.github/)?blueprint\.py npm-overrides --fix$",
     ]
     # Renovate updates the Renovate of the workflow on its line "# renovate:" alone,
     # by the same rule as in the blueprint.

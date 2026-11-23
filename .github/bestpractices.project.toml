@@ -16,3 +16,9 @@ justification = "On every pull request and after every change of main, the requi
 
 [version_tags_signed]
 justification = "Every release tag since v0.6.0 is an annotated tag that the release workflow signs without a key with gitsign: Sigstore certifies the identity of the release workflow, and the workflow Release verification checks the signature and that identity after every release, and those of the latest release every week: https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/sign-tag.sh https://github.com/Dennis-Otto/repo-blueprint/releases/tag/v0.6.0"
+
+[external_dependencies]
+justification = "blueprint.py and the package blueprint/ run on the standard library of Python, except the screenshot bot, which takes Pillow from stacks/screenshots/requirements.in, and one step of the website, which takes PyYAML; requirements-dev.in lists the direct dependencies of the tests and checks, which requirements-dev.txt pins with their hashes, and stacks/ holds the manifests and lock files that the kinds of projects take: https://github.com/Dennis-Otto/repo-blueprint/blob/main/requirements-dev.in"
+
+[osps_qa_02_01]
+justification = "blueprint.py and the package blueprint/ run on the standard library of Python, except the screenshot bot, which takes Pillow from stacks/screenshots/requirements.in, and one step of the website, which takes PyYAML; requirements-dev.in lists the direct dependencies of the tests and checks, which requirements-dev.txt pins with their hashes, and stacks/ holds the manifests and lock files that the kinds of projects take: https://github.com/Dennis-Otto/repo-blueprint/blob/main/requirements-dev.in"
