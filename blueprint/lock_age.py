@@ -221,10 +221,11 @@ def ask(url: str, opener: Callable[..., Any] | None = None) -> Any:
             with (opener or urllib.request.urlopen)(url, timeout=TIMEOUT) as response:
                 return json.load(response)
         except OSError as error:
-            # A refusal of the registry, such as 404, stays the same when asked again.
+            # A refusal of the registry, such as 404, stays the same when asked again;
+            # a timeout (408) or a limit of the rate (429) passes like an error of 5xx.
             passing = True
             if isinstance(error, urllib.error.HTTPError):
-                passing = error.code >= 500
+                passing = error.code >= 500 or error.code in (408, 429)
                 # The error is the answer too, and holds its body until it is closed.
                 error.close()
             if not passing:

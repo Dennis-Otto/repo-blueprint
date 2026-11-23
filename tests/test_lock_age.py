@@ -343,9 +343,18 @@ def test_a_registry_that_doesnt_answer_leaves_the_version_undated(
         ([refused(404)], False),
         ([refused(403)], False),
         ([refused(503)] * lock_age.ATTEMPTS, True),
+        ([refused(429)] * lock_age.ATTEMPTS, True),
+        ([refused(408)] * lock_age.ATTEMPTS, True),
         ([urllib.error.URLError("timed out")] * lock_age.ATTEMPTS, True),
     ],
-    ids=["not found", "forbidden", "an error of the registry", "an outage"],
+    ids=[
+        "not found",
+        "forbidden",
+        "an error of the registry",
+        "a limit of the rate",
+        "a timeout of the registry",
+        "an outage",
+    ],
 )
 def test_the_registry_tells_a_version_it_didnt_answer_about_from_one_it_refused(
     errors: list[OSError], unanswered: bool
