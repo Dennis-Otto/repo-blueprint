@@ -1107,7 +1107,7 @@ def test_the_bot_reads_the_annotation_of_the_step_that_stops_a_job() -> None:
     assert STOPPED in check["run"]
     assert STOPPED in STOPPED_JOB["message"]
     again = workflow_steps.step(
-        "after-checks.yml", "stopped", "Run the jobs again that Harden-Runner stopped"
+        "after-checks.yml", "stopped", "Run the jobs again that failed outside the code"
     )
     assert f'grep -qF "{STOPPED}"' in again["run"]
 
@@ -2613,6 +2613,194 @@ def test_the_daily_look_reports_a_failure_of_any_other_check_as_ever(
 
     assert len(github.issues) == 1
     assert ("GET", f"repos/{REPO}/git/ref/heads/main") not in github.calls
+
+
+DOCS = """name: Docs
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs: {}
+"""
+# The jobs of a run of Docs whose website GitHub Pages or Sigstore kept from being
+# published, and of one that a broken link failed.
+NOT_PUBLISHED = [
+    job_of_a_run(1, "docs", "success"),
+    job_of_a_run(
+        2,
+        "publish the website",
+        "failure",
+        [
+            ("Take the website that GitHub Pages publishes", "success"),
+            ("Attest the provenance of the website", "failure"),
+            ("Attest the provenance of the website once more", "failure"),
+        ],
+    ),
+    job_of_a_run(3, "ask the published website", "skipped", []),
+]
+NOT_HANDED_ON = [
+    job_of_a_run(
+        1,
+        "docs",
+        "failure",
+        [
+            ("Build the website", "success"),
+            ("Hand the website to GitHub Pages", "failure"),
+            ("Hand the website to GitHub Pages once more", "failure"),
+        ],
+    ),
+]
+BROKEN_LINK = [
+    job_of_a_run(
+        1,
+        "docs",
+        "failure",
+        [("Check the links", "failure"), ("Explain the failure", "success")],
+    ),
+]
+
+
+def failed_docs(
+    github: FakeGitHub,
+    tmp_path: Path,
+    jobs: list[dict[str, Any]],
+    *,
+    event: str = "push",
+    sha: str = HEAD,
+    ended: timedelta = timedelta(hours=3),
+    attempt: int = 2,
+    later: bool = False,
+    scheduled: bool = False,
+) -> None:
+    """A run of Docs on main that failed in these jobs, at its last attempt, which
+    ended this long ago; with later, a run that came after it still runs, and with
+    scheduled, a run of the schedule passed after it."""
+    write(tmp_path, 1, DOCS)
+    github.workflows = [workflow(1, "Docs")]
+    runs = [
+        run_of(
+            10,
+            name="Docs",
+            path=".github/workflows/w1.yml",
+            event=event,
+            created=NOW - ended - timedelta(minutes=5),
+            sha=sha,
+            attempt=attempt,
+        )
+    ]
+    if later:
+        runs.insert(
+            0,
+            run_of(
+                11,
+                name="Docs",
+                path=".github/workflows/w1.yml",
+                event="push",
+                status="in_progress",
+                conclusion=None,
+                created=NOW - timedelta(minutes=10),
+            ),
+        )
+    if scheduled:
+        runs.insert(
+            0,
+            run_of(
+                12,
+                name="Docs",
+                path=".github/workflows/w1.yml",
+                event="schedule",
+                conclusion="success",
+                created=NOW - timedelta(hours=1),
+            ),
+        )
+    github.workflow_runs[1] = runs
+    github.jobs[(10, attempt)] = jobs
+
+
+@pytest.mark.parametrize(
+    ("jobs", "scheduled"),
+    [(NOT_PUBLISHED, False), (NOT_HANDED_ON, False), (NOT_PUBLISHED, True)],
+    ids=["publish", "hand on", "a run of the schedule after it"],
+)
+def test_the_daily_look_starts_docs_once_more_for_a_website_that_it_didnt_publish(
+    github: FakeGitHub, tmp_path: Path, jobs: list[dict[str, Any]], scheduled: bool
+) -> None:
+    # Sigstore failed for at least ten minutes on 22 November 2026, longer than the
+    # second try in the job and the rerun of the bot for stopped checks. A new run
+    # builds the website again, as the artifact of the old one may have expired. A
+    # run of the schedule that passed after it published nothing.
+    failed_docs(github, tmp_path, jobs, scheduled=scheduled)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        "| `Docs` | didn't publish the website of aaaaaaa in [the run of "
+        f"{stamp(NOW - timedelta(hours=3, minutes=5))[:16].replace('T', ' ')} UTC]"
+        f"(https://github.com/{REPO}/actions/runs/10), as GitHub Pages or Sigstore "
+        "failed; a new run publishes it: started |"
+    ]
+    assert github.dispatched == [(1, {"ref": "main", "inputs": {}})]
+    assert github.issues == {}
+    assert github.reruns == []
+
+
+@pytest.mark.parametrize(
+    ("jobs", "changes"),
+    [
+        # The run that this bot or a person started publishes once more no longer.
+        (NOT_PUBLISHED, {"event": "workflow_dispatch"}),
+        # A broken link is one of the change.
+        (BROKEN_LINK, {}),
+        # The job docs failed in another step beside the hand-off.
+        (
+            [
+                job_of_a_run(
+                    1,
+                    "docs",
+                    "failure",
+                    [
+                        ("Check the links", "failure"),
+                        ("Hand the website to GitHub Pages once more", "failure"),
+                    ],
+                )
+            ],
+            {},
+        ),
+        # A newer push replaced the commit, whose website would replace a newer one.
+        (NOT_PUBLISHED, {"sha": LEFT}),
+        # A later run publishes the website itself.
+        (NOT_PUBLISHED, {"later": True}),
+    ],
+    ids=["dispatched", "broken link", "another step", "left", "later run"],
+)
+def test_the_daily_look_reports_any_other_failure_of_docs(
+    github: FakeGitHub,
+    tmp_path: Path,
+    jobs: list[dict[str, Any]],
+    changes: dict[str, Any],
+) -> None:
+    failed_docs(github, tmp_path, jobs, **changes)
+
+    sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert len(github.issues) == 1
+    assert github.dispatched == []
+
+
+def test_the_daily_look_leaves_docs_to_the_bot_for_stopped_checks_at_first(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The end of the run starts the bot for stopped checks, which runs it once more.
+    failed_docs(github, tmp_path, NOT_PUBLISHED, ended=timedelta(minutes=20), attempt=1)
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert summary.splitlines()[6:] == [
+        "| `Docs` | failed: its second try may still come |"
+    ]
+    assert github.dispatched == []
+    assert github.issues == {}
 
 
 def test_the_daily_look_starts_a_workflow_whose_schedule_github_missed(

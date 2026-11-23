@@ -88,7 +88,7 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
     record = pins.load_record(ROOT)
     # pins.py keeps the file, so it is in the form that pins.py writes.
     text = (ROOT / pins.RECORD).read_bytes().decode("utf-8")
-    assert text == pins.render_record(record, pins.load_bundles(ROOT))
+    assert text == pins.render_record(record)
     found = pins.find_pins(ROOT)
     assert (
         {pin.dep for pin in found}
@@ -544,6 +544,8 @@ def test_check_passes_when_every_pin_has_the_sha256_of_its_version(
         RECORD.replace('version = "1.0.0"', "version = 1"),
         RECORD + 'note = "more"\n',
         RECORD.replace(f'sha256 = "{OLD}"\n', ""),
+        # The bundles of an action and its image left with decision 1111.
+        RECORD + '\n[bundle."owner/lint-action"]\ncommit = "' + "1" * 40 + '"\n',
     ],
 )
 def test_a_record_that_pins_py_cannot_read_stops_it(
@@ -730,236 +732,91 @@ def test_the_assets_of_the_release_are_named_only_when_its_own_is_missing(
     assert [expected in line for line in found] == ([True] if expected else [])
 
 
-# ----------------------------------------------------- the package that an action runs
+# ------------------------------------------------------------- the image of markdownlint
 
-COMMIT = "1" * 40
-MOVED = "2" * 40
-IMAGE = "b" * 64
-ACTION = "owner/lint-action"
-LINT = f"""\
-jobs:
-  lint:
-    steps:
-      - uses: {ACTION}@{COMMIT} # v2.0.0
-      - name: Fix
-        uses: {ACTION}@{COMMIT} # v2.0.0
-"""
-LINT_SCRIPT = f"""\
-#!/usr/bin/env bash
-image="owner/lint:v1.2.0@sha256:{IMAGE}"
-"""
-BUNDLE = f"""
-[bundle."{ACTION}"]
-commit = "{COMMIT}"
-package = "lint"
-version = "1.2.0"
-image = "owner/lint"
-"""
-STALE = (
-    "scripts/lint.sh: the image owner/lint runs lint {found}, the action "
-    f"{ACTION} {{version}}: give the image the tag of {{version}} and its digest, "
-    "which Renovate brings in the pull request that moves the action"
+# An image of markdownlint-cli2 by its tag and digest, as Renovate's custom manager
+# of the images finds it in the workflows and the scripts.
+MARKDOWNLINT = re.compile(
+    r"(?<![\w./-])davidanson/markdownlint-cli2:[^@\s\"']+@sha256:[0-9a-f]{64}"
 )
+MARKDOWNLINT_FILES = (".github/*.sh", ".github/workflows/*.yml", "scripts/*.sh")
+DIGEST = "c" * 64
 
 
-def bundled_repository(
-    root: Path, bundle: str = BUNDLE, lint: str = LINT, script: str = LINT_SCRIPT
-) -> Path:
-    """A repository with a download in step with its record, and an action that runs
-    the package of an image that a script runs."""
-    repository(root, record=RECORD.replace('"1.0.0"', '"1.1.0"') + bundle)
-    (root / ".github/workflows/lint.yml").write_bytes(lint.encode())
-    (root / "scripts").mkdir()
-    (root / "scripts/lint.sh").write_bytes(script.encode())
-    return root
+def markdownlint_images(root: Path) -> dict[str, list[str]]:
+    """Each tag and digest of the image of markdownlint-cli2 that a workflow or a
+    script runs, with the files that run it."""
+    images: dict[str, list[str]] = {}
+    for pattern in MARKDOWNLINT_FILES:
+        for path in sorted(root.glob(pattern)):
+            for image in MARKDOWNLINT.findall(path.read_text(encoding="utf-8")):
+                images.setdefault(image, []).append(path.relative_to(root).as_posix())
+    return images
+
+
+def test_the_markdownlint_of_the_check_lint_is_that_of_its_image() -> None:
+    # The check lint, scripts/markdownlint.sh, which scripts/check.sh runs, and the
+    # Variants workflow run one image of markdownlint-cli2, by one tag and digest,
+    # which Renovate moves in all of them in one pull request (decision 1111).
+    images = markdownlint_images(ROOT)
+    assert list(images.values()) == [
+        [
+            ".github/workflows/lint.yml",
+            ".github/workflows/variants.yml",
+            "scripts/markdownlint.sh",
+        ]
+    ]
+    # No workflow runs the action, whose markdownlint-cli2 moved apart from the image.
+    for path in sorted(ROOT.glob(".github/workflows/*.yml")):
+        assert "markdownlint-cli2-action" not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (".github/workflows/lint.yml", ":v0.24.0@", ":v0.24.1@"),
+        (".github/workflows/variants.yml", "@sha256:70ead7c0", f"@sha256:{DIGEST[:8]}"),
+        ("scripts/markdownlint.sh", ":v0.24.0@", ":0.24.0@"),
+    ],
+)
+def test_another_tag_or_digest_of_the_image_in_one_place_is_found(
+    tmp_path: Path, path: str, old: str, new: str
+) -> None:
+    for name in (
+        ".github/workflows/lint.yml",
+        ".github/workflows/variants.yml",
+        "scripts/markdownlint.sh",
+    ):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(
+            (ROOT / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    assert len(markdownlint_images(tmp_path)) == 1
+    changed = (tmp_path / path).read_text(encoding="utf-8")
+    assert old in changed
+    (tmp_path / path).write_text(changed.replace(old, new), encoding="utf-8")
+
+    images = markdownlint_images(tmp_path)
+
+    assert len(images) == 2
+    assert [path] in images.values()
+    # Another image whose name only ends the same is another image.
+    (tmp_path / path).write_text(
+        changed.replace("davidanson/", "other/davidanson/"), encoding="utf-8"
+    )
+    assert len(markdownlint_images(tmp_path)) == 1
 
 
 class Reads:
-    """The package.json of the action, which runs lint 1.3.0, and its addresses."""
+    """The text of each address, the same for all, and the addresses it was asked."""
 
-    def __init__(self, text: str = '{"dependencies": {"lint": "1.3.0"}}') -> None:
+    def __init__(self, text: str) -> None:
         self.urls: list[str] = []
         self.text = text
 
     def __call__(self, url: str) -> str:
         self.urls.append(url)
         return self.text
-
-
-def test_the_markdownlint_of_the_check_lint_is_that_of_its_image() -> None:
-    # The check lint runs the markdownlint-cli2 of its action, scripts/markdownlint.sh
-    # and the Variants workflow that of its image: pins.check fails while the two
-    # differ, or while the record keeps the version of another commit of the action.
-    action = "DavidAnson/markdownlint-cli2-action"
-    bundles = pins.load_bundles(ROOT)
-    assert set(bundles) == {action}
-    uses = pins.find_uses(ROOT, {action})
-    assert [use.path for use in uses] == [".github/workflows/lint.yml"] * 2
-    assert pins.commits(uses) == {action: [bundles[action].commit]}
-    assert bundles[action].package == "markdownlint-cli2"
-    assert bundles[action].image == "davidanson/markdownlint-cli2"
-    images = pins.find_images(ROOT, {bundles[action].image})
-    assert [image.path for image in images] == [
-        ".github/workflows/variants.yml",
-        "scripts/markdownlint.sh",
-    ]
-    assert {image.version for image in images} == {bundles[action].version}
-    assert pins.bundle_problems(ROOT, bundles) == []
-    # pins.py keeps the file, bundles too, in the form that it writes.
-    text = (ROOT / pins.RECORD).read_bytes().decode("utf-8")
-    assert text == pins.render_record(pins.load_record(ROOT), bundles)
-
-
-def test_an_image_that_runs_another_version_than_the_action_fails_the_check(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    root = bundled_repository(tmp_path, script=LINT_SCRIPT.replace("v1.2.0", "v1.1.0"))
-
-    assert pins.main(["--check"], root=root) == 1
-
-    stale = STALE.format(found="1.1.0", version="1.2.0")
-    assert capsys.readouterr().err == f"pins.py: {stale}\n"
-    # Also without the v of its tag, in a workflow.
-    (root / ".github/workflows/lint.yml").write_bytes(
-        (LINT + f"      - run: docker run owner/lint:1.2.0@sha256:{IMAGE} .\n").encode()
-    )
-    assert pins.check(root) == [stale]
-    # Another image whose name ends in the same is another image.
-    (root / "scripts/lint.sh").write_bytes(
-        LINT_SCRIPT.replace("owner/lint:v1.2.0", "other/owner/lint:v1.1.0").encode()
-    )
-    assert pins.check(root) == []
-
-
-def test_an_action_that_renovate_moved_gets_the_version_of_its_package(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    root = bundled_repository(tmp_path, lint=LINT.replace(COMMIT, MOVED))
-    reads = Reads()
-
-    assert pins.check(root) == [
-        f"{pins.RECORD}: the workflows pin {ACTION} at {MOVED}, the record at "
-        f"{COMMIT}; python3 pins.py reads the version of lint that it runs"
-    ]
-    assert pins.main([], root=root, fetch=Fetches(), read=reads) == 0
-
-    assert reads.urls == [
-        f"https://raw.githubusercontent.com/{ACTION}/{MOVED}/package.json"
-    ]
-    assert pins.load_bundles(root) == {
-        ACTION: pins.Bundle(MOVED, "lint", "1.3.0", "owner/lint")
-    }
-    assert capsys.readouterr().out == (
-        f"{ACTION} {MOVED}: lint 1.3.0\n{pins.RECORD}: 1 downloads and 1 actions\n"
-    )
-    text = (root / pins.RECORD).read_bytes().decode("utf-8")
-    assert text == pins.render_record(pins.load_record(root), pins.load_bundles(root))
-    # Until Renovate moves the image as well.
-    assert pins.check(root) == [STALE.format(found="1.2.0", version="1.3.0")]
-    (root / "scripts/lint.sh").write_bytes(
-        LINT_SCRIPT.replace("v1.2.0", "v1.3.0").encode()
-    )
-    assert pins.check(root) == []
-    # The next run has nothing to read.
-    assert pins.main([], root=root, fetch=Fetches(), read=reads) == 0
-    assert len(reads.urls) == 1
-
-
-@pytest.mark.parametrize(
-    ("lint", "problem"),
-    [
-        (
-            "jobs: {}\n",
-            f"{pins.RECORD}: no workflow pins the action {ACTION}; remove it",
-        ),
-        (
-            LINT.replace(f"{COMMIT} # v2.0.0\n", f"{MOVED} # v2.1.0\n", 1),
-            f"The workflows pin {ACTION} at {MOVED} and {COMMIT}: give each the same "
-            "commit",
-        ),
-    ],
-)
-def test_an_action_that_the_workflows_pin_unclearly_stops_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], lint: str, problem: str
-) -> None:
-    root = bundled_repository(tmp_path, lint=lint)
-    reads = Reads()
-
-    assert pins.check(root) == [problem]
-    assert pins.main([], root=root, fetch=Fetches(), read=reads) == 2
-    assert capsys.readouterr().err == f"pins.py: {problem}\n"
-    assert reads.urls == []
-
-
-def test_an_action_whose_image_no_file_runs_fails_the_check(tmp_path: Path) -> None:
-    root = bundled_repository(tmp_path, script="#!/usr/bin/env bash\n")
-
-    assert pins.check(root) == [
-        f"{pins.RECORD}: no script or workflow runs the image owner/lint of {ACTION}; "
-        "remove it"
-    ]
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "not json",
-        "[]",
-        '{"dependencies": {"other": "1.3.0"}}',
-        '{"dependencies": {"lint": "^1.3.0"}}',
-        '{"dependencies": {"lint": 1}}',
-    ],
-)
-def test_a_package_json_without_the_exact_version_writes_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
-) -> None:
-    root = bundled_repository(tmp_path, lint=LINT.replace(COMMIT, MOVED))
-    record = (root / pins.RECORD).read_bytes()
-
-    assert pins.main([], root=root, fetch=Fetches(), read=Reads(text)) == 2
-
-    assert capsys.readouterr().err == (
-        f"pins.py: https://raw.githubusercontent.com/{ACTION}/{MOVED}/package.json "
-        "names no exact version of lint that it runs\n"
-    )
-    assert (root / pins.RECORD).read_bytes() == record
-
-
-@pytest.mark.parametrize(
-    "bundle",
-    [
-        BUNDLE.replace(COMMIT, "abc"),
-        BUNDLE.replace('"1.2.0"', '"^1.2.0"'),
-        BUNDLE.replace('"owner/lint"', '""'),
-        BUNDLE.replace('"lint"', "1"),
-        BUNDLE + 'note = "more"\n',
-        BUNDLE.replace('image = "owner/lint"\n', ""),
-        f'\n[bundle]\n"{ACTION}" = "{COMMIT}"\n',
-    ],
-)
-def test_a_bundle_that_pins_py_cannot_read_stops_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], bundle: str
-) -> None:
-    root = bundled_repository(tmp_path, bundle=bundle)
-
-    assert pins.main(["--check"], root=root) == 2
-
-    assert capsys.readouterr().err.startswith(f"pins.py: {pins.RECORD}")
-
-
-def test_a_record_of_bundles_alone_or_without_tables_stops_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    root = bundled_repository(tmp_path)
-    for record in (BUNDLE, 'bundle = "owner/lint-action"\n' + RECORD):
-        (root / pins.RECORD).write_bytes(record.encode())
-
-        assert pins.main(["--check"], root=root) == 2
-
-        assert capsys.readouterr().err == (
-            f'pins.py: {pins.RECORD} has only tables [download."OWNER/NAME"] and '
-            '[bundle."OWNER/ACTION"]\n'
-        )
 
 
 def test_the_read_gives_the_text_of_the_file(tmp_path: Path) -> None:

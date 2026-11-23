@@ -1379,7 +1379,8 @@ def test_a_signature_that_could_not_be_checked_refuses_nothing(tmp_path: Path) -
     assert result.returncode == 1
     assert (
         "::error::The signature of the release v1.3.1 of Dennis-Otto/issue-assistant"
-        " could not be checked; nothing has changed, and the next run checks it again."
+        " could not be checked, as in an outage of GitHub or of the network of the"
+        " runner; nothing has changed, and the next run checks it again."
     ) in result.stdout.splitlines()
     assert result.summary == ""
 
@@ -1403,8 +1404,9 @@ def test_an_attestation_that_github_could_not_check_refuses_nothing(
     assert result.returncode == 1
     assert (
         "::error::GitHub's attestation of the release v1.3.1 of"
-        " Dennis-Otto/issue-assistant could not be checked; nothing has changed, and"
-        " the next run checks it again."
+        " Dennis-Otto/issue-assistant could not be checked, as in an outage of GitHub"
+        " or of the network of the runner; nothing has changed, and the next run"
+        " checks it again."
     ) in result.stdout.splitlines()
     assert result.summary == ""
 
