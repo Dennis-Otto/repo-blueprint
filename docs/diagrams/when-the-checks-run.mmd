@@ -5,15 +5,15 @@ config:
 ---
 flowchart TB
     accTitle: When the checks run
-    accDescr: Every pull request runs the required checks, among them the fuzzing, which fuzzes only a change of the Python code, its targets or its tools, and zizmor, whose analysis the rules of main wait for, and the scanners of what it changes: OSV-Scanner for a lock file and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks and zizmor without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs Lint and the CI, for what no commit changes, the scanners in full, the secret scan of the whole history, the SBOM and the newest Python and Node.
+    accDescr: Every pull request runs the required checks, among them the fuzzing, which fuzzes only a change of the Python code, its targets or its tools, and zizmor, whose analysis the rules of main wait for, and the scanners of what it changes: OSV-Scanner for a lock file and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks and zizmor without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs Lint and the CI, for what no commit changes, the scanners in full, the secret scan of the whole history, the SBOM, the newest Python and Node, and the newest and the oldest PHP.
 
     pr["Pull request"]
     rpr["Release pull request<br>changelog and version"]
     required["Required checks and analyses<br>tests · lint · docs · CodeQL · zizmor<br>dependency review · secret scan<br>fuzzing of a change of the Python code"]
     scanners["Scanners of what it changes<br>lock files: OSV-Scanner<br>documents: links"]
     main["main"]
-    baseline["What keeps a baseline or publishes<br>tests with coverage · newest Python and Node<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>website · release · branch bot"]
-    weekly["Lint and the CI, for what no commit changes<br>Scanners in full · fuzzing for 25 minutes<br>secret scan of the whole history<br>SBOM · newest Python and Node"]
+    baseline["What keeps a baseline or publishes<br>tests with coverage<br>newest Python and Node · newest and oldest PHP<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>website · release · branch bot"]
+    weekly["Lint and the CI, for what no commit changes<br>Scanners in full · fuzzing for 25 minutes<br>secret scan of the whole history<br>SBOM · newest Python and Node<br>newest and oldest PHP"]
 
     pr --> required
     pr -- "changes what they read" --> scanners

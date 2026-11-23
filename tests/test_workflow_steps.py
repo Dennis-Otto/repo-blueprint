@@ -454,6 +454,7 @@ TESTED = {
             "dependabot-automerge.yml",
             "diagrams.yml",
             "newest-node.yml",
+            "newest-php.yml",
             "newest-python.yml",
             "next-runner.yml",
             "welcome.yml",
@@ -568,6 +569,11 @@ TESTED = {
         "newest-node.yml",
         "report",
         "Keep the issue of the newest Node current",
+    ): "test_template.py",
+    (
+        "newest-php.yml",
+        "report",
+        "Keep the issue of the newest and the oldest PHP current",
     ): "test_template.py",
     (
         "newest-python.yml",

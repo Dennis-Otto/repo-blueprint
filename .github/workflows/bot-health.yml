@@ -37,8 +37,9 @@ name: Bot health
 # The bots of events, Area labels, Welcome, Dependabot maintenance and Commands, also
 # those of a pull request or of a fork, and the workflows that keep an issue of their
 # own, such as Newest Node, get neither a second try nor an issue here, unless
-# Harden-Runner stopped a job of their first attempt: then their failed jobs run once
-# more, as nothing else would run them again (decision 0141). Their end starts nothing
+# Harden-Runner stopped a job of their first attempt, or a job of Newest PHP broke
+# before its tests ran: then their failed jobs run once more, as nothing else would run
+# them again (decisions 0141 and 1119). Their end starts nothing
 # here: a last job of theirs starts this bot by hand with the run, and only when a job
 # failed at their first attempt (decision 0176). Nothing follows the end of Bot health
 # itself, so the nightly look runs the failed jobs of its own runs of the last two
@@ -92,7 +93,7 @@ jobs:
       (github.event.workflow_run.event == 'release' && github.event.workflow_run.name == 'Release verification')) &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       !contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) &&
-      !contains(fromJSON('["Area labels", "Commands", "Dependabot maintenance", "Welcome", "Diagrams", "Newest Node", "Newest Python", "Next runner", "Issue assistant"]'), github.event.workflow_run.name) &&
+      !contains(fromJSON('["Area labels", "Commands", "Dependabot maintenance", "Welcome", "Diagrams", "Newest Node", "Newest PHP", "Newest Python", "Next runner", "Issue assistant"]'), github.event.workflow_run.name) &&
       contains(fromJSON('["success", "failure", "timed_out", "cancelled", "startup_failure"]'), github.event.workflow_run.conclusion)
     # One run at a time for each workflow, so that two ends never open two issues.
     concurrency:
