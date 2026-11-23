@@ -4,10 +4,6 @@
 # that the files pin. Renovate moves a version, and python3 pins.py then writes the
 # sha256 of the new release beside it and here. pins.py keeps this file; add a new
 # download by hand.
-# Each bundle is an action that the workflows pin to a commit and the package of npm
-# that it runs, with the version that its package.json names at that commit, which
-# python3 pins.py reads anew once Renovate moved the commit; the image of the package
-# that the scripts and the workflows run must have the same version.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 [download."sigstore/gitsign"]
@@ -49,9 +45,3 @@ sha256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 url = "https://unpkg.com/mermaid@{version}/dist/mermaid.min.js"
 version = "11.17.2"
 sha256 = "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8"
-
-[bundle."DavidAnson/markdownlint-cli2-action"]
-commit = "696eb3f2509270d7b882d2aa68347bc676e7af34"
-package = "markdownlint-cli2"
-version = "0.24.0"
-image = "davidanson/markdownlint-cli2"
