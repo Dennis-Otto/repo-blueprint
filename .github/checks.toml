@@ -457,9 +457,10 @@ title = "The tests on the newest PHP"
 problem = """PHPUnit failed on the newest PHP that the pinned setup-php sets up as a
 final release, with the tools of `composer.lock`; the annotations name each test that
 failed, and the summary names the PHP. Mostly the new PHP changed a behavior that the
-code or a test relies on, as its UPGRADING notes list. When the job failed before its
-tests ran, setup-php or Composer couldn't download, mostly in an outage: nothing in the
-code is wrong, the bot-health bot runs the job once more, and no issue opens."""
+code or a test relies on, as its UPGRADING notes list. When the error *Nothing in the
+code is wrong* says that setup-php or Composer couldn't download at both tries, mostly in
+an outage, the bot-health bot runs the job once more, and no issue opens. Any other
+failure before the tests comes back every time: its log names the step."""
 why = """The users of the app get that PHP with a later version of Nextcloud, while the
 CI runs the tests on the PHP of the tools only. The workflow *Newest PHP* tells it on
 `main` and every week, months before a version of Nextcloud accepts that PHP, and keeps
@@ -481,21 +482,25 @@ problem = """PHPUnit failed on the oldest PHP of `appinfo/info.xml`, or Composer
 no release of a package of `require-dev` for it, which the annotation names. The job
 resolves the newest PHPUnit that runs on that PHP in place of the one of
 `composer.lock`, as the summary names it, so a test that needs an API of a newer
-PHPUnit fails for that reason. When the job failed before it resolved, setup-php or
-Composer couldn't download, mostly in an outage: nothing in the code is wrong, the
-bot-health bot runs the job once more, and no issue opens."""
+PHPUnit fails for that reason. When the error *Nothing in the code is wrong* says that
+setup-php or Composer couldn't download at both tries, mostly in an outage, the
+bot-health bot runs the job once more, and no issue opens. Any other failure before the
+tests comes back every time: its log names the step."""
 why = """The app's users may still run that PHP, while the CI only parses the code
 with it: a behavior that differs between that PHP and the PHP of the tools passes every
 other check."""
-fix = """Set up the PHP that the summary names, here 8.2, and in a copy of the
-checkout resolve PHPUnit for it as the job does, run the tests, fix the code or the
-test, and push to `main`. When no release of a package runs on that PHP, test it
+fix = """Set up the PHP that the summary names, and in a copy of the checkout resolve
+PHPUnit for it as the step *Resolve the newest PHPUnit for the oldest PHP* does, whose
+log shows each command: remove the tools of `require-dev` that the tests don't run
+(Psalm, php-cs-fixer, the coding standard, Infection), and widen PHPUnit by
+`^10.5 || ^11.5` beside the constraint of `composer.json`. Run the tests, fix the code or
+the test, and push to `main`. When no release of a package runs on that PHP, test it
 another way, or raise `min-version` of Nextcloud in `appinfo/info.xml` to a version
 that needs a newer PHP:"""
 commands = [
-  "composer remove --dev --no-update vimeo/psalm nextcloud/coding-standard",
+  "composer remove --dev --no-update <the tools of require-dev that the tests don't run>",
   'composer config platform.php "$(php -r "echo PHP_VERSION;")"',
-  "composer require --dev --no-update 'phpunit/phpunit:^10.5 || ^11.5 || ^12.0'",
+  "composer require --dev --no-update 'phpunit/phpunit:^10.5 || ^11.5 || <the constraint of composer.json>'",
   "composer update",
   "vendor/bin/phpunit --no-coverage",
 ]

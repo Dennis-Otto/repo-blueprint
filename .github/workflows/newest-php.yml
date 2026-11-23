@@ -87,6 +87,7 @@ jobs:
         if: steps.setup.outcome == 'failure'
         run: sleep 30
       - name: Set up the newest PHP once more
+        id: setup_again
         if: steps.setup.outcome == 'failure'
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -120,6 +121,7 @@ jobs:
         if: steps.install.outcome == 'failure'
         run: sleep 30
       - name: Install the locked tools once more
+        id: install_again
         if: steps.install.outcome == 'failure'
         run: composer install --no-interaction --prefer-dist --no-progress
       # Without coverage, which pcov measures in the CI; each test that fails becomes an
@@ -133,8 +135,10 @@ jobs:
             python3 "$script" annotate phpunit build/phpunit.xml < /dev/null
             exit 1
           fi
+      # Only for a download that failed at both tries: a failure that comes back every
+      # time, such as a list of setup-php that moved, stays a plain failure.
       - name: Say that nothing in the code is wrong
-        if: failure() && steps.phpunit.outcome != 'failure'
+        if: failure() && (steps.setup_again.outcome == 'failure' || steps.install_again.outcome == 'failure')
         run: echo "::error title=Nothing in the code is wrong::The job failed before its tests ran, so nothing in the code is wrong; setup-php or Composer failed at both tries, mostly in an outage. The bot-health bot runs the job once more, and no issue opens."
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
@@ -220,6 +224,7 @@ jobs:
         if: steps.setup.outcome == 'failure'
         run: sleep 30
       - name: Set up the oldest PHP of the app once more
+        id: setup_again
         if: steps.setup.outcome == 'failure'
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -243,7 +248,7 @@ jobs:
       # becomes the PHP of the run; and PHPUnit may also be a release that runs on it,
       # from 10.5 on, for which phpunit.xml is written (decision 0035). Composer picks the
       # newest that runs. It exits with 2 when it finds none, and a download that fails
-      # gets a second try.
+      # gets a second try, after which the step says that the download failed.
       - name: Resolve the newest PHPUnit for the oldest PHP
         id: resolve
         if: steps.php.outputs.oldest != steps.php.outputs.tools
@@ -279,7 +284,10 @@ jobs:
               echo "::error title=No release for PHP $php::Composer found no release of ${packages:-a package of require-dev} that runs on PHP $php, the oldest PHP of appinfo/info.xml. Test the oldest PHP in another way, or raise min-version of Nextcloud in appinfo/info.xml to a version that needs a newer PHP."
               exit 1
             fi
-            ((try == 1)) || exit "$status"
+            if ((try == 2)); then
+              echo "download=failed" >> "$GITHUB_OUTPUT"
+              exit "$status"
+            fi
             echo "Composer failed with $status, so the job tries again in 30 seconds."
             sleep 30
           done
@@ -296,8 +304,10 @@ jobs:
             python3 "$script" annotate phpunit build/phpunit.xml < /dev/null
             exit 1
           fi
+      # Only for a download that failed at both tries: a failure that comes back every
+      # time, such as no release for the oldest PHP, stays a plain failure.
       - name: Say that nothing in the code is wrong
-        if: failure() && steps.phpunit.outcome != 'failure' && steps.resolve.outputs.found != 'none'
+        if: failure() && (steps.setup_again.outcome == 'failure' || steps.resolve.outputs.download == 'failed')
         run: echo "::error title=Nothing in the code is wrong::The job failed before its tests ran, so nothing in the code is wrong; setup-php or Composer failed at both tries, mostly in an outage. The bot-health bot runs the job once more, and no issue opens."
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.

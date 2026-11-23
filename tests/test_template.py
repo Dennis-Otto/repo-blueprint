@@ -25830,14 +25830,25 @@ def test_a_set_up_of_the_php_tests_tries_twice(job_id: str) -> None:
             "run": "sleep 30",
         }
         assert again["if"] == condition
+        assert again["id"] == f"{step_id}_again"
         assert "continue-on-error" not in again
         keys = ("uses", "with", "run")
         assert {key: first[key] for key in keys if key in first} == {
             key: again[key] for key in keys if key in again
         }
         assert names.index(name) < names.index(pause) < names.index(f"{name} once more")
+    # Only a download that failed at both tries is no fault of the app: a list of
+    # setup-php that moved, a PHP that the app doesn't name, a lock that doesn't install
+    # or no release for the oldest PHP fail every time and stay plain failures.
     said = step_in(job, "Say that nothing in the code is wrong")
-    assert said["if"].startswith("failure() && steps.phpunit.outcome != 'failure'")
+    downloads = (
+        "steps.install_again.outcome == 'failure'"
+        if job_id == "newest"
+        else "steps.resolve.outputs.download == 'failed'"
+    )
+    assert said["if"] == (
+        f"failure() && (steps.setup_again.outcome == 'failure' || {downloads})"
+    )
     assert BROKE_BEFORE in said["run"]
     assert names.index("Run the tests") < names.index(said["name"])
 
@@ -26010,7 +26021,7 @@ def test_the_oldest_php_fails_after_two_failed_downloads(tmp_path: Path) -> None
     # is wrong, and the issue stays as it is.
     assert done.returncode == 1
     assert done.stubbed == [*OLDEST_RESOLVE, OLDEST_UPDATE, "sleep 30", OLDEST_UPDATE]
-    assert done.outputs == {}
+    assert done.outputs == {"download": "failed"}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
