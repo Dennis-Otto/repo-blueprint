@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# The markdownlint-cli2 of the action of the Lint workflow, which Renovate keeps
+# The image of the check lint, by its tag and digest, which Renovate keeps
 # current; npx takes the version of its tag.
 image="davidanson/markdownlint-cli2:v0.24.0@sha256:70ead7c0352d22d04bbe612cd96b54ec591538d8f4626cafe391bb2ecf3639ca"
 version="${image#*:v}"
