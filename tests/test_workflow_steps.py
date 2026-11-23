@@ -467,7 +467,7 @@ TESTED = {
     (
         "after-checks.yml",
         "stopped",
-        "Run the jobs again that Harden-Runner stopped",
+        "Run the jobs again that failed outside the code",
     ): "test_template.py",
     (
         "after-checks.yml",

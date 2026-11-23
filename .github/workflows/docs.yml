@@ -455,7 +455,7 @@ jobs:
     needs: docs
     if: needs.docs.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -564,11 +564,6 @@ jobs:
               sleep 3
             done
           done
-      - name: Publish the website on GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
-        with:
-          artifact_name: ${{ needs.docs.outputs.pages }}
       # The provenance of what GitHub Pages publishes, artifact.tar of the artifact
       # that the job docs names in its output pages (github-pages, or
       # github-pages-again after a second try), signed with Sigstore for this
@@ -582,11 +577,50 @@ jobs:
         with:
           name: ${{ needs.docs.outputs.pages }}
           path: ${{ runner.temp }}/pages
+      # Sigstore fails now and then, as on 22 November 2026, when Rekor answered the new
+      # entry with 409 and then couldn't find the entry that it named: sigstore-js tries
+      # a request again only inside one signature. A second try half a minute later
+      # signs with a key and a certificate of its own, so its entry in Rekor is new and
+      # can't conflict with the first; an entry that the first try wrote and lost stays
+      # unused in the public log, and GitHub keeps an attestation only once its bundle
+      # exists. The website is published only after its provenance is signed: when
+      # both tries fail, nothing is published, and the website stays as it was, with
+      # its provenance, until the bot for stopped checks or bot health tries once more
+      # (decision 1110). An attestation of a website that GitHub Pages then failed to
+      # publish does no harm, and a rerun that attests again leaves two valid
+      # attestations of the same digest.
       - name: Attest the provenance of the website
+        id: attest
+        continue-on-error: true
+        timeout-minutes: 3
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        timeout-minutes: 5
         with:
           subject-path: ${{ runner.temp }}/pages/artifact.tar
+      - name: Give Sigstore half a minute
+        if: steps.attest.outcome == 'failure'
+        timeout-minutes: 1
+        run: sleep 30
+      - name: Attest the provenance of the website once more
+        id: attest-again
+        if: steps.attest.outcome == 'failure'
+        timeout-minutes: 3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/pages/artifact.tar
+      - name: Say that Sigstore failed
+        if: failure() && steps.attest-again.outcome == 'failure'
+        timeout-minutes: 1
+        run: >-
+          echo "::error title=Sigstore failed::Sigstore failed twice to sign the provenance of the website, so this run published nothing and the website stays as it was. Nothing in the code is wrong: when this run is the newest of the default branch, a bot runs this job once more."
+      - name: Publish the website on GitHub Pages
+        id: deployment
+        timeout-minutes: 5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: ${{ needs.docs.outputs.pages }}
+          # Its own limit, in milliseconds, ends before that of the step, so that the
+          # action cancels its deployment and says why.
+          timeout: 270000
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.

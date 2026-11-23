@@ -213,7 +213,7 @@ jobs:
           if ((attested != 0)); then
             # An answer of GitHub that never came is no verdict on the release.
             if grep -qiE 'HTTP 5[0-9]{2}|timed? ?out|connection (refused|reset)|no such host|TLS handshake|unexpected EOF' "$RUNNER_TEMP/attestation"; then
-              echo "::error::GitHub's attestation of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+              echo "::error::GitHub's attestation of the release $TAG of $SOURCE could not be checked, as in an outage of GitHub or of the network of the runner; nothing has changed, and the next run checks it again."
               exit 1
             fi
             refuse "GitHub's attestation of the release $TAG of $SOURCE doesn't hold; the log of the run shows what gh release verify says."
@@ -226,7 +226,7 @@ jobs:
           if ((verified == 1)); then
             refuse "The tag $TAG of $SOURCE is not one that its release workflow signed at $COMMIT."
           elif ((verified != 0)); then
-            echo "::error::The signature of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+            echo "::error::The signature of the release $TAG of $SOURCE could not be checked, as in an outage of GitHub or of the network of the runner; nothing has changed, and the next run checks it again."
             exit 1
           fi
           echo "The release $TAG of $SOURCE is immutable, attested by GitHub, on its main and signed by its release workflow." >> "$GITHUB_STEP_SUMMARY"
