@@ -33,8 +33,8 @@ sha256 = "d4c926f3523fb3ef9bb89ee78111d5305ffa400d03b346c2a7b0308f7db1e222"
 
 [download."anchore/syft"]
 url = "https://github.com/anchore/syft/releases/download/v{version}/syft_{version}_linux_amd64.tar.gz"
-version = "1.57.1"
-sha256 = "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"
+version = "1.57.2"
+sha256 = "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b"
 
 [download."gitleaks/gitleaks"]
 url = "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz"
