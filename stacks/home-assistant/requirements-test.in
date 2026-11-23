@@ -11,7 +11,7 @@ mypy
 # Home Assistant's own test plugin, which it publishes with each of its releases at
 # the same version. An integration that uses Bluetooth asks for its packages with
 # pytest-homeassistant[bluetooth].
-pytest-homeassistant==2026.11.1
+pytest-homeassistant==2026.11.2
 # The plugins of pytest that the test plugin doesn't bring: the coverage of each
 # process of pytest-xdist, which scripts/check.sh measures, the time limit of each
 # test in pyproject.toml, and the annotations of a failed test in the CI.
