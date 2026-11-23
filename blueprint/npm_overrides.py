@@ -13,10 +13,12 @@ for it, the module removes the entry and lets npm write the lock file anew, with
 --package-lock-only and --ignore-scripts, so that no code of a package runs. It keeps
 the removal only when every copy of the package in the new lock file is still at or
 above the lowest version that the override allowed, or sat at the same path below it
-with the override too, outside its reach, and when the new lock file brings no
+with the override too, outside its reach, at the same version, and when the new lock file brings no
 version that the old one lacked: Renovate gives npm --before= only on its own call,
 and this one must not let a version younger than a week into an update that merges by
-itself. Otherwise it puts both files back byte for byte."""
+itself. An entry that caps a package, with < or <= or a range such as 1.2.3 - 1.4.0,
+stays without npm: it holds the package back from a version that no lock file of
+today shows. Otherwise it puts both files back byte for byte."""
 
 from __future__ import annotations
 
@@ -110,20 +112,34 @@ def comparable(match: re.Match[str]) -> Version:
     return (major, minor, patch, 0, identifiers)
 
 
+def caps(spec: str) -> bool:
+    """Whether a range of an override sets a ceiling, with < or <= or as a range such
+    as 1.2.3 - 1.4.0: it holds a package back from a version, which no lock file of
+    today can show to be needless."""
+    for alternative in spec.split("||"):
+        if " - " in alternative:
+            return True
+        for word in alternative.split():
+            match = COMPARATOR.fullmatch(word)
+            if match is not None and match["operator"] in ("<", "<="):
+                return True
+    return False
+
+
 def floor_of(spec: str) -> Version | None:
     """The lowest version that a version or a range of an override allows, such as
     11.0.3 for ^11.0.3; None for what names no version, such as $eslint, npm:other@1
-    or the address of a repository."""
+    or the address of a repository, and for a range that caps the package."""
+    if caps(spec):
+        return None
     floors = []
     for alternative in spec.split("||"):
-        words = alternative.split(" - ")[0].split()
         lows = []
-        for word in words:
+        for word in alternative.split():
             match = COMPARATOR.fullmatch(word)
             if match is None:
                 return None
-            if match["operator"] not in ("<", "<="):
-                lows.append(comparable(match))
+            lows.append(comparable(match))
         floors.append(max(lows, default=ZERO))
     return min(floors)
 
@@ -218,8 +234,12 @@ def judge(
     before = copies(old, override.name)
     after = copies(new, override.name)
     for path, version in sorted(after.items()):
+        # A copy outside the reach of the override, below its floor before, may stay
+        # there, but only as the very same version.
         if below(version, floor) and not (
-            path in before and below(before[path], floor)
+            path in before
+            and below(before[path], floor)
+            and old["packages"][path]["version"] == new["packages"][path]["version"]
         ):
             taken = new["packages"][path]["version"]
             return False, (
@@ -291,6 +311,11 @@ def needless(root: Path, name: str, npm: Npm, *, fix: bool) -> list[Outcome]:
         return []
     outcomes = []
     for override in overrides_of(entries):
+        if caps(override.spec):
+            outcomes.append(
+                Outcome(name, override, False, "it caps the package, so it stays")
+            )
+            continue
         floor = floor_of(override.spec)
         if floor is None:
             outcomes.append(

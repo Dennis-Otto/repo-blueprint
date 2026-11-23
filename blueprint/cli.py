@@ -1527,8 +1527,9 @@ def npm_overrides_command(arguments: argparse.Namespace, root: Path) -> int:
                 root, name, npm_overrides.npm_in(npm), fix=arguments.fix
             )
         except ValueError as error:
-            print(f"blueprint.py: {error}", file=sys.stderr)
-            return 2
+            # Left alone, so that the other files and Renovate's update go on.
+            print(f"{name}: left alone: {error}", file=sys.stderr)
+            continue
         for outcome in outcomes:
             label = outcome.override.label()
             if not outcome.needless:

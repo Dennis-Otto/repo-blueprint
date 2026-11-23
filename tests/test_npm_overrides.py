@@ -19,6 +19,7 @@ from blueprint.npm_overrides import (
     ZERO,
     Override,
     Version,
+    caps,
     floor_of,
     judge,
     manifests,
@@ -291,6 +292,39 @@ def test_a_new_copy_below_the_floor_holds_the_override_too(tmp_path: Path) -> No
 
 
 @needs_git
+def test_a_copy_below_the_floor_that_changes_its_version_holds_the_override(
+    tmp_path: Path,
+) -> None:
+    # node_modules/minimatch sat below the floor at 3.1.5; without the override npm
+    # hoists 10.2.6 there, which the old lock file had elsewhere: still below, but
+    # another version, so it may be the copy that the override reached.
+    old = lock(
+        **{"addons-linter": "10.4.0", "addons-linter__minimatch": "11.0.5"},
+        minimatch="3.1.5",
+        other__minimatch="10.2.6",
+    )
+    root = project(
+        tmp_path,
+        {"package.json": dumped(PLAYER_SWITCH), "package-lock.json": dumped(old)},
+    )
+    npm = FakeNpm(
+        lock(
+            **{"addons-linter": "10.4.0"},
+            minimatch="10.2.6",
+            other__minimatch="10.2.6",
+        )
+    )
+
+    (outcome,) = needless(root, "package.json", npm, fix=True)
+
+    assert not outcome.needless
+    assert outcome.reason == (
+        "without it npm takes minimatch 10.2.6 at node_modules/minimatch, below ^11.0.3"
+    )
+    assert (root / "package.json").read_text(encoding="utf-8") == dumped(PLAYER_SWITCH)
+
+
+@needs_git
 def test_each_override_is_tried_on_what_the_one_before_left(tmp_path: Path) -> None:
     # Two overrides below one package: the first leaves, the second stays, and so does
     # the package around it, which the second still fills.
@@ -358,6 +392,29 @@ def test_an_override_that_names_no_version_stays_without_npm(tmp_path: Path) -> 
     assert [second.override.name, third.override.name] == ["ajv", "minimatch"]
     assert [second.reason, third.reason] == ["it names no version, so it stays"] * 2
     assert len(npm.folders) == 1
+
+
+@needs_git
+@pytest.mark.parametrize("spec", ["<2", "1.2.3 - 1.4.0"])
+def test_an_override_that_caps_its_package_stays_without_npm(
+    tmp_path: Path, spec: str
+) -> None:
+    # The lock file holds foo 1.5.0 with the cap and would without it, but the cap
+    # keeps the next refresh of the lock file from foo 2: it stays.
+    manifest = {"dependencies": {"bar": "1.0.0"}, "overrides": {"foo": spec}}
+    old = lock(bar="1.0.0", foo="1.5.0")
+    root = project(
+        tmp_path, {"package.json": dumped(manifest), "package-lock.json": dumped(old)}
+    )
+    before = contents(root, "package.json", "package-lock.json")
+    npm = FakeNpm(old)
+
+    (outcome,) = needless(root, "package.json", npm, fix=True)
+
+    assert not outcome.needless
+    assert outcome.reason == "it caps the package, so it stays"
+    assert npm.folders == []
+    assert contents(root, "package.json", "package-lock.json") == before
 
 
 @needs_git
@@ -560,17 +617,30 @@ def test_the_command_needs_npm_only_for_an_override(
 def test_the_command_says_what_it_cant_write_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # The broken package.json is left alone; the next one still loses its override.
     root = project(
         tmp_path,
         {
-            "package.json": '{"overrides": {}, "overrides": {"a": "1"}}',
-            "package-lock.json": dumped(lock()),
+            "a/package.json": '{"overrides": {}, "overrides": {"a": "1"}}',
+            "a/package-lock.json": dumped(lock()),
+            "b/package.json": HOMEDARTS,
+            "b/package-lock.json": dumped(lock(eslint="10.15.0", minimatch="11.0.8")),
         },
     )
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        npm_overrides,
+        "npm_in",
+        lambda npm: FakeNpm(lock(eslint="10.15.0", minimatch="11.0.8")),
+    )
 
-    assert main(["npm-overrides", "--fix"], root=root) == 2
-    assert "package.json isn't JSON that it can write back" in capsys.readouterr().err
+    assert main(["npm-overrides", "--fix"], root=root) == 0
+    captured = capsys.readouterr()
+    assert captured.err.startswith(
+        "a/package.json: left alone: a/package.json isn't JSON that it can write back"
+    )
+    assert "b/package.json: removed the override of minimatch 11.0.8" in captured.out
+    assert (root / "b/package.json").read_text(encoding="utf-8") == WITHOUT_THE_OVERRIDE
 
 
 def test_npm_writes_only_the_lock_file_and_runs_no_script(
@@ -615,9 +685,11 @@ def test_npm_writes_only_the_lock_file_and_runs_no_script(
         ("1.x", (1, 0, 0, 1, ())),
         ("*", (0, 0, 0, 1, ())),
         ("", ZERO),
-        ("<2", ZERO),
-        (">=1.2.3 <2", (1, 2, 3, 1, ())),
-        ("1.2.3 - 2.0.0", (1, 2, 3, 1, ())),
+        ("<2", None),
+        (">=1.2.3 <=2", None),
+        ("1.2.3 - 2.0.0", None),
+        ("^2 || <1", None),
+        (">=1.2.3", (1, 2, 3, 1, ())),
         ("^2.1 || ^1", (1, 0, 0, 1, ())),
         ("v3.0.0-rc.1", (3, 0, 0, 0, ((1, "rc"), (0, 1)))),
         ("latest", None),
@@ -630,6 +702,23 @@ def test_the_floor_of_an_override_is_the_lowest_version_it_allows(
     spec: str, floor: tuple[Any, ...] | None
 ) -> None:
     assert floor_of(spec) == floor
+
+
+@pytest.mark.parametrize(
+    ("spec", "capped"),
+    [
+        ("<2", True),
+        ("<=1.4.0", True),
+        (">=1.2.3 <2", True),
+        ("1.2.3 - 1.4.0", True),
+        ("^11.0.3 || <1", True),
+        ("^11.0.3", False),
+        (">=1.2.3", False),
+        ("$minimatch", False),
+    ],
+)
+def test_an_override_with_a_ceiling_caps_its_package(spec: str, capped: bool) -> None:
+    assert caps(spec) is capped
 
 
 def known(text: str) -> Version:
