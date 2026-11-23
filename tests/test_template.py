@@ -145,7 +145,7 @@ from blueprint.migrate import (
     no_bot_fixes_label,
 )
 from blueprint.mutation import NOTHING_MATCHES, default_paths
-from blueprint.outage import check_unavailable
+from blueprint.outage import CHECK_UNAVAILABLE, check_unavailable
 from blueprint.pages import CELL_WORDS, layouts, long_blocks, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import (
@@ -20590,6 +20590,7 @@ def run_after_the_checks(
     stubs: Mapping[str, str] | None = None,
     files: Mapping[str, str] | None = None,
     root: Path = workflow_steps.ROOT,
+    env: Mapping[str, str] | None = None,
     **variables: str,
 ) -> workflow_steps.StepResult:
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
@@ -20613,7 +20614,9 @@ def run_after_the_checks(
             "HEAD_REPO": "o/r",
             "SHA": "abc1234def",
             "WORKFLOW": "3",
+            "WORKFLOW_PATH": ".github/workflows/ci.yml",
             **variables,
+            **(env or {}),
         },
         stubs=stubs,
         files=files,
@@ -20633,7 +20636,7 @@ def run_a_bot_after_the_checks(
     """Runs a step of a bot after the checks, which passes; returns the calls of gh,
     the summary of the step and what gh was given to write."""
     done = run_after_the_checks(
-        tmp_path, job, step, answers, stubs, None, root, **variables
+        tmp_path, job, step, answers, stubs, None, root, env=variables
     )
     assert done.returncode == 0, done.stderr
     return done.commands, done.summary, written_by(done)
@@ -21388,6 +21391,7 @@ OF_THE_PULL_REQUEST = {
     "EVENT": "pull_request",
     "BRANCH": "feature",
     "SHA": "abc1234def",
+    "DEFAULT_BRANCH": "main",
 }
 
 
@@ -21398,7 +21402,7 @@ def run_the_bot_for_stopped_checks(
         tmp_path,
         "after-checks.yml",
         "stopped",
-        "Run the jobs again that Harden-Runner stopped",
+        "Run the jobs again that failed outside the code",
         answers=[
             Answer(
                 r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
@@ -21453,7 +21457,7 @@ def test_the_bot_for_stopped_checks_tolerates_a_run_that_started_again(
         tmp_path,
         "after-checks.yml",
         "stopped",
-        "Run the jobs again that Harden-Runner stopped",
+        "Run the jobs again that failed outside the code",
         answers=[
             Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
             Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
@@ -21480,7 +21484,7 @@ def test_the_bot_for_stopped_checks_fails_when_github_refuses_the_rerun(
         tmp_path,
         "after-checks.yml",
         "stopped",
-        "Run the jobs again that Harden-Runner stopped",
+        "Run the jobs again that failed outside the code",
         answers=[
             Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
             Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
@@ -21531,7 +21535,7 @@ def test_the_bot_for_stopped_checks_leaves_the_run_of_a_replaced_commit_alone(
         tmp_path,
         "after-checks.yml",
         "stopped",
-        "Run the jobs again that Harden-Runner stopped",
+        "Run the jobs again that failed outside the code",
         answers=[
             Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
             Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
@@ -21550,6 +21554,135 @@ def test_the_bot_for_stopped_checks_leaves_the_run_of_a_replaced_commit_alone(
     assert done.returncode == 0, done.stderr
     assert not done.called("run rerun")
     assert done.summary == (f"abc1234 {words}\n")
+
+
+# The jobs of a run of Docs that failed, with the steps that failed in each, as the
+# bot for stopped checks reads them: GitHub Pages or Sigstore kept the website from
+# being published, or a step of the change failed.
+NOT_PUBLISHED = (
+    "publish the website\tAttest the provenance of the website"
+    "|Attest the provenance of the website once more\n"
+)
+NOT_HANDED_ON = "docs\tHand the website to GitHub Pages|Hand the website to GitHub Pages once more\n"
+
+
+def run_the_bot_for_stopped_checks_on_docs(
+    tmp_path: Path, failed: str, tip: str = "abc1234def", **env: str
+) -> workflow_steps.StepResult:
+    """Runs the bot for stopped checks for run 5 of Docs, of a push to main at
+    abc1234def, whose failed jobs are failed; no job of it says that Harden-Runner
+    stopped it, and main is at tip."""
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "stopped",
+        "Run the jobs again that failed outside the code",
+        answers=[
+            Answer(
+                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+@tsv",
+                failed,
+            ),
+            Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
+            Answer(r"api repos/o/r/check-runs/11/annotations .+", f"{EXITED}\n"),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(r"api repos/o/r/git/ref/heads/main --jq .+", f"{tip}\n"),
+            Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", "7\n"),
+            exact("run rerun 5 --failed"),
+        ],
+        env={
+            "RUN": "5",
+            "NAME": "Docs",
+            "EVENT": "push",
+            "BRANCH": "main",
+            "SHA": "abc1234def",
+            "DEFAULT_BRANCH": "main",
+            **env,
+        },
+    )
+    assert done.returncode == 0, done.stderr
+    return done
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "failed",
+    [
+        NOT_PUBLISHED,
+        # The website was published, and the job that asks for it failed.
+        "ask the published website\tAsk the published website for its pages\n",
+        NOT_HANDED_ON,
+        # The jobs API may leave out the first try, which may fail.
+        "docs\tHand the website to GitHub Pages once more\n",
+    ],
+    ids=["sigstore", "asked", "handed on", "second hand-off"],
+)
+def test_the_bot_for_stopped_checks_runs_a_publication_again_that_failed(
+    tmp_path: Path, failed: str
+) -> None:
+    # GitHub Pages or Sigstore failed, so the website of main stays behind until the
+    # next push, as player-switch-for-autodarts' did for about 31 hours.
+    done = run_the_bot_for_stopped_checks_on_docs(tmp_path, failed)
+
+    assert done.called("run rerun 5 --failed")
+    assert not done.called(r"api repos/o/r/check-runs/")
+    assert done.summary == (
+        "GitHub Pages or Sigstore kept Docs from publishing the website of abc1234,"
+        " the head of main; the failed jobs run once more.\n"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("failed", "env"),
+    [
+        # A broken link, or a step of the job docs beside the hand-off, is one of the
+        # change.
+        ("docs\tCheck the links\n", {}),
+        (
+            "docs\tCheck the links|Hand the website to GitHub Pages once more\n",
+            {},
+        ),
+        (f"{NOT_PUBLISHED}docs\tBuild the website\n", {}),
+        # Only a push to the default branch publishes the website.
+        (NOT_PUBLISHED, {"EVENT": "pull_request", "BRANCH": "feature"}),
+        (NOT_PUBLISHED, {"BRANCH": "next"}),
+        # Another workflow.
+        (NOT_PUBLISHED, {"NAME": "Links"}),
+        # A run without a job that failed.
+        ("", {}),
+    ],
+    ids=[
+        "broken link",
+        "another step",
+        "another job",
+        "pull request",
+        "branch",
+        "workflow",
+        "no job",
+    ],
+)
+def test_the_bot_for_stopped_checks_leaves_any_other_failure_of_docs(
+    tmp_path: Path, failed: str, env: dict[str, str]
+) -> None:
+    done = run_the_bot_for_stopped_checks_on_docs(tmp_path, failed, **env)
+
+    assert not done.called("run rerun")
+    assert done.called(r"api repos/o/r/check-runs/11/annotations")
+    assert "it stays failed" in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_stopped_checks_publishes_no_website_of_a_replaced_commit(
+    tmp_path: Path,
+) -> None:
+    # Its website would replace that of the newer commit.
+    done = run_the_bot_for_stopped_checks_on_docs(tmp_path, NOT_PUBLISHED, "fedcba9")
+
+    assert not done.called("run rerun")
+    assert done.summary == (
+        "abc1234 is no longer the head of main, so the failed jobs of its run of Docs"
+        " don't run again: they would cancel the run for the newer commit.\n"
+    )
 
 
 def variants_of_a_run(
@@ -22802,6 +22935,22 @@ def report_of_one_job(
     """Runs the report for a run whose only job that failed at first is this one, job
     11 of CI (python), with these annotations and this log; None is a log that GitHub
     no longer has. No issue is open, unless the answers open one."""
+    return report_of_jobs(tmp_path, job, annotations, log, answers)
+
+
+def report_of_jobs(
+    tmp_path: Path,
+    job: dict[str, object],
+    annotations: list[dict[str, str]],
+    log: str | None,
+    answers: Mapping[str, object],
+    *,
+    jobs: Sequence[dict[str, object]] = (),
+    stubs: Mapping[str, str] | None = None,
+    variables: Mapping[str, str] | None = None,
+) -> workflow_steps.StepResult:
+    """The report of report_of_one_job, with the other jobs that failed in the
+    attempt, these stubs of commands and these variables of the step."""
     logs: dict[str, object] = (
         {"repos/o/r/actions/jobs/11/logs.error": "HTTP 404: Not Found"}
         if log is None
@@ -22813,7 +22962,7 @@ def report_of_one_job(
         "Add the jobs that failed at first to the issue of flaky tests",
         {
             "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
-            "repos/o/r/actions/runs/5/attempts/1/jobs": {"jobs": [job]},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {"jobs": [job, *jobs]},
             "repos/o/r/check-runs/11/annotations": annotations,
             **logs,
             "repos/o/r/actions/workflows/3/runs": {"workflow_runs": []},
@@ -22821,7 +22970,8 @@ def report_of_one_job(
             "issue create": "https://github.com/o/r/issues/9\n",
             **answers,
         },
-        URL="https://github.com/o/r/actions/runs/5",
+        stubs,
+        env={"URL": "https://github.com/o/r/actions/runs/5", **(variables or {})},
     )
     assert done.returncode == 0, done.stderr
     return done
@@ -23286,6 +23436,380 @@ def test_the_flaky_test_bot_looks_back_over_a_thousand_runs_at_most(
         "The runs before reached back only to 2026-10-11T08:00:00Z, 1,000 runs."
         in done.summary
     )
+
+
+# Waits of the step, such as those of tried between the tries of a call of gh, pass at
+# once.
+NO_WAIT = {"sleep": ""}
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_stops_looking_back_when_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    # Each run of a later attempt would wait 70 seconds for GitHub, and the job has 5
+    # minutes: its report would be lost without a word (#1110).
+    week = week_of(
+        *(
+            run_of_the_week(
+                30 + number, f"2026-10-11T0{number}:00:00Z", lost_upload(300)
+            )
+            for number in range(1, 6)
+        )
+    )
+    for number in range(31, 36):
+        key = f"repos/o/r/actions/runs/{number}/attempts/1"
+        del week[key]
+        week[f"{key}.error"] = "HTTP 502: Bad Gateway"
+    done = report_of_jobs(
+        tmp_path,
+        lost_upload(11, "check (python)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        week,
+        stubs=NO_WAIT,
+    )
+
+    asked = {
+        call.split("/attempts/")[0]
+        for call in done.commands
+        if re.search(r"actions/runs/3\d/attempts/1 ", call)
+    }
+    assert asked == {"api repos/o/r/actions/runs/31"}
+    assert (
+        "::warning::The runs of the 7 days before couldn't be read, so a failure outside"
+        " the code counts only as far as they were: HTTP 502: Bad Gateway"
+    ) in done.stdout.splitlines()
+    # It counts as far as it got, and says so.
+    assert OUTSIDE in done.summary
+    assert (
+        "The runs before reached back only to 2026-10-12T09:20:00Z, as GitHub kept"
+        " failing." in done.summary
+    )
+    assert not written_by(done)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_stops_looking_back_when_github_keeps_failing_a_job(
+    tmp_path: Path,
+) -> None:
+    # The annotations of a job that was cancelled tell its time limit, and GitHub keeps
+    # failing them: the bot asks about no more, and still counts a run that failed,
+    # which needs no question.
+    week = week_of(
+        run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
+        run_of_the_week(
+            32, "2026-10-10T08:00:00Z", lost_upload(320, conclusion="cancelled")
+        ),
+        run_of_the_week(
+            33, "2026-10-09T08:00:00Z", lost_upload(330, conclusion="cancelled")
+        ),
+        run_of_the_week(34, "2026-10-08T08:00:00Z", lost_upload(340)),
+    )
+    done = report_of_jobs(
+        tmp_path,
+        lost_upload(11, "check (python)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        {
+            **week,
+            "repos/o/r/check-runs/320/annotations.error": "HTTP 503: Unavailable",
+            "repos/o/r/check-runs/330/annotations": failed(TIMED_OUT),
+        },
+        stubs=NO_WAIT,
+    )
+
+    assert done.called(r"api repos/o/r/check-runs/320/annotations")
+    assert not done.called(r"api repos/o/r/check-runs/330/annotations")
+    assert "::warning::The runs of the 7 days before couldn't be read" in done.stdout
+    # This run, 31 and 34: the failure came back for the third time.
+    assert "`check (python)` (3 runs)" in written_by(done)["issue-comment"]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_stops_looking_back_when_its_time_is_up(
+    tmp_path: Path,
+) -> None:
+    done = report_of_jobs(
+        tmp_path,
+        lost_upload(11, "check (python)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        week_of(
+            run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
+            run_of_the_week(32, "2026-10-10T08:00:00Z", lost_upload(320)),
+        ),
+        variables={"LOOK_BACK_TIME": "0"},
+    )
+
+    assert not done.called(r"api repos/o/r/actions/runs/3\d/attempts/1")
+    assert (
+        "The runs before reached back only to 2026-10-12T09:20:00Z, as its time of 0"
+        " seconds was up." in done.summary
+    )
+    # Without the runs before, the failure outside the code counts as its first time.
+    assert not written_by(done)
+
+
+def test_the_flaky_test_bot_has_time_for_the_runs_before() -> None:
+    # About 2.4 seconds for each run of a later attempt while GitHub answers: 50 runs,
+    # within the 5 minutes of the job.
+    report = after_the_checks_job("report")
+    step = step_in(
+        report, "Add the jobs that failed at first to the issue of flaky tests"
+    )
+    assert step["env"]["LOOK_BACK_TIME"] == "120"
+    assert report["timeout-minutes"] == 5
+    assert report["permissions"]["contents"] == "read"
+
+
+# yq of the runner, which turns the file of a workflow into JSON: here with PyYAML, as
+# Windows has no yq; the test of the step below checks the real one where it is.
+YQ = (
+    'exec "$FAKE_GH_PYTHON" -c \'import json, sys, yaml; print(json.dumps(yaml.load('
+    'open(sys.argv[-1], encoding="utf-8"), Loader=getattr(yaml, "CSafeLoader",'
+    ' yaml.SafeLoader)).get("jobs") or {}))\' "$@"\n'
+)
+# A workflow whose gate e2e only sums up its shards, as the Docker E2E of
+# homedarts-for-autodarts does.
+GATED = """name: E2E
+on: pull_request
+jobs:
+  browser:
+    name: browser (${{ matrix.shard }})
+    strategy:
+      matrix:
+        shard: [1, 2]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: npm test
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: npm run lint
+  gate:
+    name: e2e
+    needs: [browser, lint]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 1
+"""
+GATE = job_of_a_run(12, "e2e", "failure", ("Run exit 1", "failure"))
+GATE_ANSWERS: dict[str, object] = {
+    "repos/o/r/check-runs/12/annotations": failed(EXITED),
+    "repos/o/r/actions/jobs/12/logs": logged(*command("exit 1"), "##[error]" + EXITED),
+    "repos/o/r/contents/.github/workflows/e2e.yml?ref=abc1234def": GATED,
+}
+A_TEST_FAILED = logged(
+    *command("npm test", printed=("not ok 1 - the board shows the score",)),
+    "##[error]Process completed with exit code 1.",
+    CLEANUP,
+)
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("shard", "annotations", "log", "rows"),
+    [
+        # A shard failed outside the code: neither it nor the gate gets a row.
+        (lost_upload(11, "browser (1)"), UPLOAD_LOST_ANNOTATIONS, None, []),
+        # A shard failed in a test: it gets its row, and the gate none, so the failure
+        # counts once.
+        (
+            job_of_a_run(11, "browser (1)", "failure", ("Run npm test", "failure")),
+            failed(EXITED),
+            A_TEST_FAILED,
+            ["browser (1)"],
+        ),
+    ],
+    ids=["outside", "test"],
+)
+def test_the_flaky_test_bot_sees_a_gate_that_only_sums_up_the_jobs_that_it_needs(
+    tmp_path: Path,
+    shard: dict[str, object],
+    annotations: list[dict[str, str]],
+    log: str | None,
+    rows: list[str],
+) -> None:
+    # Without the words of SUMS_UP, the gate's exit counted as a failure of the code,
+    # and a test of a shard twice, as in #1095.
+    done = report_of_jobs(
+        tmp_path,
+        shard,
+        annotations,
+        log if log is not None else logged(*UPLOAD_LOST, CLEANUP),
+        GATE_ANSWERS,
+        jobs=[GATE],
+        stubs={"yq": YQ},
+        variables={"WORKFLOW_PATH": ".github/workflows/e2e.yml"},
+    )
+
+    written = written_by(done)
+    shown = [
+        line.split("`")[1]
+        for line in written.get("issue-comment", "").splitlines()
+        if line.startswith("| [")
+    ]
+    assert shown == rows
+    assert not done.called(r"api repos/o/r/actions/jobs/12/logs")
+    assert len(done.called(r"api .*repos/o/r/contents/")) == 1
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_counts_a_gate_that_failed_in_a_test_of_its_own(
+    tmp_path: Path,
+) -> None:
+    # A job that does its own work under always(), as mutation.yml and renovate.yml
+    # do, keeps the row of its own error while a job that it needs failed as well.
+    done = report_of_jobs(
+        tmp_path,
+        lost_upload(11, "browser (1)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        {
+            **GATE_ANSWERS,
+            "repos/o/r/check-runs/12/annotations": failed(
+                "the gate counts the shards", EXITED
+            ),
+        },
+        jobs=[GATE],
+        stubs={"yq": YQ},
+        variables={"WORKFLOW_PATH": ".github/workflows/e2e.yml"},
+    )
+
+    assert "| [`e2e`]" in written_by(done)["issue-comment"]
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        # Its needed jobs passed, and it failed by its own judgement.
+        GATED,
+        # It runs only when its needed jobs passed.
+        GATED.replace("    if: ${{ always() }}\n", ""),
+        # A name with an expression is no name of the definition.
+        GATED.replace("    name: e2e\n", "    name: e2e ${{ matrix.x }}\n"),
+    ],
+    ids=["passed", "no always", "expression"],
+)
+def test_the_flaky_test_bot_counts_a_gate_that_failed_by_itself(
+    tmp_path: Path, workflow: str
+) -> None:
+    gate = job_of_a_run(11, "e2e", "failure", ("Run exit 1", "failure"))
+    done = report_of_jobs(
+        tmp_path,
+        gate,
+        failed(EXITED),
+        logged(*command("exit 1"), "##[error]" + EXITED, CLEANUP),
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    gate,
+                    job_of_a_run(13, "browser (1)", "success"),
+                ]
+                if workflow == GATED
+                else [gate, lost_upload(14, "browser (1)", conclusion="cancelled")]
+            },
+            "repos/o/r/check-runs/14/annotations": failed(CANCELLED),
+            "repos/o/r/contents/.github/workflows/e2e.yml?ref=abc1234def": workflow,
+        },
+        stubs={"yq": YQ},
+        variables={"WORKFLOW_PATH": ".github/workflows/e2e.yml"},
+    )
+
+    assert "| [`e2e`]" in written_by(done)["issue-comment"]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_goes_by_the_words_when_the_workflow_cant_be_read(
+    tmp_path: Path,
+) -> None:
+    done = report_of_jobs(
+        tmp_path,
+        job_of_a_run(11, "e2e", "failure", ("Run exit 1", "failure")),
+        failed(EXITED),
+        logged(*command("exit 1"), "##[error]" + EXITED, CLEANUP),
+        {
+            "repos/o/r/contents/.github/workflows/ci.yml?ref=abc1234def.error": (
+                "HTTP 404: Not Found"
+            ),
+            "repos/o/r/check-runs/12/annotations": UPLOAD_LOST_ANNOTATIONS,
+            "repos/o/r/actions/jobs/12/logs": logged(*UPLOAD_LOST, CLEANUP),
+        },
+        jobs=[lost_upload(12, "browser (1)")],
+        stubs={"yq": YQ},
+    )
+
+    assert (
+        "::notice::The file of the workflow, .github/workflows/ci.yml at abc1234,"
+        " couldn't be read, so a job that only sums up the jobs that it needs counts"
+        " unless it says so." in done.stdout.splitlines()
+    )
+    assert "| [`e2e`]" in written_by(done)["issue-comment"]
+
+
+@pytest.mark.skipif(shutil.which("yq") is None, reason="the yq of the runners")
+def test_the_yq_of_the_runner_reads_the_jobs_as_the_tests_do(tmp_path: Path) -> None:
+    workflow = tmp_path / "e2e.yml"
+    workflow.write_text(GATED, encoding="utf-8")
+    real = subprocess.run(
+        ["yq", "-o=json", ".jobs // {}", str(workflow)],
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+    assert json.loads(real.stdout) == load_yaml(GATED)["jobs"]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_leaves_out_a_release_that_could_not_be_checked(
+    tmp_path: Path,
+) -> None:
+    # Issue assistant sync couldn't reach GitHub's attestations or Sigstore.
+    sync = (ROOT / ".github/workflows/sync-issue-assistant.yml").read_text(
+        encoding="utf-8"
+    )
+    errors = [
+        line.split("::error::", 1)[1].rstrip('"')
+        for line in sync.splitlines()
+        if "could not be checked" in line
+    ]
+    message = (
+        errors[0]
+        .replace("$TAG", "v1.3.1")
+        .replace("$SOURCE", "Dennis-Otto/issue-assistant")
+    )
+    done = report_of_one_job(
+        tmp_path,
+        job_of_a_run(
+            11,
+            "sync",
+            "failure",
+            ("Verify the release before taking it over", "failure"),
+        ),
+        failed(message, EXITED),
+        logged(
+            *command(
+                "bash .github/sign-tag.sh verify", printed=(f"##[error]{message}",)
+            ),
+            "##[error]" + EXITED,
+            CLEANUP,
+        ),
+    )
+
+    assert not written_by(done)
+
+
+def test_issue_assistant_sync_says_when_it_could_not_check_a_release() -> None:
+    # So that a run that passed when it ran again gets no row of flaky tests.
+    sync = (ROOT / ".github/workflows/sync-issue-assistant.yml").read_text(
+        encoding="utf-8"
+    )
+    errors = [line for line in sync.splitlines() if "could not be checked" in line]
+    assert len(errors) == 2
+    assert all(CHECK_UNAVAILABLE in line for line in errors)
 
 
 # The comment of the bot before #1095 on the issue of flaky tests, for the run of #1090.
@@ -25612,7 +26136,39 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
             if step.get("name", "").startswith("Take the website that GitHub Pages")
         )
         attested = step_in(deploy, "Attest the provenance of the website")
-        assert steps.index(published) < steps.index(taken) < steps.index(attested)
+        waited = step_in(deploy, "Give Sigstore half a minute")
+        again = step_in(deploy, "Attest the provenance of the website once more")
+        said = step_in(deploy, "Say that Sigstore failed")
+        # Nothing is published without its provenance: the website is taken, signed,
+        # signed once more after a failure, and published only after a signature
+        # (#1110).
+        order = [taken, attested, waited, again, said, published]
+        assert [steps.index(step) for step in order] == sorted(
+            steps.index(step) for step in order
+        )
+        assert again["uses"] == attested["uses"]
+        assert again["with"] == attested["with"]
+        assert attested["id"] == "attest"
+        assert again["id"] == "attest-again"
+        assert condition_of(waited) == "steps.attest.outcome == 'failure'"
+        assert condition_of(again) == "steps.attest.outcome == 'failure'"
+        assert condition_of(said) == (
+            "failure() && steps.attest-again.outcome == 'failure'"
+        )
+        assert "::error title=Sigstore failed::" in said["run"]
+        # Only the first try may fail and let the job go on; a second failure fails
+        # the job, so that GitHub Pages publishes nothing.
+        assert [step for step in steps if "continue-on-error" in step] == [attested]
+        assert attested["continue-on-error"] is True
+        assert "if" not in published
+        assert (attested["timeout-minutes"], again["timeout-minutes"]) == (3, 3)
+        assert (waited["timeout-minutes"], published["timeout-minutes"]) == (1, 5)
+        # The limits of the steps fit into that of the job, with two minutes for the
+        # wait for Docker, which has none of its own.
+        limits = [
+            step["timeout-minutes"] for step in steps if "timeout-minutes" in step
+        ]
+        assert sum(limits) + 2 <= deploy["timeout-minutes"]
         # The job that holds the tokens for GitHub Pages and Sigstore reaches only
         # their hosts; one of its own, without a token, asks the published website,
         # on whatever domain it has.
@@ -28499,7 +29055,13 @@ def test_the_website_is_published_from_the_try_that_kept_it() -> None:
     published = workflow_steps.step(
         "docs.yml", "deploy", "Publish the website on GitHub Pages"
     )
-    assert published["with"] == {"artifact_name": "${{ needs.docs.outputs.pages }}"}
+    # The action's own limit ends before that of the step, so that it cancels its
+    # deployment and says why.
+    assert published["with"] == {
+        "artifact_name": "${{ needs.docs.outputs.pages }}",
+        "timeout": 270000,
+    }
+    assert published["with"]["timeout"] < published["timeout-minutes"] * 60_000
     signed = workflow_steps.step(
         "docs.yml", "deploy", "Take the website that GitHub Pages publishes"
     )
