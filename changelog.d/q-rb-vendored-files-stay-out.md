@@ -1,0 +1,3 @@
+### Bug fixes
+
+- **Renovate's removal of a needless override of npm reads only the `package.json` files that git keeps:** `blueprint.py npm-overrides --fix` also looked at untracked files, such as the packages that Renovate's update of Composer leaves in its checkout, and could change them. Now it leaves every untracked file alone. A post-upgrade task of Renovate still commits every `package.json` and `package-lock.json` that git shows as new, so a folder that a package manager fills belongs in `.gitignore`: the `/vendor/` of a Nextcloud app is ignored already, and if you add a `composer.json` in a subfolder, such as `vendor-bin/<tool>/composer.json`, ignore the `vendor/` beside it too.

@@ -29,7 +29,7 @@ import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from html.parser import HTMLParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple, cast
 from unittest import mock
@@ -12824,6 +12824,64 @@ def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_w
     # The merge of the pull request with its parents, the first of which is its base.
     [checkout] = steps_using(review, "actions/checkout")
     assert checkout["with"]["fetch-depth"] == 2
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_commits_no_file_that_composer_installs(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    files = files_of_the_blueprint() if kind == "blueprint" else files_on_disk(root)
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    filters = [
+        pattern
+        for rule in [shared, *shared["packageRules"], *own.get("packageRules", [])]
+        for pattern in rule.get("postUpgradeTasks", {}).get("fileFilters", [])
+    ]
+    assert "**/package.json" in filters
+    # Renovate takes a file when any entry matches it, each with minimatch on its own:
+    # a negation such as !**/vendor/** matches every file outside vendor/.
+    assert not [pattern for pattern in filters if pattern.startswith("!")]
+    # Composer's update in Renovate's checkout installs into the vendor/ beside each
+    # composer.json, and a refresh that ends without a commit leaves it for the next
+    # branch, whose task commits every file that git shows as new and that no
+    # .gitignore names (decision 1112). Its files are never made here: git answers for
+    # paths that don't exist, by the .gitignore files alone in a repository of their
+    # own, without the exclude file of this checkout or of the machine.
+    installed = [
+        (PurePosixPath(name).parent / "vendor/acme/tool" / leaf).as_posix()
+        for name in files
+        if PurePosixPath(name).name == "composer.json"
+        for leaf in ("package.json", "package-lock.json", "requirements.txt")
+    ]
+    assert bool(installed) == (kind in ("blueprint", "nextcloud-app"))
+    ignores = tmp_path / "ignores"
+    for name in files:
+        if PurePosixPath(name).name == ".gitignore":
+            (ignores / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / name, ignores / name)
+    subprocess.run(["git", "init", "--quiet", str(ignores)], check=True)
+    # Separated by NUL, which no line end of Windows changes.
+    answer = subprocess.run(
+        [
+            "git",
+            *("-c", "core.excludesFile="),
+            *("check-ignore", "--no-index", "--stdin", "-z"),
+        ],
+        cwd=ignores,
+        input="".join(f"{path}\0" for path in installed).encode(),
+        capture_output=True,
+    )
+    # 0 when it ignores a path, 1 when none.
+    assert answer.returncode in (0, 1), answer.stderr
+    ignored = set(answer.stdout.decode().split("\0"))
+    for path in installed:
+        assert path in ignored or not any(
+            matches_glob(pattern, path) for pattern in filters
+        ), path
 
 
 def test_the_mend_app_keeps_npm_alone_to_versions_a_week_old(tmp_path: Path) -> None:
