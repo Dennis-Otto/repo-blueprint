@@ -165,6 +165,9 @@ PUBLISHING = frozenset({"publish the website", "ask the published website"})
 HANDS_ON = "docs"
 HANDED_ON = "Hand the website to GitHub Pages"
 HANDED_ON_AGAIN = "Hand the website to GitHub Pages once more"
+# The events whose runs of PUBLISHES publish the website: a run of its schedule
+# publishes nothing.
+PUBLISHED_BY = frozenset({"push", "workflow_dispatch"})
 # The runs of a workflow that one request lists, the newest first.
 PAGE = 50
 # A failure that ended this recently may still get its second try from the run that
@@ -1217,9 +1220,25 @@ def publishes_again(
         and run.event == "push"
         and run.conclusion in ("failure", "timed_out")
         and now - run.updated >= SECOND_TRY_TIME
-        and not any(later.id > run.id for later in runs)
+        and not any(later.id > run.id and later.event in PUBLISHED_BY for later in runs)
         and head_of(api, repo, branch, run) == run.sha
         and only_the_publication_failed(api, repo, run)
+    )
+
+
+def last_publication(runs: Iterable[Run], again: Collection[int]) -> Run | None:
+    """The newest finished run of the branch that published the website, or tried
+    to: a run of the schedule that came after it, which publishes nothing, leaves the
+    website as that run left it."""
+    return next(
+        (
+            run
+            for run in runs
+            if run.status == "completed"
+            and run.event in PUBLISHED_BY
+            and run.id not in again
+        ),
+        None,
     )
 
 
@@ -1360,11 +1379,14 @@ def look_after(
         # Only a run of the branch closes its issue, and without an issue the next
         # weekly run is soon enough.
         waits = finished.key in issues
-    elif dispatch_inputs(text) is not None and publishes_again(
-        api, repo, branch, finished, runs, now
+    elif (
+        dispatch_inputs(text) is not None
+        and (publication := last_publication(runs, again)) is not None
+        and publishes_again(api, repo, branch, publication, runs, now)
     ):
         notes.append(
-            f"didn't publish the website of {finished.sha[:7]} in {finished.link()}, "
+            f"didn't publish the website of {publication.sha[:7]} in "
+            f"{publication.link()}, "
             "as GitHub Pages or Sigstore failed"
         )
         publish = True

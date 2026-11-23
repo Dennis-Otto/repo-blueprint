@@ -2670,9 +2670,11 @@ def failed_docs(
     ended: timedelta = timedelta(hours=3),
     attempt: int = 2,
     later: bool = False,
+    scheduled: bool = False,
 ) -> None:
     """A run of Docs on main that failed in these jobs, at its last attempt, which
-    ended this long ago; with later, a run that came after it still runs."""
+    ended this long ago; with later, a run that came after it still runs, and with
+    scheduled, a run of the schedule passed after it."""
     write(tmp_path, 1, DOCS)
     github.workflows = [workflow(1, "Docs")]
     runs = [
@@ -2699,20 +2701,35 @@ def failed_docs(
                 created=NOW - timedelta(minutes=10),
             ),
         )
+    if scheduled:
+        runs.insert(
+            0,
+            run_of(
+                12,
+                name="Docs",
+                path=".github/workflows/w1.yml",
+                event="schedule",
+                conclusion="success",
+                created=NOW - timedelta(hours=1),
+            ),
+        )
     github.workflow_runs[1] = runs
     github.jobs[(10, attempt)] = jobs
 
 
 @pytest.mark.parametrize(
-    "jobs", [NOT_PUBLISHED, NOT_HANDED_ON], ids=["publish", "hand on"]
+    ("jobs", "scheduled"),
+    [(NOT_PUBLISHED, False), (NOT_HANDED_ON, False), (NOT_PUBLISHED, True)],
+    ids=["publish", "hand on", "a run of the schedule after it"],
 )
 def test_the_daily_look_starts_docs_once_more_for_a_website_that_it_didnt_publish(
-    github: FakeGitHub, tmp_path: Path, jobs: list[dict[str, Any]]
+    github: FakeGitHub, tmp_path: Path, jobs: list[dict[str, Any]], scheduled: bool
 ) -> None:
     # Sigstore failed for at least ten minutes on 22 November 2026, longer than the
     # second try in the job and the rerun of the bot for stopped checks. A new run
-    # builds the website again, as the artifact of the old one may have expired.
-    failed_docs(github, tmp_path, jobs)
+    # builds the website again, as the artifact of the old one may have expired. A
+    # run of the schedule that passed after it published nothing.
+    failed_docs(github, tmp_path, jobs, scheduled=scheduled)
 
     summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
 

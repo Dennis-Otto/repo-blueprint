@@ -618,6 +618,9 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: ${{ needs.docs.outputs.pages }}
+          # Its own limit, in milliseconds, ends before that of the step, so that the
+          # action cancels its deployment and says why.
+          timeout: 270000
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.

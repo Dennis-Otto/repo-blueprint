@@ -23365,7 +23365,8 @@ def test_the_flaky_test_bot_stops_looking_back_when_github_keeps_failing_a_job(
     tmp_path: Path,
 ) -> None:
     # The annotations of a job that was cancelled tell its time limit, and GitHub keeps
-    # failing them: the bot asks about no more.
+    # failing them: the bot asks about no more, and still counts a run that failed,
+    # which needs no question.
     week = week_of(
         run_of_the_week(31, "2026-10-11T08:00:00Z", lost_upload(310)),
         run_of_the_week(
@@ -23374,6 +23375,7 @@ def test_the_flaky_test_bot_stops_looking_back_when_github_keeps_failing_a_job(
         run_of_the_week(
             33, "2026-10-09T08:00:00Z", lost_upload(330, conclusion="cancelled")
         ),
+        run_of_the_week(34, "2026-10-08T08:00:00Z", lost_upload(340)),
     )
     done = report_of_jobs(
         tmp_path,
@@ -23391,7 +23393,8 @@ def test_the_flaky_test_bot_stops_looking_back_when_github_keeps_failing_a_job(
     assert done.called(r"api repos/o/r/check-runs/320/annotations")
     assert not done.called(r"api repos/o/r/check-runs/330/annotations")
     assert "::warning::The runs of the 7 days before couldn't be read" in done.stdout
-    assert not written_by(done)
+    # This run, 31 and 34: the failure came back for the third time.
+    assert "`check (python)` (3 runs)" in written_by(done)["issue-comment"]
 
 
 @WITH_JQ
@@ -23522,6 +23525,31 @@ def test_the_flaky_test_bot_sees_a_gate_that_only_sums_up_the_jobs_that_it_needs
     assert shown == rows
     assert not done.called(r"api repos/o/r/actions/jobs/12/logs")
     assert len(done.called(r"api .*repos/o/r/contents/")) == 1
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_counts_a_gate_that_failed_in_a_test_of_its_own(
+    tmp_path: Path,
+) -> None:
+    # A job that does its own work under always(), as mutation.yml and renovate.yml
+    # do, keeps the row of its own error while a job that it needs failed as well.
+    done = report_of_jobs(
+        tmp_path,
+        lost_upload(11, "browser (1)"),
+        UPLOAD_LOST_ANNOTATIONS,
+        logged(*UPLOAD_LOST, CLEANUP),
+        {
+            **GATE_ANSWERS,
+            "repos/o/r/check-runs/12/annotations": failed(
+                "the gate counts the shards", EXITED
+            ),
+        },
+        jobs=[GATE],
+        stubs={"yq": YQ},
+        variables={"WORKFLOW_PATH": ".github/workflows/e2e.yml"},
+    )
+
+    assert "| [`e2e`]" in written_by(done)["issue-comment"]
 
 
 @WITH_JQ
@@ -28740,7 +28768,13 @@ def test_the_website_is_published_from_the_try_that_kept_it() -> None:
     published = workflow_steps.step(
         "docs.yml", "deploy", "Publish the website on GitHub Pages"
     )
-    assert published["with"] == {"artifact_name": "${{ needs.docs.outputs.pages }}"}
+    # The action's own limit ends before that of the step, so that it cancels its
+    # deployment and says why.
+    assert published["with"] == {
+        "artifact_name": "${{ needs.docs.outputs.pages }}",
+        "timeout": 270000,
+    }
+    assert published["with"]["timeout"] < published["timeout-minutes"] * 60_000
     signed = workflow_steps.step(
         "docs.yml", "deploy", "Take the website that GitHub Pages publishes"
     )

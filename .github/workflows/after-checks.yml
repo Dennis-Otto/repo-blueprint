@@ -923,7 +923,10 @@ jobs:
                 return 0
               fi
             fi
-            if sums_up "$name"; then
+            # Only a job with no error of its own beside its exit sums up the jobs that
+            # it needs.
+            others="$(grep -cvE '^(Process completed with exit code [0-9]+\.?)?$' <<<"$reported" || true)"
+            if ((others == 0)) && sums_up "$name"; then
               return 0
             fi
             # A log that GitHub doesn't give, such as that of a job that never started,
@@ -1197,14 +1200,14 @@ jobs:
             while IFS=$'\t' read -r run job end name steps; do
               [[ -n "$run" && "$name" == "$key" && "$steps" == "$broke" && "$seen" != *" $run "* ]] || continue
               if [[ "$end" == cancelled ]]; then
-                # After GitHub kept failing, the bot asks about no more runs.
-                [[ -z "$failing" ]] || break
+                # After GitHub kept failing, the bot asks about no more runs, and still
+                # counts those that failed.
+                [[ -z "$failing" ]] || continue
                 if ! texts="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$job/annotations" --paginate \
                   --jq '.[] | select(.annotation_level == "failure") | .message')"; then
                   if given_up; then
                     cut_short
                     failing=true
-                    break
                   fi
                   continue
                 fi
