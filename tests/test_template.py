@@ -93,6 +93,7 @@ from blueprint.best_practices import (
 )
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
+    AFTER_THE_STEPS,
     COLLISION,
     CRON,
     EVENT_BOTS,
@@ -110,6 +111,7 @@ from blueprint.bot_health import (
     TYPE,
     Cron,
     after_pull_requests,
+    around,
     dispatch_inputs,
     own_issue,
     preview_report,
@@ -18547,6 +18549,32 @@ def test_the_bot_health_bot_watches_every_bot(
     # the bot after the checks runs them again when Harden-Runner stopped them.
     assert not watched & OTHER_CHECKS
     assert "Bot health" not in watched
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_health_bot_tells_a_step_of_a_job_from_those_around_it(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The bot runs a job of a workflow of one try again when its time ran out outside
+    # its own steps, which it tells by their names: Set up job, Complete job, and the
+    # pre and post steps of an action of another repository. No step of such a
+    # workflow, in the blueprint or in a project made from it, takes such a name, so a
+    # time-out in one of them stays reported (decision 1118); the jobs of Findings come
+    # from the issue assistant's reusable workflow.
+    root = ROOT if project == "blueprint" else projects[project]
+    named = names_of_workflows(root)
+    assert AFTER_THE_STEPS <= ONE_TRY
+    for name in ONE_TRY & named.keys():
+        assert name in watched_by_bot_health(root), name
+        for job in (parse(named[name]).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                assert not around(str(step.get("name") or "")), (name, step)
+    health = (root / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    assert "in the set-up of the job, before a step of its own ran" in health
+    assert "from its third time in 7 days" in health
+    if project != "blueprint":
+        bot = (root / ".github/blueprint/bot_health.py").read_text(encoding="utf-8")
+        assert bot == (ROOT / "blueprint/bot_health.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
