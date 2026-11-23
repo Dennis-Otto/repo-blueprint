@@ -928,9 +928,10 @@ def script(
     docker: bool = True,
     python: bool = True,
     fail: bool = False,
+    variables: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """scripts/diagrams.sh of the blueprint in this repository, with the stubs of
-    Docker and Python 3, or without them."""
+    Docker and Python 3, or without them, and these variables."""
     (root / "scripts").mkdir(exist_ok=True)
     shutil.copy(ROOT / "scripts/diagrams.sh", root / "scripts/diagrams.sh")
     stubs = tmp_path / "stubs"
@@ -955,6 +956,7 @@ def script(
     )
     if fail:
         environment["FAIL"] = "1"
+    environment.update(variables or {})
     return subprocess.run(
         in_bash("scripts/diagrams.sh", *arguments),
         cwd=root,
@@ -1183,6 +1185,49 @@ def test_the_pictures_stay_when_drawing_fails(tmp_path: Path) -> None:
     assert missing.returncode == 1
     assert missing.stderr.startswith("Drawing the diagrams needs Docker")
     assert drawn(root) == {"steps.svg": "<svg old>\n"}
+
+
+def minimal_python(tmp_path: Path) -> dict[str, str]:
+    """The variables under which every Python is one without its standard library, as
+    python3-minimal of Debian is, the only Python of the dev container of PHP until its
+    setup.sh has run: it passes the version, and import shutil fails (issue 1109)."""
+    folder = tmp_path / "minimal"
+    folder.mkdir()
+    (folder / "shutil.py").write_text(
+        "raise ModuleNotFoundError(\"No module named 'shutil'\", name='shutil')\n",
+        encoding="utf-8",
+    )
+    return {"PYTHONPATH": folder.as_posix()}
+
+
+@runs_a_copy_of_the_tool
+@needs_bash
+def test_the_check_takes_no_python_without_its_standard_library(
+    tmp_path: Path,
+) -> None:
+    readme = picture("steps", Path("README.md"), alt_text(DIAGRAM))
+    root = with_tools(
+        repository(tmp_path / "repository", {**MAIN, "README.md": readme})
+    )
+    minimal = minimal_python(tmp_path)
+
+    complete = script(root, tmp_path, "--check")
+    result = script(root, tmp_path, "--check", variables=minimal)
+
+    assert complete.returncode == 0, complete.stdout + complete.stderr
+    assert complete.stdout == FINE
+    # Without a Python that blueprint.py runs on, the CI compares the alt of each
+    # picture with its source, as it does where no Python is installed at all.
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == FINE
+    assert result.stderr == ""
+    (root / "README.md").write_text(
+        picture("steps", Path("README.md"), "Old"), encoding="utf-8", newline="\n"
+    )
+    assert script(root, tmp_path, "--check").returncode == 1
+    left_out = script(root, tmp_path, "--check", variables=minimal)
+    assert left_out.returncode == 0, left_out.stdout + left_out.stderr
+    assert left_out.stdout == FINE
 
 
 @needs_bash

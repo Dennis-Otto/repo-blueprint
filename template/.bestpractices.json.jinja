@@ -18,13 +18,22 @@
 [#- The test runner of the kinds whose scripts/check.sh runs a test suite. -#]
 [%- set tests = {'python': 'pytest', 'home-assistant': 'pytest', 'php': 'PHPUnit', 'node': 'npm test'}.get(stack, '') -%]
 [%- set linters = {'python': ', Ruff, mypy', 'home-assistant': ', Ruff, mypy', 'php': ', php-cs-fixer, Psalm', 'node': ', Biome, the TypeScript compiler', }.get(stack, '') -%]
-[#- The manifest of the direct dependencies, and what lists and pins them. -#]
+[#- What lists and pins the direct dependencies, and the links to the files that list
+    them: what the package or the integration needs, beside the tools of the tests and
+    checks. pyproject.toml lists dependencies only in a Python package; that of an
+    integration or an action holds only the settings of the tools (issue 1109). -#]
+[%- if project_type == 'home-assistant' -%]
+[%- set manifest = 'custom_components/' ~ ha_domain ~ '/manifest.json' -%]
+[%- set dependencies = (files ~ manifest ~ ' ' ~ files ~ 'requirements-test.in', manifest ~ ' lists in requirements the Python packages that Home Assistant installs for the integration, requirements-test.in the direct dependencies of the tests and checks, and requirements-test.txt pins these with their hashes') -%]
+[%- else -%]
 [%- set dependencies = {
-  'python': ('requirements-dev.in', 'pyproject.toml and requirements-dev.in list the direct dependencies, and requirements-dev.txt pins each with its hashes'),
-  'home-assistant': ('requirements-test.in', 'pyproject.toml and requirements-test.in list the direct dependencies, and requirements-test.txt pins each with its hashes'),
-  'php': ('composer.json', 'composer.json lists the direct dependencies, and composer.lock pins each'),
-  'node': ('package.json', 'package.json lists the direct dependencies, and package-lock.json pins each with its hash'),
+  'python-package': (files ~ 'pyproject.toml', 'pyproject.toml lists the dependencies of the package, requirements-dev.in those of the tests and checks and requirements-fuzz.in those of the fuzzing, and requirements-dev.txt and requirements-fuzz.txt pin each with its hashes'),
+  'github-action': (files ~ 'requirements-dev.in', 'requirements-dev.in lists the direct dependencies of the tests and checks and requirements-fuzz.in those of the fuzzing, and requirements-dev.txt and requirements-fuzz.txt pin each with its hashes'),
+}.get(project_type) or {
+  'php': (files ~ 'composer.json', 'composer.json lists the direct dependencies, and composer.lock pins each'),
+  'node': (files ~ 'package.json', 'package.json lists the direct dependencies, and package-lock.json pins each with its hash'),
 }.get(stack) -%]
+[%- endif %]
 [#- The coding standards of each stack, besides those of every kind, which CONTRIBUTING.md
     names, and the tools of scripts/check.sh that enforce them. Not the strict mode of
     mypy: pyproject.toml, a file of the project, sets it. -#]
@@ -181,7 +190,7 @@
   "installation_development_quick_justification": "CONTRIBUTING.md shows how to set up everything to make and test changes: {= setup =}bash scripts/check.sh runs the checks, the same on a computer and in the CI, and git config core.hooksPath .githooks runs them before every push; the tools of the website go into a virtual environment .venv-docs with pip install --require-hashes -r .github/docs-requirements.txt, and with them bash scripts/check.sh builds the website as well, as its section Website says; the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: {= files =}CONTRIBUTING.md#checks",
 [%- if dependencies %]
   "external_dependencies_status": "Met",
-  "external_dependencies_justification": "{= dependencies[1] =}[% if stack == 'php' %]; appinfo/info.xml names the versions of Nextcloud and PHP that the app supports, and the Upstream workflow proposes each new major version of Nextcloud[% endif %]: {= files =}{= dependencies[0] =}",
+  "external_dependencies_justification": "{= dependencies[1] =}[% if stack == 'php' %]; appinfo/info.xml names the versions of Nextcloud and PHP that the app supports, and the Upstream workflow proposes each new major version of Nextcloud[% endif %]: {= dependencies[0] =}",
 [%- endif %]
   "dependency_monitoring_status": "Met",
   "dependency_monitoring_justification": "Renovate updates the dependencies, an update that fixes a vulnerability at once, and OSV-Scanner checks every lock file in the pull requests that change one, after every change of main and every week, and reports to code scanning, where the Findings workflow fails while a finding is neither fixed nor accepted with its reason; the dependency review checks each pull request for dependencies with known vulnerabilities[% if stack == 'php' %], and composer audit in scripts/check.sh checks the locked packages against the advisories of Packagist[% endif %]; Dependabot alerts, which the settings as code turn on, report known vulnerabilities of the dependencies as well: {= files =}.github/workflows/osv-scanner.yml",
@@ -255,7 +264,7 @@
   "osps_qa_01_02_justification": "Git records every change, who made it and when, and the history of main is public: {= repository =}/commits/main",
 [%- if dependencies %]
   "osps_qa_02_01_status": "Met",
-  "osps_qa_02_01_justification": "{= dependencies[1] =}: {= files =}{= dependencies[0] =}",
+  "osps_qa_02_01_justification": "{= dependencies[1] =}: {= dependencies[0] =}",
 [%- endif %]
   "osps_qa_05_01_status": "Met",
   "osps_qa_05_01_justification": "Git holds the sources, from which every release builds what it ships: the step Binary files of scripts/check.sh, a required check, fails on a program, a library, compiled code or an archive in Git, whatever the name of its file: {= files =}scripts/check.sh",
