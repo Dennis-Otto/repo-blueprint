@@ -55,7 +55,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.7"
+          version: "0.13.8"
       - name: Run the checks
         run: bash scripts/check.sh
       # A Chrome extension: Chrome for Testing loads extension/ as the checks built it,
