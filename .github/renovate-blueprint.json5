@@ -186,9 +186,17 @@
       // file and runs no script, and an override that npm still needs stays byte for
       // byte (decision 1112 of the blueprint). Renovate installs Node with npm, which
       // its image lacks, and the Python of blueprint.py.
+      //
+      // On an update that only moves the lock file, npm saves the new version into
+      // package.json as well, which Renovate would commit with the task's files: the
+      // data file names each update, so that blueprint.py puts back each package.json
+      // whose updates all only move its lock file, and npm writes each lock file anew
+      // whose root then differs from its package.json. Renovate names the file in
+      // RENOVATE_POST_UPGRADE_COMMAND_DATA_FILE, so the command stays as allowed.
       matchManagers: ["npm"],
       postUpgradeTasks: {
         commands: ["python3 blueprint.py npm-overrides --fix"],
+        dataFileTemplate: "[{{#each upgrades}}{{#unless @first}},{{/unless}}{{{toJSON (toObject 'packageFile' packageFile 'depType' depType 'depName' depName 'packageName' packageName 'currentValue' currentValue 'newValue' newValue 'isLockfileUpdate' isLockfileUpdate)}}}{{/each}}]",
         fileFilters: ["**/package.json", "**/package-lock.json"],
         executionMode: "branch",
         installTools: { node: {}, python: {} },
