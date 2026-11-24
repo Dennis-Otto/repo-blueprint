@@ -7,6 +7,35 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.26.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.25.1...v1.26.0) (2026-11-24)
+
+
+### Features
+
+* a Nextcloud app's tests run on the newest PHP and on its oldest ([#1141](https://github.com/Dennis-Otto/repo-blueprint/issues/1141)) ([c5c41b4](https://github.com/Dennis-Otto/repo-blueprint/commit/c5c41b4a0117e696d1ca787f86dae9b20225b013))
+
+
+### Bug fixes
+
+* a heading on the website has the anchor that GitHub gives it ([#1128](https://github.com/Dennis-Otto/repo-blueprint/issues/1128)) ([37d02e8](https://github.com/Dennis-Otto/repo-blueprint/commit/37d02e8456040882e275a60b7b8673837edf19c9))
+* **bot-health:** a job of Findings that ran out of its time outside its steps runs once more ([#1129](https://github.com/Dennis-Otto/repo-blueprint/issues/1129)) ([3291ec0](https://github.com/Dennis-Otto/repo-blueprint/commit/3291ec0da2139caf91292bb38f237dcec63ce9b3))
+* **bot-health:** the empty commit of a refresh with nothing to bring needs nothing ([#1140](https://github.com/Dennis-Otto/repo-blueprint/issues/1140)) ([cc02457](https://github.com/Dennis-Otto/repo-blueprint/commit/cc02457036a0fadcf60463aab6436229cefe371f))
+* **ci:** the check of a GitHub Action ends after 15 minutes instead of 8 ([#1133](https://github.com/Dennis-Otto/repo-blueprint/issues/1133)) ([30a9daf](https://github.com/Dennis-Otto/repo-blueprint/commit/30a9dafff5f2fdb8e339e11a35a09dc8813c00b8))
+* **deps:** lock file maintenance ([#1124](https://github.com/Dennis-Otto/repo-blueprint/issues/1124)) ([f0b4498](https://github.com/Dennis-Otto/repo-blueprint/commit/f0b4498aacdb1db83ee8171c312170339f1ea688))
+* **deps:** lock file maintenance ([#1146](https://github.com/Dennis-Otto/repo-blueprint/issues/1146)) ([0eb6bc4](https://github.com/Dennis-Otto/repo-blueprint/commit/0eb6bc49a084146b024ac3ec28de17d33c923563))
+* **deps:** lock file maintenance ([#1147](https://github.com/Dennis-Otto/repo-blueprint/issues/1147)) ([a083fe9](https://github.com/Dennis-Otto/repo-blueprint/commit/a083fe9a55386dd11d445d83be589d291b917273))
+* **deps:** refresh pip-compile outputs ([#1125](https://github.com/Dennis-Otto/repo-blueprint/issues/1125)) ([8012467](https://github.com/Dennis-Otto/repo-blueprint/commit/8012467424bf0a1882785a69239e40e56bb511da))
+* **deps:** update dependency anchore/syft to v1.57.2 ([#1150](https://github.com/Dennis-Otto/repo-blueprint/issues/1150)) ([acf941d](https://github.com/Dennis-Otto/repo-blueprint/commit/acf941d0166dd9f37d4925360173ff87bd6d9123))
+* **deps:** update dependency pytest-homeassistant to v2026.11.2 ([#1151](https://github.com/Dennis-Otto/repo-blueprint/issues/1151)) ([28b830c](https://github.com/Dennis-Otto/repo-blueprint/commit/28b830c8f61fc9d74e0694f5cab1681d9a012806))
+* **deps:** update ghcr.io/renovatebot/renovate docker tag to v44.258.1 ([#1143](https://github.com/Dennis-Otto/repo-blueprint/issues/1143)) ([539d34f](https://github.com/Dennis-Otto/repo-blueprint/commit/539d34f2dcda8cdd2dfd591e690ef931fb9825f3))
+* **deps:** update the images ([#1152](https://github.com/Dennis-Otto/repo-blueprint/issues/1152)) ([cb5a55c](https://github.com/Dennis-Otto/repo-blueprint/commit/cb5a55c53bfd57189f4faeb91b8317d96246cfd0))
+* **deps:** update the issue assistant to v1.15.4 ([#1134](https://github.com/Dennis-Otto/repo-blueprint/issues/1134)) ([5950637](https://github.com/Dennis-Otto/repo-blueprint/commit/595063780ce69722b951d3dda363a724790ebc0d))
+* **deps:** update the issue assistant to v1.16.0 ([#1158](https://github.com/Dennis-Otto/repo-blueprint/issues/1158)) ([4e34080](https://github.com/Dennis-Otto/repo-blueprint/commit/4e340801a2042b033bc614de9786dfd76b6ec68b))
+* **nextcloud-app:** require the PHP extensions of Nextcloud ([#1157](https://github.com/Dennis-Otto/repo-blueprint/issues/1157)) ([208f943](https://github.com/Dennis-Otto/repo-blueprint/commit/208f94330f585bb3e48600af7f59d1d212a92823))
+* Renovate's commit after npm-overrides takes in no file that Composer installs ([#1139](https://github.com/Dennis-Otto/repo-blueprint/issues/1139)) ([80ad02f](https://github.com/Dennis-Otto/repo-blueprint/commit/80ad02fd18664269c7d752ca947fbda69781aa9f))
+* **renovate:** an update of npm commits only what Renovate and the command change ([#1156](https://github.com/Dennis-Otto/repo-blueprint/issues/1156)) ([5fa2ed2](https://github.com/Dennis-Otto/repo-blueprint/commit/5fa2ed2faea8e4e72ee1b833d3eca5764dc4bcff))
+* the check lint runs the image of markdownlint-cli2 that scripts/check.sh runs ([#1126](https://github.com/Dennis-Otto/repo-blueprint/issues/1126)) ([35d160f](https://github.com/Dennis-Otto/repo-blueprint/commit/35d160f4a3c0539d900c287e857746ff1e9e71b8))
+
 ## [1.25.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.25.0...v1.25.1) (2026-11-23)
 
 ### Bug fixes
