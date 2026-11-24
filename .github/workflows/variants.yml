@@ -429,7 +429,7 @@ jobs:
         timeout-minutes: 5
         with:
           php-version: ${{ steps.php.outputs.oldest }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: none
       - name: Set up the PHP of the tools
         if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
@@ -437,7 +437,7 @@ jobs:
         timeout-minutes: 5
         with:
           php-version: ${{ steps.php.outputs.tools }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: pcov
           tools: composer:v2
       # The update keeps composer.lock as the latest release locked it, so an advisory
@@ -607,6 +607,110 @@ jobs:
             exit 1
           fi
           echo "Psalm takes the controller as an entry point: it finds the method that nothing calls, and nothing else."
+      # From 7.17.0 on, Psalm reports a call of a PHP extension that composer.json
+      # doesn't declare (MissingExtensionRequirement), so the composer.json of a new
+      # app requires the extensions of Nextcloud. With the Psalm that the new app locks,
+      # from stacks/php/composer.lock: a class that calls one function or class of
+      # each extension that its composer.json requires, which Psalm has to accept, and
+      # sodium_bin2hex, which it has to report, and nothing else. That holds while
+      # ext-sodium stays out of require. Not in the leg of the update, which keeps the
+      # composer.json and the lock of the latest release. The class is gone after the
+      # step, also when the step fails, and so is lib/Service when it was empty.
+      - name: Make Psalm ask for each PHP extension that composer.json doesn't require
+        if: matrix.start == 'new' && matrix.kind == 'nextcloud-app'
+        timeout-minutes: 5
+        run: |
+          cd "$PROJECT"
+          namespace="OCA\\$(python3 -c 'from xml.etree import ElementTree; print(ElementTree.parse("appinfo/info.xml").findtext("namespace"))')"
+          probe=lib/Service/ExtensionProbe.php
+          trap 'rm -f "$probe"; rmdir lib/Service 2>/dev/null || true' EXIT
+          # One call for each extension that composer.json requires, and for sodium.
+          calls="$(python3 <<'PYTHON'
+          import json
+          import sys
+
+          CALLS = {
+              "ctype": "ctype_digit('1')",
+              "curl": "curl_init()",
+              "dom": r"new \DOMDocument()",
+              "fileinfo": "finfo_open()",
+              "filter": "filter_var('1', FILTER_VALIDATE_INT)",
+              "libxml": "libxml_use_internal_errors(true)",
+              "mbstring": "mb_strlen('probe')",
+              "openssl": "openssl_cipher_iv_length('aes-128-cbc')",
+              "pdo": r"new \PDO('sqlite::memory:')",
+              "session": "session_status()",
+              "simplexml": "simplexml_load_string('<probe/>')",
+              "sodium": "sodium_bin2hex('probe')",
+              "xml": "xml_parser_create()",
+              "xmlreader": r"new \XMLReader()",
+              "xmlwriter": r"new \XMLWriter()",
+              "zlib": "gzcompress('probe')",
+          }
+          with open("composer.json", encoding="utf-8") as manifest:
+              required = [
+                  name.removeprefix("ext-")
+                  for name in json.load(manifest)["require"]
+                  if name.startswith("ext-")
+              ]
+          unknown = sorted(name for name in required if name not in CALLS)
+          if unknown:
+              sys.exit(
+                  "::error::composer.json requires an extension that the step calls"
+                  f" nothing of: {', '.join(unknown)}; add a call of each to CALLS."
+              )
+          for name in [*required, "sodium"]:
+              print(f"            {CALLS[name]},")
+          PYTHON
+          )"
+          mkdir -p lib/Service
+          cat > "$probe" <<EOF
+          <?php
+
+          declare(strict_types=1);
+
+          namespace $namespace\\Service;
+
+          /**
+           * @psalm-api
+           */
+          final class ExtensionProbe {
+              /**
+               * @return list<mixed>
+               */
+              public function calls(): array {
+                  return [
+          $calls
+                  ];
+              }
+          }
+          EOF
+          expected="$probe:$(grep -n 'sodium_bin2hex' "$probe" | cut -d: -f1) MissingExtensionRequirement"
+          report="$RUNNER_TEMP/psalm-extensions.json"
+          status=0
+          env -u GITHUB_WORKFLOW vendor/bin/psalm --threads=1 --no-cache --no-progress \
+            --output-format=json > "$report" || status=$?
+          # Each finding as file:line type; nothing, when Psalm wrote no report.
+          found="$(python3 - "$report" <<'FOUND'
+          import json
+          import sys
+
+          try:
+              with open(sys.argv[1], encoding="utf-8") as report:
+                  issues = json.load(report)
+          except ValueError:
+              issues = []
+          for issue in issues:
+              print(f"{issue['file_name']}:{issue['line_from']} {issue['type']}")
+          FOUND
+          )"
+          if [[ "$found" != "$expected" ]]; then
+            echo "Psalm (exit code $status) should find only: $expected"
+            echo "It found: ${found:-nothing, or wrote no report}"
+            echo "::error::Psalm no longer asks for a PHP extension that composer.json doesn't require, or asks for one that it requires: stacks/php/composer.json requires the extensions of Nextcloud, which the class calls, and no ext-sodium."
+            exit 1
+          fi
+          echo "Psalm asks for ext-sodium, which composer.json doesn't require, and for none of the extensions that it requires."
       # The sample extension as Chrome for Testing loads it, as the CI of the project does.
       - name: Load the extension of the project in Chrome for Testing
         if: matrix.start != 'adopted' && matrix.kind == 'chrome-extension'

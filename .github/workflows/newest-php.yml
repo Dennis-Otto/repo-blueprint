@@ -80,7 +80,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ steps.newest.outputs.php }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: none
           tools: composer:v2
       - name: Give setup-php half a minute
@@ -92,7 +92,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ steps.newest.outputs.php }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: none
           tools: composer:v2
       - name: Name the PHP of the run
@@ -217,7 +217,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ steps.php.outputs.oldest }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: none
           tools: composer:v2
       - name: Give setup-php half a minute
@@ -229,7 +229,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ steps.php.outputs.oldest }}
-          extensions: dom, libxml, mbstring, xml
+          extensions: ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter, zlib
           coverage: none
           tools: composer:v2
       - name: Find the cache of Composer
