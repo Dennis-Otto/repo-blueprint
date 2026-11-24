@@ -858,7 +858,8 @@ def moving_values(root: Path, names: list[str]) -> dict[str, str]:
     for name in names:
         if not name.startswith("tests/"):
             text = (root / name).read_bytes().decode("utf-8", "replace")
-            for found in IMAGE.finditer(text):
+            # The pattern is slow on long words, so only a file with a digest is searched.
+            for found in IMAGE.finditer(text) if "@sha256:" in text else ():
                 values.setdefault(found["digest"][:8], f"{name}: {found[0]}")
     return values
 
@@ -866,13 +867,18 @@ def moving_values(root: Path, names: list[str]) -> dict[str, str]:
 def written_values(root: Path, names: list[str]) -> list[str]:
     """Each file of tests/ that holds the start of a value that Renovate or pins.py
     moves, with the value."""
-    values = moving_values(root, names)
-    return [
-        f"{name} holds {start}, of {source}"
+    values = sorted(moving_values(root, names).items())
+    # Each file is read once: the tests hold large files.
+    texts = {
+        name: (root / name).read_bytes().decode("utf-8", "replace")
         for name in names
         if name.startswith("tests/")
-        for start, source in sorted(values.items())
-        if start in (root / name).read_bytes().decode("utf-8", "replace")
+    }
+    return [
+        f"{name} holds {start}, of {source}"
+        for name, text in texts.items()
+        for start, source in values
+        if start in text
     ]
 
 
