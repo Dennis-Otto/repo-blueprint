@@ -1,4 +1,0 @@
-### Bug fixes
-
-- **A job of Findings that ran out of its time outside your code runs once more instead of opening an issue:** when GitHub cancels a job of Findings at its time limit in the set-up of the job, as when the runner can't download Harden-Runner in time, or after its last step, the bot-health bot runs the failed jobs once more, and no issue opens and closes again minutes later. Mutation, Property tests and Fuzzing get the same second try for a time-out in the set-up of the job. A time-out inside a step, an open alert and a second try that fails are reported at once, as before.
-- **A time-out outside your code that keeps coming back still reaches you:** from the third time in 7 days for a job of the same name, the bot runs it once more and opens or updates the issue of the workflow as well, which names the runs and where the time went in each.

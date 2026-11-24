@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **A new Nextcloud app requires the PHP extensions that Nextcloud requires, so Psalm 7.17.0 doesn't stop on `filter_var` and calls like it:** its `composer.json` requires ctype, curl, dom, fileinfo, filter, libxml, mbstring, openssl, pdo, session, simplexml, xml, xmlreader, xmlwriter and zlib, and the CI sets up PHP with each of them. An update never changes the `composer.json` of an existing app: when Psalm reports `MissingExtensionRequirement` there, run `composer require --no-update 'ext-filter:*'` for each extension that it names, then `composer update --lock`, in a pull request of its own. Renovate then rebases its lock file maintenance on top of it; nobody pushes to the `renovate/*` branch. The PR coach explains the finding the same way.
