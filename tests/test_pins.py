@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import io
 import re
+import subprocess
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -14,6 +15,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from shared import git_environment
 
 import pins
 
@@ -740,7 +742,6 @@ MARKDOWNLINT = re.compile(
     r"(?<![\w./-])davidanson/markdownlint-cli2:[^@\s\"']+@sha256:[0-9a-f]{64}"
 )
 MARKDOWNLINT_FILES = (".github/*.sh", ".github/workflows/*.yml", "scripts/*.sh")
-DIGEST = "c" * 64
 
 
 def markdownlint_images(root: Path) -> dict[str, list[str]]:
@@ -771,40 +772,149 @@ def test_the_markdownlint_of_the_check_lint_is_that_of_its_image() -> None:
         assert "markdownlint-cli2-action" not in path.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    ("path", "old", "new"),
-    [
-        (".github/workflows/lint.yml", ":v0.24.0@", ":v0.24.1@"),
-        (".github/workflows/variants.yml", "@sha256:70ead7c0", f"@sha256:{DIGEST[:8]}"),
-        ("scripts/markdownlint.sh", ":v0.24.0@", ":0.24.0@"),
-    ],
+# The tag and the digest of an image of markdownlint-cli2.
+MARKDOWNLINT_PARTS = re.compile(r":(?P<tag>[^@]+)@sha256:(?P<digest>[0-9a-f]{64})$")
+MARKDOWNLINT_SCRIPTS = (
+    ".github/workflows/lint.yml",
+    ".github/workflows/variants.yml",
+    "scripts/markdownlint.sh",
 )
+
+
+def another_image(image: str, part: str) -> str:
+    """The image with one part moved, built from the part that it has, so that the
+    test holds for each version that Renovate brings: a later tag, the tag without
+    its v (or with one), or another digest."""
+    found = MARKDOWNLINT_PARTS.search(image)
+    assert found is not None, image
+    tag, digest = found["tag"], found["digest"]
+    if part == "tag":
+        tag = f"{tag}.1"
+    elif part == "tag without its v":
+        tag = tag.removeprefix("v") if tag.startswith("v") else f"v{tag}"
+    else:
+        digest = "d" * 64 if digest == "c" * 64 else "c" * 64
+    other = f"{image[: found.start()]}:{tag}@sha256:{digest}"
+    assert other != image
+    return other
+
+
+@pytest.mark.parametrize("part", ["tag", "digest", "tag without its v"])
+@pytest.mark.parametrize("path", MARKDOWNLINT_SCRIPTS)
 def test_another_tag_or_digest_of_the_image_in_one_place_is_found(
-    tmp_path: Path, path: str, old: str, new: str
+    tmp_path: Path, path: str, part: str
 ) -> None:
-    for name in (
-        ".github/workflows/lint.yml",
-        ".github/workflows/variants.yml",
-        "scripts/markdownlint.sh",
-    ):
+    # The test reads the image that the files hold, which Renovate moves, and writes
+    # no tag or digest of its own (#1149).
+    for name in MARKDOWNLINT_SCRIPTS:
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(
             (ROOT / name).read_text(encoding="utf-8"), encoding="utf-8"
         )
-    assert len(markdownlint_images(tmp_path)) == 1
+    [image] = markdownlint_images(tmp_path)
+    other = another_image(image, part)
     changed = (tmp_path / path).read_text(encoding="utf-8")
-    assert old in changed
-    (tmp_path / path).write_text(changed.replace(old, new), encoding="utf-8")
+    # The whole image, so that another image with the same tag stays as it is.
+    assert image in changed
+    (tmp_path / path).write_text(changed.replace(image, other), encoding="utf-8")
 
     images = markdownlint_images(tmp_path)
 
     assert len(images) == 2
-    assert [path] in images.values()
+    assert images[other] == [path]
     # Another image whose name only ends the same is another image.
     (tmp_path / path).write_text(
         changed.replace("davidanson/", "other/davidanson/"), encoding="utf-8"
     )
     assert len(markdownlint_images(tmp_path)) == 1
+
+
+# An image by its tag and digest, as Renovate pins it in the workflows, the scripts,
+# the template and the stacks.
+IMAGE = re.compile(r"[\w.-]+(?:/[\w.-]+)*:[^@\s\"'`]+@sha256:(?P<digest>[0-9a-f]{64})")
+
+
+def tracked_files(root: Path) -> list[str]:
+    """The files of the repository as Git sees them, new ones not yet committed
+    included, without what .gitignore leaves out."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+        capture_output=True,
+        check=True,
+        env=git_environment(root),
+    ).stdout.decode("utf-8")
+    return [name for name in listed.split("\0") if (root / name).is_file()]
+
+
+def moving_values(root: Path, names: list[str]) -> dict[str, str]:
+    """The start of each value that only Renovate and pins.py write, with where it
+    comes from: the digest of each image that a file outside tests/ runs and the
+    sha256 of each download of .github/pins.toml."""
+    values = {
+        download.sha256[:8]: f"{pins.RECORD}: {dep}"
+        for dep, download in pins.load_record(root).items()
+    }
+    for name in names:
+        if not name.startswith("tests/"):
+            text = (root / name).read_bytes().decode("utf-8", "replace")
+            for found in IMAGE.finditer(text):
+                values.setdefault(found["digest"][:8], f"{name}: {found[0]}")
+    return values
+
+
+def written_values(root: Path, names: list[str]) -> list[str]:
+    """Each file of tests/ that holds the start of a value that Renovate or pins.py
+    moves, with the value."""
+    values = moving_values(root, names)
+    return [
+        f"{name} holds {start}, of {source}"
+        for name in names
+        if name.startswith("tests/")
+        for start, source in sorted(values.items())
+        if start in (root / name).read_bytes().decode("utf-8", "replace")
+    ]
+
+
+def test_no_test_writes_a_digest_or_a_checksum_that_renovate_moves() -> None:
+    # A test that names the digest of an image or the sha256 of a download fails at
+    # the next update, in a pull request of Renovate that can't fix it (#1149): it
+    # reads the value from the file that holds it instead. A test that names only a
+    # tag or a version gets past this guard.
+    assert written_values(ROOT, tracked_files(ROOT)) == []
+
+
+def test_a_digest_or_a_checksum_in_a_test_is_found(tmp_path: Path) -> None:
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/pins.toml").write_text(
+        f'[download."owner/tool"]\nurl = "https://example.org/{{version}}"\n'
+        f'version = "1.0.0"\nsha256 = "{NEW}"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/run.sh").write_text(
+        f"docker run owner/image:v1.0.0@sha256:{OLD}\n", encoding="utf-8"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_run.py").write_text(
+        f'IMAGE = "owner/image:v1.0.0@sha256:{OLD[:8]}"\nSUM = "{NEW[:12]}"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests/test_other.py").write_text("NO = 1\n", encoding="utf-8")
+    names = [
+        ".github/pins.toml",
+        "scripts/run.sh",
+        "tests/test_other.py",
+        "tests/test_run.py",
+    ]
+
+    assert written_values(tmp_path, names) == sorted(
+        [
+            f"tests/test_run.py holds {OLD[:8]}, of scripts/run.sh: "
+            f"owner/image:v1.0.0@sha256:{OLD}",
+            f"tests/test_run.py holds {NEW[:8]}, of .github/pins.toml: owner/tool",
+        ]
+    )
 
 
 class Reads:
