@@ -80,6 +80,7 @@ from blueprint import (
     branches,
     cli,
     diagrams,
+    npm_overrides,
     ownership,
     screenshots,
 )
@@ -12916,11 +12917,40 @@ WAITS = {
 # needless (decision 1112), without its command, which names where blueprint.py is.
 # Renovate commits only package.json and package-lock.json of it, in any folder, and
 # installs Node with npm, which its image lacks, and Python for blueprint.py.
+# Renovate writes a file with every update of the branch for the command, as a list of
+# JSON, and names it in RENOVATE_POST_UPGRADE_COMMAND_DATA_FILE: toObject and toJSON are
+# helpers of its templates, which leave out a field that an update lacks.
+NPM_UPDATES = (
+    "[{{#each upgrades}}{{#unless @first}},{{/unless}}{{{toJSON (toObject "
+    "'packageFile' packageFile 'depType' depType 'depName' depName "
+    "'packageName' packageName 'currentValue' currentValue 'newValue' newValue "
+    "'isLockfileUpdate' isLockfileUpdate)}}}{{/each}}]"
+)
 NPM_OVERRIDES_TASKS = {
     "fileFilters": ["**/package.json", "**/package-lock.json"],
     "executionMode": "branch",
     "installTools": {"node": {}, "python": {}},
+    "dataFileTemplate": NPM_UPDATES,
 }
+
+
+def test_the_data_file_of_an_update_of_npm_names_what_the_command_reads() -> None:
+    # Each field of an update that blueprint.py reads is a field of Renovate's
+    # templates, under its own name, so that the package.json of an update that only
+    # moves the lock file goes back to what Git keeps.
+    fields = re.findall(r"'(\w+)' (\w+)", NPM_UPDATES)
+    assert all(key == value for key, value in fields)
+    assert {"packageFile", "depName", "packageName", "isLockfileUpdate"} <= {
+        key for key, _ in fields
+    }
+    # An update as the template writes it, which the command reads.
+    update = {key: f"stacks/worker/{key}" for key, _ in fields}
+    (read,) = npm_overrides.updates_of(
+        json.dumps([update | {"isLockfileUpdate": True}])
+    )
+    assert read == npm_overrides.Update(
+        "stacks/worker/packageFile", "stacks/worker/depName", lock_only=True
+    )
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])

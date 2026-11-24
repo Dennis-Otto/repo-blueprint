@@ -15,18 +15,27 @@ import pytest
 from blueprint import npm_overrides
 from blueprint.cli import main
 from blueprint.npm_overrides import (
+    DATA_FILE,
     INSTALL,
     ZERO,
     Override,
+    Update,
     Version,
+    align,
     caps,
+    differs,
     floor_of,
     judge,
+    lock_only,
     manifests,
     needless,
     npm_in,
     overrides_of,
     package_name,
+    packages,
+    put_back,
+    unaligned,
+    updates_of,
     version_of,
     without,
     written,
@@ -511,7 +520,12 @@ def test_an_untracked_package_json_of_another_tool_is_left_alone(
 ) -> None:
     # Renovate's Composer update installs into stacks/php/vendor/, and its checkout
     # keeps that folder for the next branch; no .gitignore names it here.
-    old = lock(eslint="10.15.0", minimatch="11.0.8")
+    # The root of the lock file matches package.json without the override, as npm
+    # writes it.
+    old = rooted(
+        lock(eslint="10.15.0", minimatch="11.0.8"),
+        devDependencies={"eslint": "10.15.0"},
+    )
     root = project(
         tmp_path, {"package.json": HOMEDARTS, "package-lock.json": dumped(old)}
     )
@@ -601,7 +615,8 @@ def test_the_command_without_fix_names_what_npm_no_longer_needs(
         "package.json: kept the override of ajv 6.14.0: without it npm takes ajv "
         "6.12.6 at node_modules/ajv, below 6.14.0.\n"
         "python3 blueprint.py npm-overrides --fix removes each override that npm no "
-        "longer needs, as Renovate does after an update of npm.\n"
+        "longer needs and lets npm write each lock file anew whose root differs, as "
+        "Renovate does after an update of npm.\n"
     )
 
 
@@ -609,7 +624,7 @@ def test_the_command_without_fix_names_what_npm_no_longer_needs(
 def test_the_command_passes_when_npm_needs_every_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    old = lock(minimatch="11.0.5")
+    old = rooted(lock(minimatch="11.0.5"), devDependencies={"eslint": "10.15.0"})
     root = project(
         tmp_path, {"package.json": HOMEDARTS, "package-lock.json": dumped(old)}
     )
@@ -633,7 +648,8 @@ def test_the_command_needs_npm_only_for_an_override(
 
     assert main(["npm-overrides", "--fix"], root=root) == 0
     assert capsys.readouterr().out == (
-        "No package.json here has overrides and a package-lock.json beside it.\n"
+        "No package.json here has overrides or a package-lock.json beside it whose "
+        "root differs from it.\n"
     )
 
     (root / "package.json").write_text(HOMEDARTS, encoding="utf-8")
@@ -699,6 +715,478 @@ def test_npm_writes_only_the_lock_file_and_runs_no_script(
         )
     ]
     assert {"--package-lock-only", "--ignore-scripts"} <= set(INSTALL)
+
+
+# ------------------------------- what npm leaves behind on an update of the lock file
+
+# The package.json of the Cloudflare Worker of the blueprint before its pull request
+# #1144, whose updates of wrangler and @cloudflare/vitest-plugin only move the lock file.
+WORKER: dict[str, Any] = {
+    "name": "worker",
+    "private": True,
+    "devDependencies": {"@cloudflare/vitest-plugin": "^1.5.1", "wrangler": "^4.157.0"},
+}
+# The package.json of a Chrome extension, which ships no dependency.
+EXTENSION: dict[str, Any] = {
+    "name": "extension",
+    "devDependencies": {"web-ext": "10.8.0"},
+}
+
+
+def rooted(content: dict[str, Any], **maps: dict[str, str]) -> dict[str, Any]:
+    """The lock file with these maps of dependencies in its root, packages[""]."""
+    content["packages"][""].update(maps)
+    return content
+
+
+def committed(
+    root: Path, files: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """A git repository with these files in HEAD, as Renovate's checkout of the base
+    branch has them before the update."""
+    assert GIT
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(root.parent / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    project(root, files)
+    subprocess.run(
+        [
+            GIT,
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Dev",
+            "-c",
+            "user.email=dev@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "Base",
+        ],
+        check=True,
+    )
+    return root
+
+
+def renovate_wrote(root: Path, files: dict[str, str]) -> None:
+    """The files as Renovate leaves them for its task: its own and npm's."""
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(text.encode("utf-8"))
+
+
+def renovate_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *updates: dict[str, Any]
+) -> None:
+    """Renovate's data file with these updates, named in its variable."""
+    data = tmp_path / "post-upgrade-data-file.tmp"
+    data.write_text(json.dumps(list(updates)), encoding="utf-8")
+    monkeypatch.setenv(DATA_FILE, str(data))
+
+
+def update(
+    manifest: str, name: str, value: str, *, lock_only: bool = True
+) -> dict[str, Any]:
+    """An update as the template of the rule writes it into the data file; Renovate
+    has no isLockfileUpdate for one that bumps or replaces a range."""
+    found: dict[str, Any] = {
+        "packageFile": manifest,
+        "depType": "devDependencies",
+        "depName": name,
+        "packageName": name,
+        "currentValue": value,
+        "newValue": value,
+    }
+    return found | {"isLockfileUpdate": True} if lock_only else found
+
+
+def with_npm(monkeypatch: pytest.MonkeyPatch, npm: FakeNpm) -> FakeNpm:
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(npm_overrides, "npm_in", lambda path: npm)
+    return npm
+
+
+@needs_git
+def test_a_range_that_npm_saved_on_an_update_of_the_lock_file_goes_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # npm's call for #1144 saved ^4.163.0 and ^1.8.3 into package.json, and Renovate
+    # set the root of the lock file back to the ranges of package.json.
+    manifest = "stacks/worker/package.json"
+    lock_file = "stacks/worker/package-lock.json"
+    root = committed(
+        tmp_path / "repository",
+        {
+            manifest: dumped(WORKER),
+            lock_file: dumped(
+                rooted(
+                    lock(wrangler="4.157.0", **{"@cloudflare/vitest-plugin": "1.5.1"}),
+                    devDependencies=WORKER["devDependencies"],
+                )
+            ),
+        },
+        monkeypatch,
+    )
+    saved = {"@cloudflare/vitest-plugin": "^1.8.3", "wrangler": "^4.163.0"}
+    renovates = rooted(
+        lock(wrangler="4.163.0", **{"@cloudflare/vitest-plugin": "1.8.3"}),
+        devDependencies=WORKER["devDependencies"],
+    )
+    renovate_wrote(
+        root,
+        {
+            manifest: dumped(WORKER | {"devDependencies": saved}),
+            lock_file: dumped(renovates),
+        },
+    )
+    renovate_names(
+        tmp_path,
+        monkeypatch,
+        update(manifest, "wrangler", "^4.157.0"),
+        update(manifest, "@cloudflare/vitest-plugin", "^1.5.1"),
+    )
+    npm = with_npm(monkeypatch, FakeNpm())
+
+    assert main(["npm-overrides", "--fix"], root=root) == 0
+
+    # Renovate takes up only the lock file: package.json is as Git keeps it, and the
+    # root of the lock file matches it without a call of npm.
+    assert contents(root, manifest, lock_file) == [
+        dumped(WORKER).encode(),
+        dumped(renovates).encode(),
+    ]
+    assert npm.folders == []
+    assert capsys.readouterr().out == (
+        "stacks/worker/package.json: put back as Git keeps it: its updates of "
+        "wrangler, @cloudflare/vitest-plugin only move the lock file, and npm saved "
+        "them into it.\n"
+        "No package.json here has overrides or a package-lock.json beside it whose "
+        "root differs from it.\n"
+    )
+    assert DATA_FILE == "RENOVATE_POST_UPGRADE_COMMAND_DATA_FILE"
+
+
+@needs_git
+def test_a_package_that_npm_added_to_the_dependencies_leaves_both_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # npm added minimatch, which only an override names, to the dependencies of
+    # package.json and of the root of the lock file, where Renovate sets no range back.
+    root = committed(
+        tmp_path / "repository",
+        {
+            "package.json": dumped(EXTENSION),
+            "package-lock.json": dumped(
+                rooted(
+                    lock(**{"web-ext": "10.8.0"}, minimatch="11.0.8"),
+                    devDependencies=EXTENSION["devDependencies"],
+                )
+            ),
+        },
+        monkeypatch,
+    )
+    added = {"minimatch": "^11.0.9"}
+    renovate_wrote(
+        root,
+        {
+            "package.json": dumped(EXTENSION | {"dependencies": added}),
+            "package-lock.json": dumped(
+                rooted(
+                    lock(**{"web-ext": "10.8.0"}, minimatch="11.0.9"),
+                    dependencies=added,
+                    devDependencies=EXTENSION["devDependencies"],
+                )
+            ),
+        },
+    )
+    renovate_names(
+        tmp_path, monkeypatch, update("package.json", "minimatch", "^11.0.3")
+    )
+    aligned = rooted(
+        lock(**{"web-ext": "10.8.0"}, minimatch="11.0.9"),
+        devDependencies=EXTENSION["devDependencies"],
+    )
+    npm = with_npm(monkeypatch, FakeNpm(aligned))
+
+    assert main(["npm-overrides", "--fix"], root=root) == 0
+
+    # The update keeps minimatch 11.0.9, and the package ships no dependency.
+    assert npm.folders == [root]
+    assert npm.manifests == [EXTENSION]
+    assert contents(root, "package.json", "package-lock.json") == [
+        dumped(EXTENSION).encode(),
+        dumped(aligned).encode(),
+    ]
+    assert capsys.readouterr().out == (
+        "package.json: put back as Git keeps it: its updates of minimatch only move "
+        "the lock file, and npm saved them into it.\n"
+        "package.json: the root of its package-lock.json differs in dependencies, so "
+        "npm wrote it anew with the versions that it had.\n"
+    )
+
+
+@needs_git
+def test_a_group_that_bumps_one_range_keeps_renovates_package_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One update bumps the range of a, the other moves only b in the lock file:
+    # package.json is Renovate's, and only the root of the lock file follows it.
+    ranges = {"a": "^1.0.0", "b": "^1.0.0"}
+    root = committed(
+        tmp_path / "repository",
+        {
+            "package.json": dumped({"devDependencies": ranges}),
+            "package-lock.json": dumped(
+                rooted(lock(a="1.0.0", b="1.0.0"), devDependencies=ranges)
+            ),
+        },
+        monkeypatch,
+    )
+    bumped = {"a": "^2.0.0", "b": "^1.0.0"}
+    renovate_wrote(
+        root,
+        {
+            "package.json": dumped({"devDependencies": bumped}),
+            "package-lock.json": dumped(
+                rooted(
+                    lock(a="2.0.0", b="1.1.0"),
+                    devDependencies={"a": "^2.0.0", "b": "^1.1.0"},
+                )
+            ),
+        },
+    )
+    renovate_names(
+        tmp_path,
+        monkeypatch,
+        update("package.json", "a", "^1.0.0", lock_only=False),
+        update("package.json", "b", "^1.0.0"),
+    )
+    aligned = rooted(lock(a="2.0.0", b="1.1.0"), devDependencies=bumped)
+    npm = with_npm(monkeypatch, FakeNpm(aligned))
+
+    assert main(["npm-overrides", "--fix"], root=root) == 0
+
+    assert npm.manifests == [{"devDependencies": bumped}]
+    assert contents(root, "package.json", "package-lock.json") == [
+        dumped({"devDependencies": bumped}).encode(),
+        dumped(aligned).encode(),
+    ]
+
+
+@needs_git
+def test_a_lock_file_with_a_version_that_the_update_lacked_fails_the_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # npm's call here has no --before=, so a version that the lock file of the update
+    # lacked may be younger than a week: the command fails, and the update with it.
+    root = committed(
+        tmp_path / "repository",
+        {"package.json": dumped(EXTENSION), "package-lock.json": dumped(lock())},
+        monkeypatch,
+    )
+    added = {"minimatch": "^11.0.9"}
+    renovates = rooted(
+        lock(**{"web-ext": "10.8.0"}, minimatch="11.0.9"),
+        dependencies=added,
+        devDependencies=EXTENSION["devDependencies"],
+    )
+    renovate_wrote(
+        root,
+        {
+            "package.json": dumped(EXTENSION | {"dependencies": added}),
+            "package-lock.json": dumped(renovates),
+        },
+    )
+    renovate_names(
+        tmp_path, monkeypatch, update("package.json", "minimatch", "^11.0.3")
+    )
+    with_npm(
+        monkeypatch,
+        FakeNpm(
+            rooted(
+                lock(**{"web-ext": "10.8.0"}, minimatch="11.0.9", ajv="8.17.2"),
+                devDependencies=EXTENSION["devDependencies"],
+            )
+        ),
+    )
+
+    assert main(["npm-overrides", "--fix"], root=root) == 1
+
+    # The lock file stays as Renovate wrote it, beside package.json as Git keeps it.
+    assert contents(root, "package.json", "package-lock.json") == [
+        dumped(EXTENSION).encode(),
+        dumped(renovates).encode(),
+    ]
+    assert capsys.readouterr().err == (
+        "package.json: the root of its package-lock.json differs in dependencies, and "
+        "it stays so: npm brings ajv@8.17.2, which the lock file of the update doesn't "
+        "have, and only Renovate's own call of npm keeps to versions a week old.\n"
+    )
+
+
+@needs_git
+@pytest.mark.parametrize(
+    ("stderr", "message"),
+    [("one\nnpm error ETARGET\n", "npm error ETARGET"), ("", "no message")],
+)
+def test_a_failure_of_npm_keeps_the_lock_file_as_it_was(
+    tmp_path: Path, stderr: str, message: str
+) -> None:
+    written_lock = dumped(rooted(lock(a="1.0.0"), devDependencies={"a": "^1.1.0"}))
+    root = project(
+        tmp_path,
+        {
+            "package.json": dumped({"devDependencies": {"a": "^1.0.0"}}),
+            "package-lock.json": written_lock,
+        },
+    )
+    before = contents(root, "package.json", "package-lock.json")
+    npm = FakeNpm(lock(), returncode=1)
+    npm.stderr = stderr
+
+    assert align(root, "package.json", npm, written_lock.encode()) == (
+        False,
+        f"npm failed: {message}",
+    )
+    assert contents(root, "package.json", "package-lock.json") == before
+
+
+@needs_git
+def test_the_command_without_fix_names_a_lock_file_whose_root_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = project(
+        tmp_path,
+        {
+            "package.json": dumped({"devDependencies": {"a": "^1.0.0"}}),
+            "package-lock.json": dumped(
+                rooted(
+                    lock(a="1.1.0"),
+                    devDependencies={"a": "^1.1.0"},
+                    peerDependencies={"b": "*"},
+                )
+            ),
+        },
+    )
+    before = contents(root, "package.json", "package-lock.json")
+    npm = with_npm(monkeypatch, FakeNpm())
+
+    assert main(["npm-overrides"], root=root) == 1
+
+    assert npm.folders == []
+    assert contents(root, "package.json", "package-lock.json") == before
+    assert capsys.readouterr().out == (
+        "package.json: the root of its package-lock.json differs in devDependencies, "
+        "peerDependencies.\n"
+        "python3 blueprint.py npm-overrides --fix removes each override that npm no "
+        "longer needs and lets npm write each lock file anew whose root differs, as "
+        "Renovate does after an update of npm.\n"
+    )
+
+
+@needs_git
+@pytest.mark.parametrize(
+    ("data", "error"),
+    [
+        (None, "post-upgrade-data-file.tmp"),
+        ("[", "Expecting value"),
+        ("{}", "it isn't a list of updates, each with its packageFile"),
+        ('[{"depName": "a"}]', "it isn't a list of updates, each with its packageFile"),
+    ],
+)
+def test_a_data_file_that_it_cant_read_fails_the_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    data: str | None,
+    error: str,
+) -> None:
+    root = project(
+        tmp_path / "repository",
+        {"package.json": HOMEDARTS, "package-lock.json": dumped(lock())},
+    )
+    path = tmp_path / "post-upgrade-data-file.tmp"
+    if data is not None:
+        path.write_text(data, encoding="utf-8")
+    monkeypatch.setenv(DATA_FILE, str(path))
+    npm = with_npm(monkeypatch, FakeNpm())
+
+    assert main(["npm-overrides", "--fix"], root=root) == 1
+
+    assert npm.folders == []
+    err = capsys.readouterr().err
+    assert err.startswith(f"Renovate's data file of the updates, {path}: ")
+    assert error in err.removeprefix(f"Renovate's data file of the updates, {path}: ")
+
+
+def test_the_updates_of_the_data_file_name_their_package_json() -> None:
+    updates = updates_of(
+        json.dumps(
+            [
+                update("a/package.json", "x", "^1.0.0"),
+                {"packageFile": "a/package.json", "packageName": "y"},
+                update("b/package.json", "z", "^1.0.0"),
+                {"packageFile": "c/package.json", "isLockfileUpdate": "true"},
+            ]
+        )
+    )
+
+    assert updates == [
+        Update("a/package.json", "x", lock_only=True),
+        Update("a/package.json", "y", lock_only=False),
+        Update("b/package.json", "z", lock_only=True),
+        Update("c/package.json", "", lock_only=False),
+    ]
+    assert lock_only(updates) == {"b/package.json": ["z"]}
+
+
+@needs_git
+def test_only_a_changed_package_json_that_git_keeps_goes_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # a is as Git keeps it, b is new on the branch and c has no lock file beside it.
+    root = committed(
+        tmp_path / "repository",
+        {
+            "a/package.json": dumped(EXTENSION),
+            "a/package-lock.json": dumped(lock()),
+            "c/package.json": dumped(EXTENSION),
+        },
+        monkeypatch,
+    )
+    new = {
+        "b/package.json": dumped(EXTENSION | {"dependencies": {"x": "^1.0.0"}}),
+        "b/package-lock.json": dumped(lock()),
+        "c/package.json": dumped(EXTENSION | {"dependencies": {"x": "^1.0.0"}}),
+    }
+    renovate_wrote(root, new)
+    assert GIT
+    subprocess.run([GIT, "-C", str(root), "add", "--all"], check=True)
+    updates = [Update(f"{name}/package.json", "x", True) for name in ("a", "b", "c")]
+
+    assert packages(root) == ["a/package.json", "b/package.json"]
+    assert put_back(root, packages(root), updates) == []
+    assert contents(root, *new) == [text.encode() for text in new.values()]
+
+
+@needs_git
+def test_a_lock_file_without_a_root_and_files_that_arent_json_are_left_out(
+    tmp_path: Path,
+) -> None:
+    root = project(
+        tmp_path,
+        {
+            # npm 6 wrote lock files of version 1, without packages.
+            "old/package.json": dumped({"devDependencies": {"a": "^1.0.0"}}),
+            "old/package-lock.json": dumped({"lockfileVersion": 1}),
+            "broken/package.json": "{",
+            "broken/package-lock.json": dumped(lock()),
+        },
+    )
+
+    assert unaligned(root, packages(root)) == []
+    assert differs({"dependencies": {}}, lock()) == []
 
 
 # ------------------------------------------------------------------ the pieces
