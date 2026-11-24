@@ -1581,10 +1581,15 @@ why = """Psalm catches bugs that the tests miss, before they reach a Nextcloud s
 fix = """Fix each line that Psalm names; its documentation explains every issue. A method
 that the plugin names and `nextcloud/ocp` lost is the blueprint's to adapt: report
 it there, and keep the update of `nextcloud/ocp` until a release of the blueprint
-does. Psalm runs alone with:"""
+does. For `MissingExtensionRequirement`, the code calls a PHP extension that
+`composer.json` doesn't declare: add it to `require`, such as with
+`composer require --no-update 'ext-filter:*'`, or to `suggest` when the code checks
+`extension_loaded()` first, then run `composer update --lock`, in a pull request of
+the app's own, never on the branch of Renovate. Psalm runs alone with:"""
 commands = ["vendor/bin/psalm --no-cache"]
 docs = "https://psalm.dev/docs/running_psalm/issues/"
-autofix = """Only a person knows which type is right."""
+autofix = """Only a person knows which type is right, and whether the app requires an
+extension that Psalm names or only suggests it."""
 
 [step."Psalm taint canary"]
 rerun = false

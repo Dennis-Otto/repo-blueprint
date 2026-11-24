@@ -14,7 +14,22 @@
 		}
 	},
 	"require": {
-		"php": "^8.2"
+		"php": "^8.2",
+		"ext-ctype": "*",
+		"ext-curl": "*",
+		"ext-dom": "*",
+		"ext-fileinfo": "*",
+		"ext-filter": "*",
+		"ext-libxml": "*",
+		"ext-mbstring": "*",
+		"ext-openssl": "*",
+		"ext-pdo": "*",
+		"ext-session": "*",
+		"ext-simplexml": "*",
+		"ext-xml": "*",
+		"ext-xmlreader": "*",
+		"ext-xmlwriter": "*",
+		"ext-zlib": "*"
 	},
 	"require-dev": {
 		"nextcloud/coding-standard": "^1.5",

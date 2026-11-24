@@ -3003,6 +3003,85 @@ def test_the_composer_lock_belongs_to_the_composer_json(
     )
 
 
+# The PHP extensions that a new Nextcloud app requires: those that the admin manual of
+# Nextcloud 33 to 35 requires of every server, which Psalm 7.17.0 asks composer.json
+# to declare before the code calls them (MissingExtensionRequirement). Four are left
+# out: gd and zip, which neither the dev container nor php:8.3-cli has, so that
+# composer install would stop there; posix, which PHP on Windows lacks; and json,
+# which is built into PHP 8.
+NEXTCLOUD_PHP_EXTENSIONS = (
+    "ctype",
+    "curl",
+    "dom",
+    "fileinfo",
+    "filter",
+    "libxml",
+    "mbstring",
+    "openssl",
+    "pdo",
+    "session",
+    "simplexml",
+    "xml",
+    "xmlreader",
+    "xmlwriter",
+    "zlib",
+)
+
+
+def test_a_nextcloud_app_requires_the_php_extensions_of_nextcloud(
+    projects: dict[str, Path],
+) -> None:
+    project = projects["nextcloud-app"]
+    manifest = json.loads((project / "composer.json").read_text(encoding="utf-8"))
+    lock = json.loads((project / "composer.lock").read_text(encoding="utf-8"))
+    extensions = {f"ext-{name}": "*" for name in NEXTCLOUD_PHP_EXTENSIONS}
+
+    assert manifest["require"] == {"php": "^8.2", **extensions}
+    # In the order of Composer's sort-packages, so that composer require keeps it.
+    assert list(manifest["require"]) == ["php", *sorted(extensions)]
+    assert lock["platform"] == manifest["require"]
+    assert lock["platform-dev"] == {}
+    assert not {"ext-gd", "ext-zip", "ext-posix", "ext-json"} & set(extensions)
+
+
+def test_setup_php_installs_each_extension_that_a_nextcloud_app_requires() -> None:
+    required = [
+        name.removeprefix("ext-")
+        for name in json.loads(
+            (ROOT / "stacks/php/composer.json").read_text(encoding="utf-8")
+        )["require"]
+        if name.startswith("ext-")
+    ]
+    assert required == list(NEXTCLOUD_PHP_EXTENSIONS)
+    found = {}
+    for name in ("ci-php.yml", "variants.yml", "newest-php.yml", "mutation.yml"):
+        setups = []
+        for job in workflow_steps.workflow(name)["jobs"].values():
+            steps = job.get("steps") or []
+            for index, step in enumerate(steps):
+                # Composer checks the extensions that composer.json requires, in
+                # composer install and update and in check-platform-reqs.
+                if str(step.get("uses", "")).startswith(
+                    "shivammathur/setup-php@"
+                ) and any(
+                    "composer " in str(later.get("run", ""))
+                    for later in steps[index + 1 :]
+                ):
+                    setups.append(step["with"]["extensions"].split(", "))
+        found[name] = setups
+    # The jobs of newest-php.yml and mutation.yml don't run in the blueprint, so this
+    # is what makes them certain.
+    assert {name: len(setups) for name, setups in found.items()} == {
+        "ci-php.yml": 2,
+        "variants.yml": 2,
+        "newest-php.yml": 4,
+        "mutation.yml": 1,
+    }
+    for setups in found.values():
+        for extensions in setups:
+            assert extensions == required
+
+
 def test_the_package_lock_belongs_to_the_package_json(
     projects: dict[str, Path],
 ) -> None:
@@ -8714,6 +8793,133 @@ def test_the_variants_prove_that_psalm_takes_each_controller_as_an_entry_point(
     ), done.stdout
 
 
+# A Psalm for the step of the Variants that proves Psalm to ask for an extension that
+# composer.json doesn't require: it keeps a copy of the class that the step writes and
+# reports the call of sodium, as Psalm 7.17.0 does, also that of filter, as it would
+# without ext-filter in composer.json, or nothing, as when it crashes.
+EXTENSION_PSALM = r"""#!/usr/bin/env bash
+probe=lib/Service/ExtensionProbe.php
+cp "$probe" "$SEEN"
+finding() {
+  printf '{"type": "MissingExtensionRequirement", "file_name": "%s", "line_from": %s}' \
+    "$probe" "$(grep -n "$1" "$probe" | cut -d: -f1)"
+}
+case "$FINDS" in
+  sodium) echo "[$(finding sodium_bin2hex)]" ;;
+  declared) echo "[$(finding filter_var), $(finding sodium_bin2hex)]" ;;
+  *) echo "Psalm crashed" >&2; exit 1 ;;
+esac
+exit 2
+"""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("finds", ["sodium", "declared", "nothing", "unknown"])
+def test_the_variants_prove_that_psalm_asks_for_an_undeclared_extension(
+    tmp_path: Path, finds: str
+) -> None:
+    name = "Make Psalm ask for each PHP extension that composer.json doesn't require"
+    variant = workflow_steps.step("variants.yml", "variant", name)
+    # Only each new Nextcloud app: the update keeps the composer.json and the lock of
+    # the latest release, whose Psalm may not know the rule.
+    assert condition_of(variant) == (
+        "matrix.start == 'new' && matrix.kind == 'nextcloud-app'"
+    )
+    workspace = tmp_path / "workspace"
+    project = workspace / "variant"
+    (project / "appinfo").mkdir(parents=True)
+    (project / "appinfo/info.xml").write_text(
+        "<?xml version='1.0'?>\n<info><id>app</id><namespace>App</namespace></info>\n",
+        encoding="utf-8",
+    )
+    manifest = json.loads(
+        (ROOT / "stacks/php/composer.json").read_text(encoding="utf-8")
+    )
+    if finds == "unknown":
+        # An extension that the step has no call of.
+        manifest["require"]["ext-gd"] = "*"
+    (project / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+    psalm = project / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    psalm.write_text(EXTENSION_PSALM, encoding="utf-8", newline="\n")
+    psalm.chmod(0o755)
+    seen = tmp_path / "seen.php"
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "variant",
+        name,
+        env={"FINDS": finds, "SEEN": str(seen)},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        workspace=workspace,
+    )
+
+    # The class is gone, whatever Psalm found.
+    assert list((project / "lib").rglob("*.php")) == []
+    if finds == "unknown":
+        assert done.returncode == 1
+        assert not seen.exists()
+        assert (
+            "::error::composer.json requires an extension that the step calls nothing"
+            " of: gd; add a call of each to CALLS.\n"
+        ) in done.stderr
+        return
+    # One call of each extension that composer.json requires, in its order, and of
+    # sodium last, in a class of the app's namespace that Psalm takes as public API.
+    probe = seen.read_text(encoding="utf-8").splitlines()
+    assert "namespace OCA\\App\\Service;" in probe
+    assert " * @psalm-api" in probe
+    calls = [line.strip() for line in probe if line.startswith(" " * 12)]
+    assert [call.split("(")[0].removeprefix("new \\") for call in calls] == [
+        "ctype_digit",
+        "curl_init",
+        "DOMDocument",
+        "finfo_open",
+        "filter_var",
+        "libxml_use_internal_errors",
+        "mb_strlen",
+        "openssl_cipher_iv_length",
+        "PDO",
+        "session_status",
+        "simplexml_load_string",
+        "xml_parser_create",
+        "XMLReader",
+        "XMLWriter",
+        "gzcompress",
+        "sodium_bin2hex",
+    ]
+    assert all(call.endswith(",") for call in calls)
+
+    def where(call: str) -> str:
+        return f"lib/Service/ExtensionProbe.php:{probe.index(' ' * 12 + call) + 1}"
+
+    sodium = where(calls[-1])
+    if finds == "sodium":
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert done.stdout == (
+            "Psalm asks for ext-sodium, which composer.json doesn't require, and for"
+            " none of the extensions that it requires.\n"
+        )
+        return
+    assert done.returncode == 1
+    found = {
+        "declared": (
+            f"{where(calls[4])} MissingExtensionRequirement\n"
+            f"{sodium} MissingExtensionRequirement"
+        ),
+        "nothing": "nothing, or wrote no report",
+    }[finds]
+    assert done.stdout.startswith(
+        "Psalm (exit code "
+        + ("2" if finds == "declared" else "1")
+        + f") should find only: {sodium} MissingExtensionRequirement\n"
+        f"It found: {found}\n"
+        "::error::Psalm no longer asks for a PHP extension that composer.json"
+        " doesn't require,"
+    ), done.stdout
+
+
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("sees", [True, False])
 def test_the_canary_of_the_taint_analysis_runs_beside_the_types(
@@ -9205,8 +9411,8 @@ def test_the_tools_of_a_nextcloud_app_run_on_the_php_of_its_composer_json(
     assert tools["with"]["php-version"] == "${{ steps.php.outputs.tools }}"
     assert tools["with"]["coverage"] == "pcov"
     assert tools["with"]["tools"] == "composer:v2"
-    # The same extensions on both, which the packages of the app may need.
-    assert oldest["with"]["extensions"] == "dom, libxml, mbstring, xml"
+    # The same extensions on both, which the app and its packages require.
+    assert oldest["with"]["extensions"] == ", ".join(NEXTCLOUD_PHP_EXTENSIONS)
     assert tools["with"]["extensions"] == oldest["with"]["extensions"]
     # No PHP of its own beside the two that the app names.
     setups = [
@@ -25830,7 +26036,7 @@ def test_the_newest_and_the_oldest_php_test_main_and_every_week(
         for each in steps_using(job, "shivammathur/setup-php"):
             version = each["with"]["php-version"]
             assert re.fullmatch(r"\$\{\{ steps\.\w+\.outputs\.\w+ \}\}", version)
-            assert each["with"]["extensions"] == "dom, libxml, mbstring, xml"
+            assert each["with"]["extensions"] == ", ".join(NEXTCLOUD_PHP_EXTENSIONS)
             assert each["with"]["coverage"] == "none"
             assert each["with"]["tools"] == "composer:v2"
         assert step_in(job, "Explain the failure")["env"] == {"CHECK": job["name"]}
@@ -33987,7 +34193,8 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     # on a pull request, whose code the report runs.
     for job in (plan, job_in(workflow, "stats"), mutation, report):
         assert job["permissions"]["contents"] == "read"
-        assert "write" not in values_of(job)
+        # As a word: the extension xmlwriter of PHP writes nothing.
+        assert not re.search(r"\bwrite\b", values_of(job))
     assert report["permissions"] == {"actions": "read", "contents": "read"}
     assert plan["name"] == "mutation plan"
     assert report["name"] == "mutation report"
