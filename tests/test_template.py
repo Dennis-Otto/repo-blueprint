@@ -3042,6 +3042,13 @@ def test_a_nextcloud_app_requires_the_php_extensions_of_nextcloud(
     assert lock["platform"] == manifest["require"]
     assert lock["platform-dev"] == {}
     assert not {"ext-gd", "ext-zip", "ext-posix", "ext-json"} & set(extensions)
+    # A PHP for Windows loads these only once php.ini turns them on, so composer
+    # install would stop there: the guide says so.
+    guide = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert (
+        "A PHP for Windows loads curl, fileinfo, mbstring and openssl only once its"
+        " `php.ini` turns them on" in guide
+    )
 
 
 def test_setup_php_installs_each_extension_that_a_nextcloud_app_requires() -> None:

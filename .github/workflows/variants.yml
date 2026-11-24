@@ -615,7 +615,7 @@ jobs:
       # sodium_bin2hex, which it has to report, and nothing else. That holds while
       # ext-sodium stays out of require. Not in the leg of the update, which keeps the
       # composer.json and the lock of the latest release. The class is gone after the
-      # step, also when the step fails.
+      # step, also when the step fails, and so is lib/Service when it was empty.
       - name: Make Psalm ask for each PHP extension that composer.json doesn't require
         if: matrix.start == 'new' && matrix.kind == 'nextcloud-app'
         timeout-minutes: 5
@@ -623,9 +623,9 @@ jobs:
           cd "$PROJECT"
           namespace="OCA\\$(python3 -c 'from xml.etree import ElementTree; print(ElementTree.parse("appinfo/info.xml").findtext("namespace"))')"
           probe=lib/Service/ExtensionProbe.php
-          trap 'rm -f "$probe"' EXIT
+          trap 'rm -f "$probe"; rmdir lib/Service 2>/dev/null || true' EXIT
           # One call for each extension that composer.json requires, and for sodium.
-          calls="$(python3 <<'CALLS'
+          calls="$(python3 <<'PYTHON'
           import json
           import sys
 
@@ -661,7 +661,7 @@ jobs:
               )
           for name in [*required, "sodium"]:
               print(f"            {CALLS[name]},")
-          CALLS
+          PYTHON
           )"
           mkdir -p lib/Service
           cat > "$probe" <<EOF
