@@ -27922,7 +27922,7 @@ def test_the_markdown_lints_with_one_version_everywhere() -> None:
         ], path
 
 
-# What markdownlint-cli2 0.24.0, the version of the image, wrote for a document that
+# What markdownlint-cli2 0.24.0, a version of the image, wrote for a document that
 # breaks MD018 and MD009 (the second as a warning by its rules) and for one that breaks
 # MD012, which names no column: the findings on stderr, the rest on stdout.
 MARKDOWNLINT_OUTPUT = """\
