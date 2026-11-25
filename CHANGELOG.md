@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.26.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.26.0...v1.26.1) (2026-11-25)
 
-
 ### Bug fixes
 
 * **deps:** update davidanson/markdownlint-cli2 docker tag to v0.24.1 ([#1100](https://github.com/Dennis-Otto/repo-blueprint/issues/1100)) ([abcd44a](https://github.com/Dennis-Otto/repo-blueprint/commit/abcd44a1b046f8290d3f38915344696d32fc983a))
