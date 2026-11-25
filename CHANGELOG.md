@@ -7,6 +7,14 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.26.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.26.0...v1.26.1) (2026-11-25)
+
+
+### Bug fixes
+
+* **deps:** update davidanson/markdownlint-cli2 docker tag to v0.24.1 ([#1100](https://github.com/Dennis-Otto/repo-blueprint/issues/1100)) ([abcd44a](https://github.com/Dennis-Otto/repo-blueprint/commit/abcd44a1b046f8290d3f38915344696d32fc983a))
+* **deps:** update the tools of the cloudflare workers ([#1144](https://github.com/Dennis-Otto/repo-blueprint/issues/1144)) ([d83a3eb](https://github.com/Dennis-Otto/repo-blueprint/commit/d83a3ebf18f4398ec1f7f3c4240aa6ed7c878df9))
+
 ## [1.26.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.25.1...v1.26.0) (2026-11-24)
 
 ### Features
